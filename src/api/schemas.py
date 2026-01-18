@@ -21,6 +21,7 @@ class AccountRes(BaseModel):
     close_profit: float
     risk_ratio: float
     updated_at: datetime
+    user_id: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -147,5 +148,6 @@ class AlarmRes(BaseModel):
 class AlarmStatsRes(BaseModel):
     """告警统计响应"""
     today_total: int
+    unconfirmed: int
     last_hour: int
     last_five_minutes: int

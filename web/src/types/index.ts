@@ -23,6 +23,7 @@ export interface Account {
   close_profit: number
   risk_ratio: number
   updated_at: string
+  user_id?: string | null
 }
 
 /** 持仓信息 */
@@ -135,17 +136,6 @@ export interface RotationInstruction {
   updated_at: string
 }
 
-/** 日志条目 */
-export interface LogEntry {
-  timestamp: string
-  level: string
-  logger: string
-  function: string
-  line: number
-  message: string
-  raw?: string
-}
-
 /** WebSocket 消息类型 */
 export type WSMessageType =
   | 'connected'
@@ -156,10 +146,7 @@ export type WSMessageType =
   | 'tick_update'
   | 'quote_update'
   | 'system_status'
-  | 'log_update'
   | 'alarm_update'
-  | 'log_subscribe_success'
-  | 'log_unsubscribe_success'
 
 /** WebSocket 消息 */
 export interface WSMessage<T = any> {
@@ -207,6 +194,10 @@ export interface Alarm {
 /** 告警统计 */
 export interface AlarmStats {
   today_total: number
+  unconfirmed: number
   last_hour: number
   last_five_minutes: number
 }
+
+/** 告警状态 */
+export type AlarmStatus = 'UNCONFIRMED' | 'CONFIRMED'

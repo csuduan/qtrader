@@ -75,26 +75,5 @@ export const systemApi = {
    */
   triggerJob: async (jobId: string) => {
     return api.post<{ job_id: string, job_name: string }>(`/jobs/${jobId}/trigger`)
-  },
-
-  /**
-   * 启动日志监控服务
-   */
-  startLogMonitoring: async (): Promise<{ enabled: boolean }> => {
-    return api.post<{ enabled: boolean }>('/system/log-monitoring/start')
-  },
-
-  /**
-   * 停止日志监控服务
-   */
-  stopLogMonitoring: async (): Promise<{ enabled: boolean }> => {
-    return api.post<{ enabled: boolean }>('/system/log-monitoring/stop')
-  },
-
-  /**
-   * 获取日志监控服务状态
-   */
-  getLogMonitoringStatus: async (): Promise<{ enabled: boolean }> => {
-    return api.get<{ enabled: boolean }>('/system/log-monitoring/status')
   }
 }

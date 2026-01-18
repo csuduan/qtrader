@@ -15,7 +15,6 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from src.api.routes.account import router as account_router
 from src.api.routes.alarm import router as alarm_router
 from src.api.routes.jobs import router as jobs_router
-from src.api.routes.log import router as log_router
 from src.api.routes.order import router as order_router
 from src.api.routes.position import router as position_router
 from src.api.routes.quote import router as quote_router
@@ -29,19 +28,10 @@ from src.api.responses import (
     validation_exception_handler
 )
 from src.api.websocket_manager import websocket_manager
-from src.services.log_watcher import LogWatcher
 from src.utils.event import event_engine, EventTypes, Event
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
-
-
-async def _process_log_entries(entries):
-    """处理日志条目的全局异步函数"""
-    global websocket_manager
-    if entries and websocket_manager:
-        for entry in entries:
-            await websocket_manager.broadcast_log(entry)
 
 
 def create_app(config=None) -> FastAPI:
@@ -59,29 +49,6 @@ def create_app(config=None) -> FastAPI:
         description="基于TqSdk的自动化交易系统API",
         version="0.1.0",
     )
-
-    # 初始化日志监控器（如果有配置）
-    if config:
-        # 创建同步回调，使用线程安全的方式提交异步任务
-        def sync_callback(entries):
-            """同步回调，在线程中调用"""
-            if entries and websocket_manager:
-                # 获取事件循环并提交任务
-                try:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        asyncio.run_coroutine_threadsafe(
-                            _process_log_entries(entries), loop
-                        )
-                except RuntimeError:
-                    pass
-
-        log_watcher = LogWatcher(
-            log_dir=config.paths.logs,
-            callback=sync_callback
-        )
-        # 将 log_watcher 存储在 app.state 中，供其他路由使用
-        app.state.log_watcher = log_watcher
 
     # 配置CORS
     if config and config.api.cors_origins:
@@ -130,7 +97,6 @@ def create_app(config=None) -> FastAPI:
     app.include_router(jobs_router)
     app.include_router(rotation_router)
     app.include_router(system_router)
-    app.include_router(log_router)
     app.include_router(alarm_router)
 
     @app.on_event("startup")
@@ -201,27 +167,7 @@ def create_app(config=None) -> FastAPI:
                 data = await websocket.receive_text()
                 try:
                     msg_data = json.loads(data)
-
-                    # 处理订阅日志请求
-                    if msg_data.get("type") == "subscribe_logs":
-                        websocket_manager.subscribe_logs(websocket)
-                        await websocket.send_text(json.dumps({
-                            "type": "log_subscribe_success",
-                            "message": "日志订阅成功",
-                            "timestamp": datetime.now().isoformat(),
-                        }, ensure_ascii=False))
-
-                    # 处理取消订阅日志请求
-                    elif msg_data.get("type") == "unsubscribe_logs":
-                        websocket_manager.unsubscribe_logs(websocket)
-                        await websocket.send_text(json.dumps({
-                            "type": "log_unsubscribe_success",
-                            "message": "日志取消订阅成功",
-                            "timestamp": datetime.now().isoformat(),
-                        }, ensure_ascii=False))
-
-                    else:
-                        logger.debug(f"收到WebSocket消息: {data}")
+                    logger.debug(f"收到WebSocket消息: {data}")
                 except json.JSONDecodeError:
                     logger.warning(f"WebSocket消息解析失败: {data}")
 

@@ -30,10 +30,10 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '系统' }
   },
   {
-    path: '/logs',
-    name: 'Logs',
-    component: () => import('@/views/LogViewer.vue'),
-    meta: { title: '日志' }
+    path: '/alarms',
+    name: 'Alarms',
+    component: () => import('@/views/Alarm.vue'),
+    meta: { title: '告警' }
   }
 ]
 
@@ -45,7 +45,7 @@ const router = createRouter({
 // 路由守卫
 router.beforeEach((to, _from, next) => {
   // 设置页面标题
-  document.title = `${to.meta.title || 'Q-Trader'} - 交易管理系统`
+  document.title = `${to.meta.title || ''} | Q-Trader`
   next()
 })
 

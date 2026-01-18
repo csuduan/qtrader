@@ -81,6 +81,22 @@ def setup_logger(
     logger.info(f"日志系统初始化完成，日志目录: {log_dir}")
 
 
+def enable_alarm_handler():
+    """
+    启用告警日志处理器
+    监听ERROR级别日志并自动创建告警
+    """
+    from src.utils.alarm_handler import alarm_handler
+
+    logger.add(
+        lambda record: alarm_handler(record),
+        level="ERROR",
+        format="{message}",
+        enqueue=False
+    )
+    logger.info("告警日志处理器已启用")
+
+
 def get_logger(name: Optional[str] = None):
     """
     获取logger实例

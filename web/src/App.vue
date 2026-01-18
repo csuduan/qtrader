@@ -3,6 +3,7 @@
     <!-- 侧边栏 -->
     <el-aside width="150px" class="sidebar">
       <div class="logo">
+         <img :src="getLogo()" alt="logo" width="40" />
         <h2>Q-Trader</h2>
       </div>
       <el-menu
@@ -29,9 +30,9 @@
           <el-icon><Setting /></el-icon>
           <span>系统</span>
         </el-menu-item>
-        <el-menu-item index="/logs">
-          <el-icon><Document /></el-icon>
-          <span>日志</span>
+        <el-menu-item index="/alarms">
+          <el-icon><Warning /></el-icon>
+          <span>告警</span>
         </el-menu-item>
       </el-menu>
     </el-aside>
@@ -76,6 +77,9 @@ import wsManager from '@/ws'
 
 const store = useStore()
 
+function getLogo() {
+    return new URL("/logo.png", import.meta.url).href;
+  }
 // 格式化数字
 function formatNumber(num: number): string {
   return num.toFixed(2)

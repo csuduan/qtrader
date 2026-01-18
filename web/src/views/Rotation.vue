@@ -64,7 +64,7 @@
               />
             </template>
           </el-table-column>
-          <el-table-column label="信息" width="200" show-overflow-tooltip>
+          <el-table-column label="信息"  show-overflow-tooltip>
             <template #default="{ row }">
               <span v-if="row.status === 'COMPLETED'" style="color: #67c23a">已完成</span>
               <span v-else style="color: #f56c6c">{{ row.error_message || '待执行' }}</span>

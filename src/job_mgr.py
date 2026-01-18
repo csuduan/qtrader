@@ -9,7 +9,7 @@ from typing import Optional
 
 from src.config_loader import AppConfig
 from src.database import get_session
-from src.models.po import PositionPo as PositionModel
+from src.models.po import PositionPo as PositionModel, AlarmPo as AlarmModel
 from src.switch_mgr import SwitchPosManager
 from src.trading_engine import TradingEngine
 from src.utils.logger import get_logger
@@ -138,3 +138,33 @@ class JobManager:
             #logger.info("扫描订单任务完成")
         except Exception as e:
             logger.error(f"扫描订单任务执行失败: {e}")
+
+    def cleanup_old_alarms(self) -> None:
+        """清理3天前的告警"""
+        logger.info("开始清理旧告警")
+        session = get_session()
+        if not session:
+            logger.error("无法获取数据库会话")
+            return
+
+        try:
+            from datetime import timedelta
+            three_days_ago = datetime.now() - timedelta(days=3)
+
+            deleted_count = (
+                session.query(AlarmModel)
+                .filter(AlarmModel.created_at < three_days_ago)
+                .delete()
+            )
+
+            session.commit()
+
+            if deleted_count > 0:
+                logger.info(f"已清理 {deleted_count} 条旧告警记录")
+            else:
+                logger.info("没有需要清理的旧告警记录")
+        except Exception as e:
+            logger.error(f"清理旧告警失败: {e}")
+            session.rollback()
+        finally:
+            session.close()

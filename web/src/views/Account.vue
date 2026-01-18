@@ -111,7 +111,7 @@
                 {{ formatDateTime(row.updated_at) }}
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="150" fixed="right">
+            <el-table-column label="操作"  fixed="right">
               <template #default="{ row }">
                 <el-button
                   type="danger"
@@ -251,7 +251,7 @@
                   </template>
                 </el-table-column>
                 <el-table-column prop="last_msg" label="最后消息" width="200" show-overflow-tooltip />
-                <el-table-column prop="updated_at" label="更新时间" width="160">
+                <el-table-column prop="updated_at" label="更新时间">
                   <template #default="{ row }">
                     {{ formatDateTime(row.updated_at) }}
                   </template>
@@ -328,73 +328,6 @@
           </el-table>
 
           <el-empty v-if="store.trades.length === 0" description="暂无成交记录" />
-        </el-card>
-      </el-tab-pane>
-
-      <el-tab-pane label="告警" name="alarm">
-        <el-card shadow="hover">
-          <template #header>
-            <div class="card-header">
-              <span>告警列表</span>
-              <el-button type="primary" @click="loadAlarmData" :loading="loading">
-                <el-icon><Refresh /></el-icon>
-                刷新
-              </el-button>
-            </div>
-          </template>
-
-          <el-row :gutter="20" class="mb-4">
-            <el-col :span="8">
-              <el-statistic title="今日总告警" :value="alarmStats.today_total" />
-            </el-col>
-            <el-col :span="8">
-              <el-statistic title="最近1小时告警" :value="alarmStats.last_hour" />
-            </el-col>
-            <el-col :span="8">
-              <el-statistic title="最近5分钟告警" :value="alarmStats.last_five_minutes" />
-            </el-col>
-          </el-row>
-
-          <el-table :data="alarms" stripe v-loading="loading" height="400">
-            <el-table-column prop="account_id" label="账户" width="120" />
-            <el-table-column prop="alarm_date" label="日期" width="100" />
-            <el-table-column prop="alarm_time" label="时间" width="80" />
-            <el-table-column prop="source" label="来源" width="80">
-              <template #default="{ row }">
-                <el-tag :type="row.source === 'SYSTEM' ? 'danger' : 'warning'" size="small">
-                  {{ row.source === 'SYSTEM' ? '系统' : '交易' }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column prop="title" label="标题" width="200" show-overflow-tooltip />
-            <el-table-column prop="detail" label="详情" show-overflow-tooltip />
-            <el-table-column prop="status" label="状态" width="100">
-              <template #default="{ row }">
-                <el-tag :type="row.status === 'CONFIRMED' ? 'success' : 'danger'" size="small">
-                  {{ row.status === 'CONFIRMED' ? '已确认' : '未确认' }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column prop="created_at" label="创建时间" width="160">
-              <template #default="{ row }">
-                {{ formatDateTime(row.created_at) }}
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="100">
-              <template #default="{ row }">
-                <el-button
-                  type="primary"
-                  size="small"
-                  :disabled="row.status === 'CONFIRMED'"
-                  @click="handleConfirmAlarm(row.id)"
-                >
-                  确认
-                </el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-
-          <el-empty v-if="alarms.length === 0" description="暂无告警" />
         </el-card>
       </el-tab-pane>
     </el-tabs>
@@ -525,9 +458,9 @@ import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useStore } from '@/stores'
-import { orderApi, positionApi, quoteApi, alarmApi } from '@/api'
+import { orderApi, positionApi, quoteApi } from '@/api'
 import wsManager from '@/ws'
-import type { ManualOrderRequest, Position, Order, Quote, Alarm } from '@/types'
+import type { ManualOrderRequest, Position, Order, Quote } from '@/types'
 
 const route = useRoute()
 const store = useStore()
@@ -547,8 +480,6 @@ const orderTab = ref('PENDING')
 
 const selectedOrders = ref<Order[]>([])
 const quotes = ref<Quote[]>([])
-const alarms = ref<Alarm[]>([])
-const alarmStats = ref({ today_total: 0, last_hour: 0, last_five_minutes: 0 })
 const tradeDateFilter = ref(new Date().toISOString().split('T')[0])
 
 const statusMap: Record<string, string> = {
@@ -608,12 +539,6 @@ function handleTickUpdate(tickData: Quote) {
   }
 }
 
-function handleAlarmUpdate(alarmData: Alarm) {
-  if (!alarmData) return
-  alarms.value.unshift(alarmData)
-  loadAlarmStats()
-}
-
 async function loadAccountData() {
   loading.value = true
   try {
@@ -648,38 +573,6 @@ async function loadTradeData() {
     await store.loadTrades(tradeDateFilter.value)
   } finally {
     loading.value = false
-  }
-}
-
-async function loadAlarmData() {
-  loading.value = true
-  try {
-    const result = await alarmApi.getTodayAlarms()
-    alarms.value = result || []
-    await loadAlarmStats()
-  } catch (error: any) {
-    ElMessage.error(`加载告警列表失败: ${error.message}`)
-  } finally {
-    loading.value = false
-  }
-}
-
-async function loadAlarmStats() {
-  try {
-    const result = await alarmApi.getAlarmStats()
-    alarmStats.value = result || { today_total: 0, last_hour: 0, last_five_minutes: 0 }
-  } catch (error: any) {
-    console.error(`加载告警统计失败: ${error.message}`)
-  }
-}
-
-async function handleConfirmAlarm(alarmId: number) {
-  try {
-    await alarmApi.confirmAlarm(alarmId)
-    ElMessage.success('确认成功')
-    await loadAlarmData()
-  } catch (error: any) {
-    ElMessage.error(`确认失败: ${error.message}`)
   }
 }
 
@@ -892,8 +785,6 @@ watch(activeTab, (newTab) => {
     loadPositionData()
   } else if (newTab === 'trade') {
     loadTradeData()
-  } else if (newTab === 'alarm') {
-    loadAlarmData()
   }
 })
 
@@ -918,17 +809,13 @@ onMounted(() => {
     loadPositionData()
   } else if (activeTab.value === 'trade') {
     loadTradeData()
-  } else if (activeTab.value === 'alarm') {
-    loadAlarmData()
   }
 
   wsManager.onTickUpdate(handleTickUpdate)
-  wsManager.onAlarmUpdate(handleAlarmUpdate)
 })
 
 onUnmounted(() => {
   wsManager.onTickUpdate(handleTickUpdate)()
-  wsManager.onAlarmUpdate(handleAlarmUpdate)()
 })
 </script>
 

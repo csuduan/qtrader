@@ -76,6 +76,13 @@ def main():
         log_level="INFO",
     )
 
+    # 启用告警日志处理器
+    try:
+        from src.utils.logger import enable_alarm_handler
+        enable_alarm_handler()
+    except Exception as e:
+        logger.error(f"启用告警日志处理器失败: {e}")
+
     logger.info("=" * 60)
     logger.info("Q-Trader系统启动")
     logger.info("=" * 60)

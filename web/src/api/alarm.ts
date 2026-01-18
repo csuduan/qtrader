@@ -1,9 +1,9 @@
 import request from './request'
-import type { Alarm, AlarmStats } from '@/types'
+import type { Alarm, AlarmStats, AlarmStatus } from '@/types'
 
 export const alarmApi = {
-  getTodayAlarms(): Promise<Alarm[]> {
-    return request.get('/alarm/list')
+  getTodayAlarms(statusFilter?: AlarmStatus): Promise<Alarm[]> {
+    return request.get('/alarm/list', { params: { status_filter: statusFilter } })
   },
 
   getAlarmStats(): Promise<AlarmStats> {

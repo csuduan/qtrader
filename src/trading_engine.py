@@ -271,7 +271,11 @@ class TradingEngine:
         """检查并推送账户信息"""
         if self.api.is_changing(self.account):
             try:
-                account_id = self.config.account_id
+                user_id = None
+                if self.config.account_type == "account" and self.config.trading_account:
+                    user_id = self.config.trading_account.user_id
+
+                account_id = user_id if user_id else "-"
                 account_data = {
                     "account_id": account_id,
                     "balance": float(self.account.get("balance", 0)),
@@ -282,6 +286,7 @@ class TradingEngine:
                     "close_profit": float(self.account.get("close_profit", 0)),
                     "risk_ratio": float(self.account.get("risk_ratio", 0)),
                     "updated_at": datetime.now().isoformat(),
+                    "user_id": user_id,
                 }
 
                 # logger.info(f"账户更新 - balance: {account_data['balance']:.2f}, "

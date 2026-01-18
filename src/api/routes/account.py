@@ -28,7 +28,7 @@ async def get_account_info(engine = Depends(get_trading_engine)):
         if not engine or not engine.account:
             return success_response(
                 data=AccountRes(
-                    account_id="",
+                    account_id="-",
                     broker_name="",
                     currency="CNY",
                     balance=0,
@@ -39,15 +39,20 @@ async def get_account_info(engine = Depends(get_trading_engine)):
                     close_profit=0,
                     risk_ratio=0,
                     updated_at=datetime.now(),
+                    user_id=None,
                 ),
                 message="获取成功"
             )
 
         account = engine.account
 
+        user_id = None
+        if engine.config.account_type == "account" and engine.config.trading_account:
+            user_id = engine.config.trading_account.user_id
+
         return success_response(
             data=AccountRes(
-                account_id=engine.config.account_id,
+                account_id="-" if not user_id else user_id,
                 broker_name=account.get("broker_name", ""),
                 currency=account.get("currency", "CNY"),
                 balance=float(account.get("balance", 0)),
@@ -58,6 +63,7 @@ async def get_account_info(engine = Depends(get_trading_engine)):
                 close_profit=float(account.get("close_profit", 0)),
                 risk_ratio=float(account.get("risk_ratio", 0)),
                 updated_at=datetime.now(),
+                user_id=user_id,
             ),
             message="获取成功"
         )

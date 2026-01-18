@@ -1,5 +1,5 @@
 import { ref, type Ref } from 'vue'
-import type { WSMessage, Account, Position, Trade, Order, SystemStatus, LogEntry, Alarm } from '@/types'
+import type { WSMessage, Account, Position, Trade, Order, SystemStatus, Alarm } from '@/types'
 
 class WebSocketManager {
   private ws: WebSocket | null = null
@@ -17,7 +17,6 @@ class WebSocketManager {
    private onOrderUpdateCallbacks: Array<(data: Order) => void> = []
     private onSystemStatusCallbacks: Array<(data: SystemStatus) => void> = []
     private onTickUpdateCallbacks: Array<(data: any) => void> = []
-    private onLogUpdateCallbacks: Array<(data: LogEntry) => void> = []
     private onAlarmUpdateCallbacks: Array<(data: Alarm) => void> = []
 
   // 连接状态
@@ -98,43 +97,36 @@ class WebSocketManager {
     * 处理消息
     */
      private handleMessage(message: WSMessage): void {
-      switch (message.type) {
-        case 'connected':
-          console.log('收到连接确认消息:', message.data)
-          break
-        case 'log_subscribe_success':
-        case 'log_unsubscribe_success':
-          console.log('收到日志订阅状态:', message.type)
-          break
-        case 'account_update':
-          this.onAccountUpdateCallbacks.forEach(cb => cb(message.data))
-          break
-        case 'position_update':
-          this.onPositionUpdateCallbacks.forEach(cb => cb(message.data))
-          break
-        case 'trade_update':
-          this.onTradeUpdateCallbacks.forEach(cb => cb(message.data))
-          break
-        case 'order_update':
-          this.onOrderUpdateCallbacks.forEach(cb => cb(message.data))
-          break
-        case 'system_status':
-          this.onSystemStatusCallbacks.forEach(cb => cb(message.data))
-          break
-          case 'tick_update':
-          case 'quote_update':
-            this.onTickUpdateCallbacks.forEach(cb => cb(message.data))
-            break
-          case 'log_update':
-            this.onLogUpdateCallbacks.forEach(cb => cb(message.data))
-            break
-          case 'alarm_update':
-            this.onAlarmUpdateCallbacks.forEach(cb => cb(message.data))
-            break
-          default:
-            console.warn('未知消息类型:', message.type)
-       }
-     }
+       switch (message.type) {
+         case 'connected':
+           console.log('收到连接确认消息:', message.data)
+           break
+         case 'account_update':
+           this.onAccountUpdateCallbacks.forEach(cb => cb(message.data))
+           break
+         case 'position_update':
+           this.onPositionUpdateCallbacks.forEach(cb => cb(message.data))
+           break
+         case 'trade_update':
+           this.onTradeUpdateCallbacks.forEach(cb => cb(message.data))
+           break
+         case 'order_update':
+           this.onOrderUpdateCallbacks.forEach(cb => cb(message.data))
+           break
+         case 'system_status':
+           this.onSystemStatusCallbacks.forEach(cb => cb(message.data))
+           break
+           case 'tick_update':
+           case 'quote_update':
+             this.onTickUpdateCallbacks.forEach(cb => cb(message.data))
+             break
+           case 'alarm_update':
+             this.onAlarmUpdateCallbacks.forEach(cb => cb(message.data))
+             break
+           default:
+             console.warn('未知消息类型:', message.type)
+        }
+      }
 
   /**
    * 订阅连接成功事件
@@ -227,63 +219,32 @@ class WebSocketManager {
      }
    }
 
-    /**
-     * 订阅行情更新事件
-     */
-    onTickUpdate(callback: (data: any) => void): () => void {
-      this.onTickUpdateCallbacks.push(callback)
-      return () => {
-        const index = this.onTickUpdateCallbacks.indexOf(callback)
-        if (index > -1) {
-          this.onTickUpdateCallbacks.splice(index, 1)
-        }
-      }
-    }
-
-    /**
-      * 订阅日志更新事件
+     /**
+      * 订阅行情更新事件
       */
-    onLogUpdate(callback: (data: LogEntry) => void): () => void {
-      this.onLogUpdateCallbacks.push(callback)
-      return () => {
-        const index = this.onLogUpdateCallbacks.indexOf(callback)
-        if (index > -1) {
-          this.onLogUpdateCallbacks.splice(index, 1)
-        }
-      }
-    }
+     onTickUpdate(callback: (data: any) => void): () => void {
+       this.onTickUpdateCallbacks.push(callback)
+       return () => {
+         const index = this.onTickUpdateCallbacks.indexOf(callback)
+         if (index > -1) {
+           this.onTickUpdateCallbacks.splice(index, 1)
+         }
+       }
+     }
 
-    /**
-      * 订阅告警更新事件
-      */
-    onAlarmUpdate(callback: (data: Alarm) => void): () => void {
-      this.onAlarmUpdateCallbacks.push(callback)
-      return () => {
-        const index = this.onAlarmUpdateCallbacks.indexOf(callback)
-        if (index > -1) {
-          this.onAlarmUpdateCallbacks.splice(index, 1)
-        }
-      }
-    }
-
-    /**
-      * 订阅日志流
-      */
-    subscribeLogs(): void {
-      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        this.ws.send(JSON.stringify({ type: 'subscribe_logs' }))
-      }
-    }
-
-    /**
-     * 取消订阅日志流
-     */
-    unsubscribeLogs(): void {
-      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        this.ws.send(JSON.stringify({ type: 'unsubscribe_logs' }))
-      }
-    }
-  }
+     /**
+       * 订阅告警更新事件
+       */
+     onAlarmUpdate(callback: (data: Alarm) => void): () => void {
+       this.onAlarmUpdateCallbacks.push(callback)
+       return () => {
+         const index = this.onAlarmUpdateCallbacks.indexOf(callback)
+         if (index > -1) {
+           this.onAlarmUpdateCallbacks.splice(index, 1)
+         }
+       }
+     }
+   }
 
 // 导出单例
 export const wsManager = new WebSocketManager()
