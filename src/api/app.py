@@ -174,10 +174,10 @@ def create_app(config=None) -> FastAPI:
                     logger.warning(f"WebSocket消息解析失败: {data}")
 
         except WebSocketDisconnect:
-            websocket_manager.disconnect(websocket)
+            await websocket_manager.disconnect(websocket)
         except Exception as e:
             logger.error(f"WebSocket连接出错: {e}")
-            websocket_manager.disconnect(websocket)
+            await websocket_manager.disconnect(websocket)
 
     return app
 

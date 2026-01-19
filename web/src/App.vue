@@ -55,7 +55,7 @@
             <el-divider direction="vertical" />
             <span>可用: ¥{{ formatNumber(store.account.available) }}</span>
             <el-divider direction="vertical" />
-            <span>浮动盈亏: <span :class="store.totalFloatProfit >= 0 ? 'profit' : 'loss'">¥{{ formatNumber(store.totalFloatProfit) }}</span></span>
+            <span>浮动盈亏: <span :class="store.account.float_profit >= 0 ? 'profit' : 'loss'">¥{{ formatNumber(store.account.float_profit) }}</span></span>
           </div>
         </div>
       </el-header>

@@ -76,7 +76,7 @@ async def get_orders(
                 limit_price=float(order.get("limit_price", 0)) if order.get("limit_price") else None,
                 price_type=order.get("price_type", ""),
                 status=order.get("status", ""),
-                insert_date_time=order.get("insert_date_time", 0),
+                insert_date_time=datetime.fromtimestamp(order.insert_date_time/1_000_000_000),
                 last_msg=order.get("last_msg", ""),
                 created_at=datetime.now(),
                 updated_at=datetime.now(),

@@ -31,10 +31,6 @@ export const useStore = defineStore('main', () => {
   })
 
   // 计算属性
-  const totalFloatProfit = computed(() => {
-    return positions.value.reduce((sum, pos) => sum + pos.float_profit, 0)
-  })
-
   const activeOrders = computed(() => {
     return orders.value.filter(order => order.status === 'ALIVE')
   })
@@ -216,7 +212,6 @@ export const useStore = defineStore('main', () => {
     systemStatus,
 
     // 计算属性
-    totalFloatProfit,
     activeOrders,
 
     // 方法

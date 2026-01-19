@@ -46,8 +46,8 @@
               <el-col :span="12">
                 <div class="stat-item">
                   <div class="stat-label">浮动盈亏</div>
-                  <div class="stat-value" :class="store.totalFloatProfit >= 0 ? 'profit' : 'loss'">
-                    ¥{{ formatNumber(store.totalFloatProfit) }}
+                  <div class="stat-value" :class="store.account.float_profit >= 0 ? 'profit' : 'loss'">
+                    ¥{{ formatNumber(store.account.float_profit) }}
                   </div>
                 </div>
               </el-col>
@@ -150,7 +150,7 @@
           </template>
           <el-table :data="store.trades.slice(0, 5)" stripe>
             <el-table-column prop="trade_id" label="成交ID" width="180" />
-            <el-table-column prop="instrument_id" label="合约" width="120" />
+            <el-table-column prop="symbol" label="合约" width="120" />
             <el-table-column prop="direction" label="方向" width="80">
               <template #default="{ row }">
                 <el-tag :type="row.direction === 'BUY' ? 'success' : 'danger'" size="small">
@@ -167,7 +167,7 @@
             <el-table-column prop="volume" label="手数" width="80" />
             <el-table-column prop="created_at" label="时间">
               <template #default="{ row }">
-                {{ formatDateTime(row.created_at) }}
+                {{ formatDateTime(row.trade_date_time) }}
               </template>
             </el-table-column>
           </el-table>

@@ -57,7 +57,7 @@ class TradeRes(BaseModel):
     offset: str
     price: float
     volume: int
-    trade_date_time: int
+    trade_date_time: datetime
     created_at: datetime
 
     class Config:
@@ -78,7 +78,7 @@ class OrderRes(BaseModel):
     limit_price: Optional[float] = None
     price_type: str
     status: str
-    insert_date_time: int
+    insert_date_time: datetime
     last_msg: Optional[str] = None
     created_at: datetime
     updated_at: datetime

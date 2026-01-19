@@ -6,7 +6,6 @@ import asyncio
 import math
 from datetime import datetime
 import time
-from os import listdrives
 from typing import Any, Dict, List, Optional
 from threading import Thread
 
@@ -301,13 +300,9 @@ class TradingEngine:
         """检查并推送账户信息"""
         if self.api.is_changing(self.account):
             try:
-                user_id = None
-                if self.config.account_type == "account" and self.config.trading_account:
-                    user_id = self.config.trading_account.user_id
-
-                account_id = user_id if user_id else "-"
+                user_id = self.config.trading_account.user_id if self.config.account_type == "real" else 'SIM'
                 account_data = {
-                    "account_id": account_id,
+                    "account_id": self.account_id,
                     "balance": float(self.account.get("balance", 0)),
                     "available": float(self.account.get("available", 0)),
                     "margin": float(self.account.get("margin", 0)),
@@ -339,7 +334,7 @@ class TradingEngine:
                 account_id = self.config.account_id
 
                 for symbol, pos in all_positions.items():
-                    if self.api.is_changing(pos):
+                    if self.api.is_changing(pos,['pos_long','pos_short']):
                         self.positions[symbol] = pos
 
                         # 推送持仓更新事件（tqsdk原始数据）

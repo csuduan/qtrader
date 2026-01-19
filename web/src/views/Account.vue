@@ -251,9 +251,9 @@
                   </template>
                 </el-table-column>
                 <el-table-column prop="last_msg" label="最后消息" width="200" show-overflow-tooltip />
-                <el-table-column prop="updated_at" label="更新时间">
+                <el-table-column prop="updated_at" label="报单时间">
                   <template #default="{ row }">
-                    {{ formatDateTime(row.updated_at) }}
+                    {{ formatDateTime(row.insert_date_time) }}
                   </template>
                 </el-table-column>
                 <el-table-column
@@ -322,7 +322,7 @@
             <el-table-column prop="order_id" label="委托单ID" width="180" show-overflow-tooltip />
             <el-table-column prop="created_at" label="成交时间">
               <template #default="{ row }">
-                {{ formatDateTime(row.created_at) }}
+                {{ formatDateTime(row.trade_date_time) }}
               </template>
             </el-table-column>
           </el-table>

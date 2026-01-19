@@ -215,7 +215,7 @@ class SwitchPosManager:
         try:
             today_dir = Path(self.switchPos_files_dir) / datetime.now().strftime("%Y%m%d")
             today_str = datetime.now().strftime("%Y%m%d")
-            csv_files = [f for f in today_dir.glob("*.csv") if today_str in f.name]
+            csv_files = [f for f in today_dir.glob("*.csv") if today_str in f.name and self.config.account_id in f.name]
             if not csv_files:
                 return
             

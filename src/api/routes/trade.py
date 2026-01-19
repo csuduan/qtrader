@@ -101,7 +101,7 @@ async def get_trades(
                     offset=trade.get("offset", ""),
                     price=float(trade.get("price", 0)),
                     volume=trade.get("volume", 0),
-                    trade_date_time=trade.get("trade_date_time", 0),
+                    trade_date_time=datetime.fromtimestamp(trade.trade_date_time/1_000_000_000),
                     created_at=datetime.now(),
                 )
                 for id,trade in paginated_trades.items()

@@ -45,14 +45,12 @@ async def get_account_info(engine = Depends(get_trading_engine)):
             )
 
         account = engine.account
+        user_id = engine.config.trading_account.user_id if engine.config.account_type == "real" else 'SIM'
 
-        user_id = None
-        if engine.config.account_type == "account" and engine.config.trading_account:
-            user_id = engine.config.trading_account.user_id
 
         return success_response(
             data=AccountRes(
-                account_id="-" if not engine.account_id else engine.account_id,
+                account_id=engine.account_id,
                 broker_name=account.get("broker_name", ""),
                 currency=account.get("currency", "CNY"),
                 balance=float(account.get("balance", 0)),
