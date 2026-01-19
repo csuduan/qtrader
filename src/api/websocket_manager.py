@@ -5,7 +5,7 @@ import asyncio
 import json
 import simplejson as json
 from datetime import datetime
-from typing import Optional
+from typing import Dict, Optional
 
 from fastapi import WebSocket
 
@@ -20,7 +20,7 @@ class WebSocketManager:
 
     def __init__(self):
         self.active_connections: set[WebSocket] = set()
-        self._cached_account_data: Optional[dict] = None
+        self._cached_accounts_data: Dict[str, dict] = {}
         self._account_update_task: Optional[asyncio.Task] = None
 
     async def connect(self, websocket: WebSocket):
@@ -52,13 +52,14 @@ class WebSocketManager:
                 logger.error(f"发送消息失败: {e}")
                 disconnected.add(connection)
 
-        # 清理断开的连接
         for connection in disconnected:
             await self.disconnect(connection)
 
     async def broadcast_account(self, account_data: dict) -> None:
         """更新账户信息缓存（每3秒推送一次）"""
-        self._cached_account_data = account_data
+        account_id = account_data.get("account_id")
+        if account_id:
+            self._cached_accounts_data[account_id] = account_data
 
     async def _start_account_update_task(self) -> None:
         """启动账户信息定时推送任务"""
@@ -75,13 +76,13 @@ class WebSocketManager:
                 pass
 
     async def _account_update_loop(self) -> None:
-        """账户信息定时推送循环"""
+        """账户信息定时推送循环（推送所有账户）"""
         while True:
             await asyncio.sleep(3)
-            if self._cached_account_data is not None:
+            if self._cached_accounts_data:
                 await self.broadcast({
-                    "type": "account_update",
-                    "data": self._cached_account_data,
+                    "type": "accounts_update",
+                    "data": list(self._cached_accounts_data.values()),
                     "timestamp": datetime.now().isoformat(),
                 })
 

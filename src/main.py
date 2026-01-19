@@ -12,20 +12,19 @@ import uvicorn
 
 from src.api.app import create_app, websocket_manager
 from src.config_loader import AppConfig, ensure_directories, load_config
-from src.context import set_config, set_task_scheduler, set_trading_engine, set_switch_pos_manager
+from src.context import set_config, set_task_scheduler, set_trading_engine
 from src.database import init_database
 from src.persistence import init_persistence
 from src.scheduler import TaskScheduler
-from src.trading_engine import TradingEngine
-from src.switch_mgr import SwitchPosManager
+from src.account_manager import AccountManager
 from src.utils.logger import get_logger, setup_logger
 
 logger = get_logger(__name__)
 
 # 全局变量
 config: AppConfig = None
-trading_engine: TradingEngine = None
-task_scheduler: TaskScheduler = None
+account_manager = None
+task_scheduler = TaskScheduler = None
 running = False
 
 
@@ -44,7 +43,6 @@ def load_application_config() -> AppConfig:
         sys.exit(1)
 
 
-
 def signal_handler(signum, frame):
     """信号处理器"""
     global running
@@ -52,8 +50,11 @@ def signal_handler(signum, frame):
     running = False
 
     # 断开连接
-    if trading_engine:
-        trading_engine.disconnect()
+    if account_manager:
+        from src.account_manager import get_account_manager
+        manager = get_account_manager()
+        if manager:
+            manager.shutdown_all()
 
     # 关闭任务调度器
     if task_scheduler:
@@ -64,7 +65,7 @@ def signal_handler(signum, frame):
 
 def main():
     """主函数"""
-    global config, trading_engine, task_scheduler, running
+    global config, account_manager, task_scheduler, running
 
     # 加载配置
     config = load_application_config()
@@ -76,55 +77,36 @@ def main():
         log_level="INFO",
     )
 
-    # 启用告警日志处理器
-    try:
-        from src.utils.logger import enable_alarm_handler
-        enable_alarm_handler()
-    except Exception as e:
-        logger.error(f"启用告警日志处理器失败: {e}")
-
     logger.info("=" * 60)
-    logger.info("Q-Trader系统启动")
+    logger.info("Q-Trader系统启动 - 多账户模式（单进程多线程）")
     logger.info("=" * 60)
 
     # 初始化数据库
-    logger.info("初始化数据库...")
     init_database(config.paths.database)
 
     # 启动数据持久化服务
-    logger.info("启动数据持久化服务...")
     init_persistence()
 
-    # 创建交易引擎
-    logger.info("创建交易引擎...")
-    trading_engine = TradingEngine(config)
-    set_trading_engine(trading_engine)
-    trading_engine.connect()
-        
+    # 创建账户管理器并初始化所有账户
+    logger.info("初始化账户管理器...")
+    account_manager = AccountManager(config)
+    account_manager.initialize_all()
+
+    # 创建任务调度器
+    logger.info("创建任务调度器...")
+    task_scheduler = TaskScheduler(config, account_manager)
+    task_scheduler.start()
+
+    # 启动FastAPI应用
+    app = create_app(config)
+    logger.info(f"启动API服务，监听 {config.api.host}:{config.api.port}")
+    logger.info(f"API文档: http://{config.api.host}:{config.api.port}/docs")
+    logger.info(f"WebSocket: ws://{config.api.host}:{config.api.port}/ws")
 
     # 设置信号处理
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-
-    # 创建换仓管理器
-    logger.info("创建换仓管理器...")
-    switch_pos_manager = SwitchPosManager(config, trading_engine)
-    set_switch_pos_manager(switch_pos_manager)
-
-    # 启动任务调度器
-    logger.info("创建任务调度器...")
-    task_scheduler = TaskScheduler(config, trading_engine)
-    set_task_scheduler(task_scheduler)
-    task_scheduler.start()
-
-
-    # 启动FastAPI应用
-    logger.info("创建FastAPI应用...")
-    app = create_app(config)
-    logger.info(f"启动API服务，监听 {config.api.host}:{config.api.port}")
-    logger.info(f"API文档: http://{config.api.host}:{config.api.port}/docs")
-    logger.info(f"WebSocket: ws://{config.api.host}:{config.api.port}/ws")
 
     try:
         uvicorn.run(
@@ -133,12 +115,10 @@ def main():
             port=config.api.port,
             log_level="info",
         )
-    except KeyboardInterrupt:
-        logger.info("收到键盘中断信号")
     finally:
-        running = False
-        if trading_engine:
-            trading_engine.disconnect()
+        # 关闭所有账户
+        if account_manager:
+            account_manager.shutdown_all()
         if task_scheduler:
             task_scheduler.shutdown()
         logger.info("程序已退出")

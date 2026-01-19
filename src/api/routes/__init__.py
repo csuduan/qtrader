@@ -1,1 +1,9 @@
-# routes module
+from src.api.routes.account import router as accounts_router
+from src.api.routes.position import router as position_router
+from src.api.routes.order import router as order_router
+from src.api.routes.trade import router as trade_router
+from src.api.routes.rotation import router as rotation_router
+from src.api.routes.system import router as system_router
+from src.api.routes.system_params import router as system_params_router
+from src.api.routes.jobs import router as jobs_router
+from src.api.routes.alarm import router as alarm_router

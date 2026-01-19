@@ -102,8 +102,20 @@ class TradingConfig(BaseModel):
     paused: bool = False
 
 
+class AccountConfig(BaseModel):
+    """单个账户配置"""
+    account_id: str
+    account_type: str = "kq"
+    account_name: str = ""
+    enabled: bool = True
+    interface: str = "tqsdk"
+    trading_account: Optional[TradingAccountConfig] = None
+    ctp_config: Optional[dict] = None
+
+
 class AppConfig(BaseModel):
     """应用总配置"""
+    accounts: List[AccountConfig] = Field(default_factory=list)
     tianqin: TianqinConfig
     account_type: str = "kq"
     account_id: str = ""

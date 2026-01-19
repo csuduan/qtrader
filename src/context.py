@@ -6,14 +6,17 @@ from typing import Optional
 
 from src.config_loader import AppConfig
 from src.trading_engine import TradingEngine
-from src.utils.event import EventTypes, event_engine
+from src.scheduler import TaskScheduler
+from src.account_manager import AccountManager
 from src.switch_mgr import SwitchPosManager
+from src.utils.event import EventTypes, event_engine
 
 
 
 trading_engine: Optional[TradingEngine] = None
-config: AppConfig = None
-task_scheduler = None
+config: Optional[AppConfig] = None
+task_scheduler: Optional[TaskScheduler] = None
+account_manager: Optional[AccountManager] = None
 switch_pos_manager: Optional[SwitchPosManager] = None
 
 
@@ -24,8 +27,9 @@ def set_trading_engine(engine: TradingEngine):
     trading_engine = engine
 
 
-def get_trading_engine() -> Optional[TradingEngine]:
+def get_trading_engine() -> Optional["TradingEngine"]:
     """获取全局交易引擎实例"""
+    from src.trading_engine import TradingEngine
     return trading_engine
 
 
@@ -35,7 +39,7 @@ def set_config(cfg: AppConfig):
     config = cfg
 
 
-def get_config() -> AppConfig:
+def get_config() -> Optional[AppConfig]:
     """获取全局配置实例"""
     return config
 
@@ -59,3 +63,13 @@ def set_switch_pos_manager(manager):
 def get_switch_pos_manager() -> Optional[SwitchPosManager]:
     """获取全局换仓管理器实例"""
     return switch_pos_manager
+
+def set_account_manager(manager: AccountManager):
+    """设置全局账户管理器实例"""
+    global account_manager
+    account_manager = manager
+
+
+def get_account_manager() -> Optional[AccountManager]:
+    """获取全局账户管理器实例"""
+    return account_manager
