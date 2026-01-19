@@ -15,14 +15,17 @@
 
 ## 功能特性
 
-- 📊 **总览页面**: 账户概览、盈亏统计、风控信息、最近成交
-- 💼 **账户管理**: 详细账户信息和资产状况
-- 📦 **持仓管理**: 实时查看和管理持仓
-- 📝 **成交记录**: 查看历史成交记录
-- 📋 **委托单管理**: 手动报单、撤单、查看委托单状态
-- 📈 **K线图表**: 使用 ECharts 展示K线走势图
-- ⚙️ **系统控制**: 连接/断开交易系统、暂停/恢复交易
-- 🔴 **实时推送**: WebSocket 实时数据更新
+ - 📊 **总览页面**: 账户概览、盈亏统计、风控信息、最近成交
+ - 💼 **账户管理**: 详细账户信息和资产状况
+ - 🔄 **换仓管理**: 创建、编辑、执行换仓指令，一键平仓
+ - 📦 **持仓管理**: 实时查看和管理持仓，支持平仓操作
+ - 📝 **成交记录**: 查看历史成交记录
+ - 📋 **委托单管理**: 手动报单、撤单、查看委托单状态
+ - 📊 **行情管理**: 订阅/取消订阅合约行情，查看实时行情数据
+ - ⚙️ **系统控制**: 连接/断开交易系统、暂停/恢复交易
+ - ⏰ **定时任务**: 查看和管理定时任务，支持启用/禁用和手动触发
+ - 🔔 **告警管理**: 查看和清除告警信息
+ - 🔴 **实时推送**: WebSocket 实时数据更新（账户信息每3秒推送一次）
 
 ## 快速开始
 
@@ -59,12 +62,16 @@ web/
 ├── public/          # 静态资源
 ├── src/
 │   ├── api/         # API 服务层
-│   │   ├── account.ts
-│   │   ├── position.ts
-│   │   ├── trade.ts
-│   │   ├── order.ts
-│   │   ├── kline.ts
-│   │   └── system.ts
+│   │   ├── request.ts      # Axios 封装
+│   │   ├── account.ts      # 账户相关API
+│   │   ├── position.ts     # 持仓相关API
+│   │   ├── trade.ts        # 成交相关API
+│   │   ├── order.ts        # 委托单相关API
+│   │   ├── quote.ts        # 行情相关API
+│   │   ├── rotation.ts     # 换仓相关API
+│   │   ├── system.ts       # 系统控制API
+│   │   ├── jobs.ts         # 定时任务API
+│   │   └── alarm.ts        # 告警相关API
 │   ├── stores/      # Pinia 状态管理
 │   │   └── index.ts
 │   ├── router/      # Vue Router 路由配置
@@ -72,13 +79,11 @@ web/
 │   ├── types/       # TypeScript 类型定义
 │   │   └── index.ts
 │   ├── views/       # 页面组件
-│   │   ├── Dashboard.vue
-│   │   ├── Account.vue
-│   │   ├── Position.vue
-│   │   ├── Trade.vue
-│   │   ├── Order.vue
-│   │   ├── Kline.vue
-│   │   └── System.vue
+│   │   ├── Dashboard.vue   # 总览页面
+│   │   ├── Account.vue     # 账户管理
+│   │   ├── Rotation.vue    # 换仓管理
+│   │   ├── Alarm.vue       # 告警管理
+│   │   └── System.vue     # 系统控制
 │   ├── App.vue      # 根组件
 │   ├── main.ts      # 应用入口
 │   ├── ws.ts        # WebSocket 管理
@@ -126,12 +131,10 @@ WebSocket 消息在 `src/ws.ts` 中处理，支持以下消息类型：
 |------|------|------|
 | `/` | 重定向到 /dashboard | |
 | `/dashboard` | Dashboard | 总览 |
-| `/account` | Account | 账户管理 |
-| `/position` | Position | 持仓管理 |
-| `/trade` | Trade | 成交记录 |
-| `/order` | Order | 委托单管理 |
-| `/kline` | Kline | K线图表 |
+| `/account` | Account | 账户管理（包含持仓、成交、委托单、行情） |
+| `/rotation` | Rotation | 换仓管理 |
 | `/system` | System | 系统控制 |
+| `/alarms` | Alarm | 告警管理 |
 
 ## 代码规范
 

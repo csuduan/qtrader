@@ -1,35 +1,62 @@
-# Q-Trader自动化交易系统
+# Q-Trader 量化交易系统
 
-基于天勤量化API (TqSdk) 开发的自动化交易程序，支持配置文件管理、行情订阅、指令执行、数据持久化、RESTful API和Vue管理界面。
+Q-Trader 是一款专为现代金融投资打造的专业量化交易平台，致力于通过技术驱动投资决策，为交易者、投资机构与金融开发者提供高效、稳定、可扩展的自动化交易解决方案。
+
+## 技术栈
+
+### 后端
+- **语言**: Python 3.8+
+- **Web框架**: FastAPI
+- **数据库**: SQLite
+- **ORM**: SQLAlchemy
+- **交易接口**: TqSdk (天勤量化)
+- **任务调度**: APScheduler
+- **异步**: asyncio
+
+### 前端
+- **框架**: Vue 3 + TypeScript
+- **构建工具**: Vite
+- **UI组件**: Element Plus
+- **图表**: ECharts
+- **状态管理**: Pinia
+- **路由**: Vue Router
+- **HTTP客户端**: Axios
+- **WebSocket**: 原生WebSocket
 
 ## 功能特性
 
-- **配置管理**: 支持YAML配置文件，可配置天勤账号、交易参数、风控参数等
-- **行情订阅**: 支持订阅分钟K线行情数据
-- **订单扫描**: 自动扫描CSV格式的交易指令文件并执行
-- **风控模块**: 支持单日最大报单次数、撤单次数、单笔最大手数等风控参数
-- **数据持久化**: 使用SQLite存储账户、持仓、成交、委托单等数据
-- **RESTful API**: 提供完整的API接口，支持账户、持仓、成交、委托单查询及手动报单
-- **WebSocket实时推送**: 支持实时推送账户、持仓、成交、委托单等数据更新
-- **Vue管理界面**: (待开发) 基于Vue 3 + Vite的前端管理界面
+ - **配置管理**: 支持YAML配置文件，可配置天勤账号、交易参数、风控参数等
+ - **行情订阅**: 支持订阅实时行情数据
+ - **订单扫描**: 自动扫描CSV格式的交易指令文件并执行
+ - **风控模块**: 支持单日最大报单次数、撤单次数、单笔最大手数等风控参数
+ - **数据持久化**: 使用SQLite存储账户、持仓、成交、委托单等数据
+ - **RESTful API**: 提供完整的API接口，支持账户、持仓、成交、委托单查询及手动报单
+ - **WebSocket实时推送**: 支持实时推送账户、持仓、成交、委托单等数据更新（账户信息每3秒推送一次）
+ - **Vue管理界面**: 完整的Web管理界面，支持账户管理、持仓管理、成交记录、委托单管理、系统控制等
+ - **定时任务调度**: 支持配置定时任务，如盘前自动连接、盘后自动断开、自动换仓等
 
 ## 项目结构
 
 ```
-py-trade/
+qtrader/
 ├── config/
-│   ├── config.yaml           # 主配置文件
-│   └── config.example.yaml   # 配置文件示例
+│   └── config.yaml           # 主配置文件
 ├── src/
 │   ├── main.py               # 主程序入口
 │   ├── config_loader.py      # 配置加载器
 │   ├── trading_engine.py     # 交易引擎核心
-│   ├── order_scanner.py      # 订单文件扫描器
+│   ├── switch_mgr.py         # 换仓管理器
 │   ├── risk_control.py       # 风控模块
 │   ├── database.py           # 数据库操作
-│   ├── models.py             # 数据模型
+│   ├── persistence.py        # 数据持久化
+│   ├── scheduler.py          # 定时任务调度器
+│   ├── job_mgr.py            # 任务管理
+│   ├── init_sys.py           # 系统初始化脚本
+│   ├── param_loader.py       # 参数加载器
+│   ├── models/               # 数据模型
 │   ├── api/
 │   │   ├── app.py            # FastAPI应用
+│   │   ├── websocket_manager.py  # WebSocket管理器
 │   │   ├── routes/           # API路由
 │   │   └── schemas.py        # API数据模型
 │   └── utils/                # 工具模块
@@ -38,7 +65,14 @@ py-trade/
 │   └── logs/                 # 日志目录
 ├── storage/
 │   └── trading.db            # SQLite数据库
-└── requirements.txt          # Python依赖
+├── web/                      # 前端项目
+│   └── ...                   # Vue 3 + Vite + Element Plus
+├── docs/                     # 文档目录
+│   ├── INIT_SYSTEM.md        # 系统初始化文档
+│   └── INIT_SYSTEM_UPDATE.md # 系统更新文档
+├── requirements.txt          # Python依赖
+├── AGENTS.md                 # 开发指南
+└── README.md                 # 项目说明
 ```
 
 ## 快速开始
@@ -46,7 +80,6 @@ py-trade/
 ### 1. 安装依赖
 
 ```bash
-conda activate mypy
 pip install -r requirements.txt
 ```
 
@@ -55,18 +88,25 @@ pip install -r requirements.txt
 复制示例配置文件并修改：
 
 ```bash
-cp config/config.example.yaml config/config.yaml
+cp config/config.yaml config/config.yaml
 ```
 
-编辑 `config/config.yaml`，填入您的天勤账号信息：
+编辑 `config/config.yaml`，配置交易账户信息。
 
-```yaml
-tianqin:
-  username: "your_username"
-  password: "your_password"
+### 3. 初始化系统
+
+首次运行或需要重置系统时，请运行初始化脚本：
+
+```bash
+python -m src.init_sys
 ```
 
-### 3. 运行程序
+这将：
+- 创建/重建所有数据库表
+- 从配置文件导入定时任务到数据库
+- 从配置文件初始化风控参数到数据库
+
+### 4. 运行程序
 
 ```bash
 python -m src.main
@@ -119,9 +159,10 @@ SHFE.ag2505,SHFE,CLOSE,SELL,3,4500,
 - `POST /api/order` - 手动报单
 - `DELETE /api/order/{order_id}` - 撤销委托单
 
-### K线数据
-- `GET /api/kline` - 获取K线数据
-- `GET /api/kline/{symbol}` - 获取指定合约K线数据
+### 行情相关
+- `GET /api/quote/subscribe` - 订阅行情
+- `GET /api/quote/unsubscribe` - 取消订阅行情
+- `GET /api/quotes` - 获取订阅的行情列表
 
 ### 系统控制
 - `GET /api/system/status` - 获取系统状态
@@ -129,6 +170,32 @@ SHFE.ag2505,SHFE,CLOSE,SELL,3,4500,
 - `POST /api/system/disconnect` - 断开连接
 - `POST /api/system/pause` - 暂停交易
 - `POST /api/system/resume` - 恢复交易
+
+### 系统参数
+- `GET /api/system-params` - 获取所有系统参数
+- `GET /api/system-params/{param_key}` - 获取单个参数
+- `PUT /api/system-params/{param_key}` - 更新参数
+- `GET /api/system-params/group/{group}` - 按分组获取参数
+
+### 换仓管理
+- `GET /api/rotation/instructions` - 获取换仓指令列表
+- `GET /api/rotation/instructions/{id}` - 获取换仓指令详情
+- `POST /api/rotation/instructions` - 创建换仓指令
+- `PUT /api/rotation/instructions/{id}` - 更新换仓指令
+- `DELETE /api/rotation/instructions/{id}` - 删除换仓指令
+- `POST /api/rotation/execute` - 执行换仓
+- `POST /api/rotation/close-all` - 平掉所有持仓
+- `POST /api/rotation/check` - 检查换仓状态
+
+### 定时任务
+- `GET /api/jobs` - 获取定时任务列表
+- `GET /api/jobs/{job_id}` - 获取任务详情
+- `POST /api/jobs/{job_id}/toggle` - 启用/禁用任务
+- `POST /api/jobs/{job_id}/trigger` - 手动触发任务
+
+### 告警管理
+- `GET /api/alarms` - 获取告警列表
+- `POST /api/alarms/clear` - 清除已处理告警
 
 ## WebSocket消息格式
 
@@ -138,14 +205,22 @@ SHFE.ag2505,SHFE,CLOSE,SELL,3,4500,
 const ws = new WebSocket('ws://localhost:8000/ws');
 ```
 
-### 消息类型
+### 服务端推送消息类型
 
-- `account_update` - 账户信息更新
-- `position_update` - 持仓信息更新
-- `trade_update` - 新成交记录
-- `order_update` - 委托单状态更新
-- `kline_update` - K线数据更新
-- `system_status` - 系统状态变化
+- `connected` - 连接成功
+- `account_update` - 账户信息更新（每3秒推送一次）
+- `position_update` - 持仓信息更新（实时）
+- `trade_update` - 新成交记录（实时）
+- `order_update` - 委托单状态更新（实时）
+- `quote_update` - 行情数据更新（实时）
+- `tick_update` - tick数据更新（实时）
+- `system_status` - 系统状态更新
+- `alarm_update` - 告警更新
+
+### 客户端发送消息类型
+
+- `subscribe_logs` - 订阅日志流
+- `unsubscribe_logs` - 取消订阅日志流
 
 ### 消息格式
 
@@ -168,9 +243,9 @@ const ws = new WebSocket('ws://localhost:8000/ws');
 
 支持三种账户类型：
 
-1. **kq** - 快期模拟账户（默认）
-2. **sim** - 本地模拟账户
-3. **account** - 实盘账户（需配置交易账户信息）
+1. **sim** - 本地模拟账户（默认）
+2. **kq** - 快期模拟账户
+3. **real** - 实盘账户（需配置交易账户信息）
 
 ### 风控参数
 
@@ -190,8 +265,10 @@ const ws = new WebSocket('ws://localhost:8000/ws');
 - [x] 日志系统
 - [x] 数据库和ORM模型
 - [x] 交易引擎核心
-- [x] 订单文件扫描器
+- [x] 换仓管理器
 - [x] 风控模块
+- [x] 定时任务调度
+- [x] 数据持久化
 - [x] RESTful API
 - [x] WebSocket实时推送
 - [x] Vue前端管理界面
@@ -206,11 +283,14 @@ const ws = new WebSocket('ws://localhost:8000/ws');
 
 - **总览页面**: 显示账户概览、盈亏统计、风控信息和最近成交
 - **账户管理**: 查看详细账户信息和资产状况
-- **持仓管理**: 实时查看和管理持仓
+- **换仓管理**: 创建、编辑、执行换仓指令，一键平仓
+- **持仓管理**: 实时查看和管理持仓，支持平仓操作
 - **成交记录**: 查看历史成交记录
 - **委托单管理**: 手动报单、撤单、查看委托单状态
-- **K线图表**: 使用 ECharts 展示K线走势图
+- **行情管理**: 订阅/取消订阅合约行情，查看实时行情数据
 - **系统控制**: 连接/断开交易系统、暂停/恢复交易
+- **定时任务**: 查看和管理定时任务，支持启用/禁用和手动触发
+- **告警管理**: 查看和清除告警信息
 
 ### 前端启动
 
@@ -222,6 +302,10 @@ npm run dev
 
 访问 http://localhost:3000
 
+**注意**：
+- Vite 配置了代理，`/api` 和 `/ws` 请求会自动转发到 `http://localhost:8000`
+- 如需修改后端地址，请编辑 `vite.config.ts` 中的 `proxy` 配置
+
 ### 前端技术栈
 
 - **框架**: Vue 3 + TypeScript
@@ -232,6 +316,14 @@ npm run dev
 - **路由**: Vue Router
 - **HTTP客户端**: Axios
 - **WebSocket**: 原生WebSocket
+
+## 文档
+
+- **系统初始化**: [docs/INIT_SYSTEM.md](docs/INIT_SYSTEM.md) - 系统初始化和使用说明
+- **系统更新**: [docs/INIT_SYSTEM_UPDATE.md](docs/INIT_SYSTEM_UPDATE.md) - 系统优化更新说明
+- **WebSocket优化**: [docs/WEBSOCKET_OPTIMIZATION.md](docs/WEBSOCKET_OPTIMIZATION.md) - WebSocket推送优化说明
+- **开发指南**: [AGENTS.md](AGENTS.md) - 开发规范和指南
+- **前端文档**: [web/README.md](web/README.md) - 前端项目说明
 
 ## 许可证
 

@@ -108,15 +108,21 @@
 
 **服务端推送消息类型**
 - `connected`: 连接成功
-- `account_update`: 账户信息更新
-- `position_update`: 持仓信息更新
-- `trade_update`: 成交记录更新
-- `order_update`: 委托单状态更新
-- `quote_update`: 行情数据更新
-- `tick_update`: tick数据更新
+- `account_update`: 账户信息更新（每3秒推送一次，使用缓存机制）
+- `position_update`: 持仓信息更新（实时）
+- `trade_update`: 成交记录更新（实时）
+- `order_update`: 委托单状态更新（实时）
+- `quote_update`: 行情数据更新（实时）
+- `tick_update`: tick数据更新（实时）
 - `system_status`: 系统状态更新
 - `log_update`: 日志更新
 - `alarm_update`: 告警更新
+
+**WebSocket推送优化**
+- 账户信息采用缓存机制，收到更新时只缓存最新数据
+- 定时任务每3秒推送一次缓存的最新账户数据
+- 无连接时自动停止推送任务，有连接时自动启动
+- 其他类型数据（持仓、成交、委托单、行情）实时推送
 
 **客户端发送消息类型**
 - `subscribe_logs`: 订阅日志流
