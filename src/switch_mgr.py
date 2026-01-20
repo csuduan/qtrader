@@ -228,7 +228,7 @@ class SwitchPosManager:
                     continue
 
                 # 导入文件
-                result = self.import_csv(csv_file.read_text(), csv_file.name, mode="replace")
+                result = self.import_csv(csv_file.read_text(encoding="utf-8-sig"), csv_file.name, mode="replace")
                 # 记录导入成功，写入导入记录
                 if result and result.get("imported", 0) > 0:
                     record = OrderFile(
