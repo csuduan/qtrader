@@ -89,7 +89,7 @@ class JobManager:
             file_path = export_dir / file_name
 
             # 导出数据
-            with open(file_path, "w", encoding="utf-8-sig", newline="") as f:
+            with open(file_path, "w", encoding="gbk", newline="") as f:
                 fieldnames = ["账户ID", "交易日期", "合约代码", "方向", "今仓", "昨仓"]
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
                 writer.writeheader()

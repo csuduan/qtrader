@@ -228,7 +228,7 @@ class SwitchPosManager:
                     continue
 
                 # 导入文件
-                result = self.import_csv(csv_file.read_text(encoding="utf-8-sig"), csv_file.name, mode="replace")
+                result = self.import_csv(csv_file.read_text(encoding="gbk"), csv_file.name, mode="replace")
                 # 记录导入成功，写入导入记录
                 if result and result.get("imported", 0) > 0:
                     record = OrderFile(
@@ -492,7 +492,7 @@ class SwitchPosManager:
         instructions = []
 
         try:
-            with open(file_path, "r", encoding="utf-8-sig") as f:
+            with open(file_path, "r", encoding="gbk") as f:
                 reader = csv.DictReader(f)
 
                 required_columns = ["实盘账户", "合约代码", "交易所代码", "开平类型", "买卖方向", "手数", "价格"]
