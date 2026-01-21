@@ -116,11 +116,6 @@ class WebSocketManager:
             "data": quote_data,
             "timestamp": datetime.now().isoformat(),
         })
-
-
-# 创建全局实例
-websocket_manager = WebSocketManager()
-
     # ==================== 策略事件推送 ====================
 
     async def broadcast_strategy_status(self, strategy_status: dict):
@@ -150,3 +145,6 @@ websocket_manager = WebSocketManager()
             "timestamp": datetime.now().isoformat()
         }
         await self.broadcast(message)
+
+# 创建全局实例
+websocket_manager = WebSocketManager()

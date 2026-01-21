@@ -2,7 +2,7 @@
 抽象数据模型层
 统一tqsdk和CTP的数据格式，作为所有外部接口的契约
 """
-from datetime import datetime
+from datetime import datetime as DateTime
 from enum import Enum
 from typing import Optional, Dict, List, Any
 
@@ -106,7 +106,7 @@ class TickData(BaseModel):
     # 必需字段（所有Gateway必须提供）
     symbol: str = Field(..., description="合约代码")
     exchange: Exchange = Field(..., description="交易所")
-    datetime: datetime = Field(..., description="行情时间")
+    datetime: DateTime = Field(..., description="行情时间")
     last_price: float = Field(..., description="最新价")
 
     # 可选字段（建议提供，但不强制）
@@ -149,7 +149,7 @@ class BarData(BaseModel):
     symbol: str = Field(..., description="合约代码")
     exchange: Exchange = Field(..., description="交易所")
     interval: Interval = Field(..., description="K线周期")
-    datetime: datetime = Field(..., description="K线时间")
+    datetime: DateTime = Field(..., description="K线时间")
 
     open_price: float = Field(..., description="开盘价")
     high_price: float = Field(..., description="最高价")
@@ -196,8 +196,8 @@ class OrderData(BaseModel):
     gateway_order_id: Optional[str] = Field(None, description="网关订单ID（如CTP的OrderSysID）")
     trading_day: Optional[str] = Field(None, description="交易日")
 
-    insert_time: Optional[datetime] = Field(None, description="下单时间")
-    update_time: Optional[datetime] = Field(None, description="最后更新时间")
+    insert_time: Optional[DateTime] = Field(None, description="下单时间")
+    update_time: Optional[DateTime] = Field(None, description="最后更新时间")
 
     # 扩展字段
     extras: Dict[str, Any] = Field(default_factory=dict)
@@ -232,7 +232,7 @@ class TradeData(BaseModel):
 
     # 可选字段
     trading_day: Optional[str] = Field(None, description="交易日")
-    trade_time: Optional[datetime] = Field(None, description="成交时间")
+    trade_time: Optional[DateTime] = Field(None, description="成交时间")
     commission: Optional[float] = Field(None, description="手续费")
 
     # 扩展字段
@@ -295,7 +295,7 @@ class AccountData(BaseModel):
 
     risk_ratio: Optional[float] = Field(None, description="风险度")
 
-    update_time: Optional[datetime] = Field(None, description="更新时间")
+    update_time: Optional[DateTime] = Field(None, description="更新时间")
 
     # 扩展字段
     extras: Dict[str, Any] = Field(default_factory=dict)

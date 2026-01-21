@@ -367,3 +367,9 @@ def load_strategies_config(config_path: str = "config/strategies.yaml") -> Strat
     except Exception as e:
         logger.error(f"加载策略配置失败: {e}")
         return StrategiesConfig()
+
+# Gateway类型配置
+class GatewayConfig(BaseModel):
+    """Gateway配置"""
+    gateway_type: str = "TQSDK"  # TQSDK 或 CTP
+

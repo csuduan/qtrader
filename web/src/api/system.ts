@@ -1,5 +1,5 @@
 import api from './request'
-import type { SystemStatus, Job } from '@/types'
+import type { SystemStatus, Job, RiskControlStatus } from '@/types'
 
 /**
  * 系统控制 API
@@ -15,8 +15,8 @@ export const systemApi = {
   /**
    * 获取风控状态
    */
-  getRiskControlStatus: async () => {
-    return api.get('/system/risk-control')
+  getRiskControlStatus: async (): Promise<RiskControlStatus> => {
+    return api.get<RiskControlStatus>('/system/risk-control')
   },
 
   /**

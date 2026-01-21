@@ -22,6 +22,7 @@ from src.api.routes.rotation import router as rotation_router
 from src.api.routes.system import router as system_router
 from src.api.routes.system_params import router as system_params_router
 from src.api.routes.trade import router as trade_router
+from src.api.routes.strategy import router as strategy_router
 from src.api.schemas import AccountRes, OrderRes, PositionRes, TradeRes
 from src.api.responses import (
     global_exception_handler,

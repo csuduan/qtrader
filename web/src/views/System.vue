@@ -442,15 +442,7 @@ async function loadTasks() {
   }
 }
 
-async function handleToggleTask(row: Job) {
-  try {
-    await jobsApi.toggleJob(row.job_id, row.enabled)
-    ElMessage.success('更新成功')
-  } catch (error: any) {
-    ElMessage.error(`操作失败: ${error.message}`)
-    row.enabled = !row.enabled
-  }
-}
+
 
 async function handleOperateJob(row: Job, action: 'pause' | 'resume' | 'trigger') {
   const actionKey = `${row.job_id}_${action}`

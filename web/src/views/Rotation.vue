@@ -326,12 +326,7 @@ function getProgress(total: number, remaining: number): number {
   return Math.round(((total - remaining) / total) * 100)
 }
 
-function getProgressStatus(total: number, remaining: number): string {
-  const percentage = getProgress(total, remaining)
-  if (percentage === 100) return 'success'
-  if (percentage > 0) return 'warning'
-  return ''
-}
+
 
 function handleDialogOpen() {
   importForm.file = null

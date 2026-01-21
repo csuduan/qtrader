@@ -1,4 +1,4 @@
-import axios, { type AxiosResponse, type AxiosInstance } from 'axios'
+import axios, { type AxiosRequestConfig, type InternalAxiosRequestConfig, type AxiosResponse } from 'axios'
 import { ElMessage } from 'element-plus'
 
 // 定义响应类型
@@ -8,26 +8,44 @@ export interface ApiResponse<T = any> {
   data: T
 }
 
-const api: AxiosInstance = axios.create({
+// 自定义Axios类型，拦截器自动解包data
+type ApiInstance = {
+  get<T = any>(url: string, config?: AxiosRequestConfig): Promise<T>
+  post<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T>
+  put<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T>
+  delete<T = any>(url: string, config?: AxiosRequestConfig): Promise<T>
+}
+
+const axiosInstance = axios.create({
   baseURL: '/api',
   headers: {
     'Content-Type': 'application/json'
   }
 })
 
+// 请求拦截器
+axiosInstance.interceptors.request.use(
+  (config: InternalAxiosRequestConfig) => {
+    return config
+  },
+  (error) => {
+    return Promise.reject(error)
+  }
+)
+
 // 响应拦截器 - 自动解包 data
-api.interceptors.response.use(
-  async (response: AxiosResponse<ApiResponse<any>>) => {
+axiosInstance.interceptors.response.use(
+  (response: AxiosResponse<ApiResponse<any>>) => {
     const res = response.data
     if (res.code === 0) {
-      return res.data as any
+      return res.data
     } else {
       const error = new Error(res.message || '请求失败')
       console.error('API Error:', error)
       throw error
     }
   },
-  async (error) => {
+  (error) => {
     console.error('Network Error:', error)
     if (error.response) {
       if (error.response.status === 500) {
@@ -42,5 +60,8 @@ api.interceptors.response.use(
     throw new Error('网络请求失败')
   }
 )
+
+// 类型断言，确保返回类型正确
+const api = axiosInstance as unknown as ApiInstance
 
 export default api
