@@ -1,0 +1,80 @@
+# 策略配置文件
+# 定义策略ID、类型、合约、手数、参数路径等
+
+strategies:
+  # RSI策略示例
+  rsi_strategy:
+    enabled: true
+    strategy_type: bar  # tick 或 bar
+    symbol: "DCE.IM2605"
+    exchange: "DCE"
+    volume_per_trade: 1
+    max_position: 5
+
+    # RSI参数
+    rsi_period: 14
+    overbought: 70
+    oversold: 30
+
+    # 止盈止损
+    take_profit_pct: 0.02
+    stop_loss_pct: 0.01
+    fee_rate: 0.0001
+
+    # 交易窗口
+    trade_start_time: "09:30:00"
+    trade_end_time: "14:50:00"
+    force_exit_time: "14:55:00"
+
+    # 交易限制
+    one_trade_per_day: true
+
+    # 参数文件路径（可选）
+    params_file: null
+
+  # 均线交叉策略示例
+  ma_cross_strategy:
+    enabled: false
+    strategy_type: bar
+    symbol: "SHFE.rb2505"
+    exchange: "SHFE"
+    volume_per_trade: 2
+    max_position: 10
+
+    # MA参数
+    fast_period: 10
+    slow_period: 30
+
+    take_profit_pct: 0.015
+    stop_loss_pct: 0.015
+    fee_rate: 0.0001
+
+    trade_start_time: "09:30:00"
+    trade_end_time: "14:50:00"
+    force_exit_time: "14:55:00"
+
+    one_trade_per_day: true
+    params_file: null
+
+  # Tick驱动策略示例
+  tick_breakout_strategy:
+    enabled: false
+    strategy_type: tick
+    symbol: "SHFE.ag2505"
+    exchange: "SHFE"
+    volume_per_trade: 1
+    max_position: 5
+
+    # 突破参数
+    threshold: 0.001  # 0.1%
+
+    take_profit_pct: 0.01
+    stop_loss_pct: 0.01
+    fee_rate: 0.0001
+
+    trade_start_time: "09:30:00"
+    trade_end_time: "14:50:00"
+    force_exit_time: "14:55:00"
+
+    one_trade_per_day: false
+    params_file: null
