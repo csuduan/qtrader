@@ -202,3 +202,191 @@ export interface AlarmStats {
 
 /** 告警状态 */
 export type AlarmStatus = 'UNCONFIRMED' | 'CONFIRMED'
+
+/** ==================== 新增：适配器与策略系统类型 ==================== */
+
+/** 买卖方向 */
+export type Direction = 'BUY' | 'SELL'
+
+/** 开平类型 */
+export type Offset = 'OPEN' | 'CLOSE' | 'CLOSETODAY' | 'CLOSEYESTERDAY'
+
+/** 订单状态 */
+export type OrderStatus = 'SUBMITTING' | 'NOTTRADED' | 'PARTTRADED' | 'ALLTRADED' | 'CANCELLED' | 'REJECTED'
+
+/** 订单类型 */
+export type OrderType = 'LIMIT' | 'MARKET' | 'FOK' | 'FAK'
+
+/** 交易所 */
+export type Exchange = 'CFFEX' | 'SHFE' | 'CZCE' | 'DCE' | 'INE' | 'GFEX' | 'SSE' | 'SZSE' | 'LOCAL' | ''
+
+/** 产品类型 */
+export type ProductType = 'FUTURES' | 'OPTION' | 'SPOT' | 'INDEX' | 'ETF'
+
+/** K线周期 */
+export type Interval = 'tick' | '1m' | '1h' | 'd' | 'w'
+
+/** 策略类型 */
+export type StrategyType = 'tick' | 'bar' | 'both'
+
+/** 统一Tick数据 */
+export interface TickData {
+  symbol: string
+  exchange: Exchange
+  datetime: string
+  last_price: number
+  volume?: number
+  turnover?: number
+  open_interest?: number
+  bid_price_1?: number
+  bid_volume_1?: number
+  ask_price_1?: number
+  ask_volume_1?: number
+  open_price?: number
+  high_price?: number
+  low_price?: number
+  pre_close?: number
+  limit_up?: number
+  limit_down?: number
+  extras?: Record<string, any>
+}
+
+/** 统一Bar数据 */
+export interface BarData {
+  symbol: string
+  exchange: Exchange
+  interval: Interval
+  datetime: string
+  open_price: number
+  high_price: number
+  low_price: number
+  close_price: number
+  volume?: number
+  turnover?: number
+  open_interest?: number
+  extras?: Record<string, any>
+}
+
+/** 统一订单数据 */
+export interface OrderData {
+  order_id: string
+  symbol: string
+  exchange: Exchange
+  direction: Direction
+  offset: Offset
+  volume: number
+  traded: number
+  price?: number
+  price_type: OrderType
+  status: OrderStatus
+  status_msg: string
+  gateway_order_id?: string
+  trading_day?: string
+  insert_time?: string
+  update_time?: string
+  extras?: Record<string, any>
+}
+
+/** 统一成交数据 */
+export interface TradeData {
+  trade_id: string
+  order_id: string
+  symbol: string
+  exchange: Exchange
+  direction: Direction
+  offset: Offset
+  price: number
+  volume: number
+  trading_day?: string
+  trade_time?: string
+  commission?: number
+  extras?: Record<string, any>
+}
+
+/** 统一持仓数据 */
+export interface PositionData {
+  symbol: string
+  exchange: Exchange
+  direction: 'LONG' | 'SHORT' | 'NET'
+  volume: number
+  yd_volume?: number
+  td_volume?: number
+  frozen?: number
+  available?: number
+  avg_price?: number
+  hold_cost?: number
+  hold_profit?: number
+  close_profit?: number
+  margin?: number
+  extras?: Record<string, any>
+}
+
+/** 统一账户数据 */
+export interface AccountData {
+  account_id: string
+  balance: number
+  available: number
+  frozen?: number
+  margin?: number
+  pre_balance?: number
+  hold_profit?: number
+  close_profit?: number
+  risk_ratio?: number
+  update_time?: string
+  extras?: Record<string, any>
+}
+
+/** 统一合约数据 */
+export interface ContractData {
+  symbol: string
+  exchange: Exchange
+  name: string
+  product_type: ProductType
+  multiple?: number
+  pricetick?: number
+  min_volume?: number
+  option_strike?: number
+  option_underlying?: string
+  option_type?: string
+  extras?: Record<string, any>
+}
+
+/** 策略配置 */
+export interface StrategyConfig {
+  enabled: boolean
+  strategy_type: StrategyType
+  symbol: string
+  exchange: string
+  volume_per_trade: number
+  max_position: number
+  take_profit_pct?: number
+  stop_loss_pct?: number
+  fee_rate?: number
+  trade_start_time?: string
+  trade_end_time?: string
+  force_exit_time?: string
+  one_trade_per_day?: boolean
+  params_file?: string
+  params?: Record<string, any>
+}
+
+/** 策略状态 */
+export interface StrategyStatus {
+  strategy_id: string
+  active: boolean
+  config: StrategyConfig
+}
+
+/** 策略事件类型 */
+export type StrategyEventType = 'strategy_status' | 'strategy_signal'
+
+/** 策略信号 */
+export interface StrategySignal {
+  strategy_id: string
+  symbol: string
+  action: 'BUY' | 'SELL' | 'CLOSE'
+  price?: number
+  volume?: number
+  reason?: string
+  timestamp?: string
+}

@@ -304,3 +304,66 @@ def create_settings_file() -> None:
         yaml.dump(default_config, f, allow_unicode=True, default_flow_style=False)
 
     print(f"默认配置文件已创建: {config_path}")
+
+# 策略配置类
+class StrategyConfig(BaseModel):
+    """单个策略配置"""
+    enabled: bool = False
+    strategy_type: str = "bar"  # tick 或 bar
+    symbol: str = ""
+    exchange: str = ""
+    volume_per_trade: int = 1
+    max_position: int = 5
+
+    # 交易参数
+    take_profit_pct: float = 0.02
+    stop_loss_pct: float = 0.01
+    fee_rate: float = 0.0001
+
+    # 交易窗口
+    trade_start_time: str = "09:30:00"
+    trade_end_time: str = "14:50:00"
+    force_exit_time: str = "14:55:00"
+
+    # 交易限制
+    one_trade_per_day: bool = True
+
+    # 参数文件路径
+    params_file: Optional[str] = None
+
+    # 策略特定参数（子类扩展）
+    params: Dict[str, Any] = Field(default_factory=dict)
+
+
+class StrategiesConfig(BaseModel):
+    """策略配置集合"""
+    strategies: Dict[str, StrategyConfig] = Field(default_factory=dict)
+
+    class Config:
+        extra = "allow"  # 允许额外字段
+
+
+def load_strategies_config(config_path: str = "config/strategies.yaml") -> StrategiesConfig:
+    """
+    加载策略配置
+
+    Args:
+        config_path: 策略配置文件路径
+
+    Returns:
+        StrategiesConfig: 策略配置对象
+    """
+    from pathlib import Path
+
+    config_file = Path(config_path)
+    if not config_file.exists():
+        logger.warning(f"策略配置文件不存在: {config_path}")
+        return StrategiesConfig()
+
+    try:
+        with open(config_file, 'r', encoding='utf-8') as f:
+            data = yaml.safe_load(f)
+            return StrategiesConfig(**data)
+    except Exception as e:
+        logger.error(f"加载策略配置失败: {e}")
+        return StrategiesConfig()
