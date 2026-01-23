@@ -1,9 +1,10 @@
 """
-TqSdk Gateway适配器(完整实现)
-包含所有tqsdk逻辑,TradingEngine通过此适配器与tqsdk交互
+TqSdk Gateway适配器
 """
 from datetime import datetime
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List,Union,Set
+import threading
+import time
 
 from tqsdk import TqApi, TqAuth, TqKq, TqSim, TqAccount
 from tqsdk.objs import Account, Order, Position, Quote, Trade
@@ -13,11 +14,20 @@ from src.models.object import (
     TickData, BarData, OrderData, TradeData,
     PositionData, AccountData, ContractData,
     SubscribeRequest, OrderRequest, CancelRequest,
-    Direction, Offset, Status, OrderType, Exchange
+    Direction, Offset, Status, OrderType, Exchange, ProductType
 )
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+exchange_map = {
+    "SHFE": Exchange.SHFE,
+    "DCE": Exchange.DCE,
+    "CZCE": Exchange.CZCE,
+    "CFFEX": Exchange.CFFEX,
+    "INE": Exchange.INE,
+    "GFEX": Exchange.GFEX,
+}
 
 
 class TqGateway(BaseGateway):
@@ -28,6 +38,7 @@ class TqGateway(BaseGateway):
     def __init__(self, trading_engine=None):
         super().__init__()
         self.trading_engine = trading_engine
+        self.connected = False
         
         # TqSdk API实例
         self.api: Optional[TqApi] = None
@@ -48,26 +59,22 @@ class TqGateway(BaseGateway):
         self._tq_trades: Dict[str, Trade] = {}
         self._tq_quotes: Dict[str, Quote] = {}
         
+        # 合约符号映射(原始symbol -> 统一symbol)
+        self._upper_symbols: Dict[str, str] = {}
+        
         # 配置(在connect时设置)
         self.config = None
         self.account_id = None
+
+        # 历史订阅的合约符号列表
+        self.hist_subs: Set[str] = []
         
-        # 交易所映射
-        self.exchange_map = self._init_exchange_map()
-        
+     
         # 订单引用计数
         self._order_ref = 0
+
+
     
-    def _init_exchange_map(self) -> Dict[str, Exchange]:
-        """初始化交易所映射"""
-        return {
-            "SHFE": Exchange.SHFE,
-            "DCE": Exchange.DCE,
-            "CZCE": Exchange.CZCE,
-            "CFFEX": Exchange.CFFEX,
-            "INE": Exchange.INE,
-            "GFEX": Exchange.GFEX,
-        }
     
     # ==================== 连接管理 ====================
     
@@ -79,6 +86,10 @@ class TqGateway(BaseGateway):
             if not self.trading_engine:
                 logger.error("TradingEngine实例未传入，无法连接")
                 return False
+            
+            if self.connected:
+                logger.warning("已连接到TqSdk,无需重复连接")
+                return True
 
             config = self.trading_engine.config
             self.config = config
@@ -106,14 +117,6 @@ class TqGateway(BaseGateway):
                     user_id=getattr(trading_cfg, 'user_id', ''),
                     password=getattr(trading_cfg, 'password', ''),
                 )
-                if hasattr(trading_cfg, 'auth_code') and hasattr(trading_cfg, 'app_id'):
-                    account = TqAccount(
-                        broker_id=getattr(trading_cfg, 'broker_name', ''),
-                        user_id=getattr(trading_cfg, 'user_id', ''),
-                        password=getattr(trading_cfg, 'password', ''),
-                        auth_code=getattr(trading_cfg, 'auth_code', ''),
-                        app_id=getattr(trading_cfg, 'app_id', ''),
-                    )
             else:  # sim
                 account = TqSim()
             
@@ -127,84 +130,103 @@ class TqGateway(BaseGateway):
             self._tq_trades = self.api.get_trade()
             
             # 获取合约列表
-            quotes = self.api.query_quotes(ins_class=["FUTURE"], expired=False)
-            for symbol in quotes:
-                self._quotes[symbol] = self._convert_tick(
-                    self.api.get_quote(symbol),
-                    symbol
+            ls = self.api.query_quotes(ins_class=["FUTURE"], expired=False)
+            symbol_infos = self.api.query_symbol_info(ls)
+            for index,item in symbol_infos.iterrows():
+                instrument_id = item.instrument_id
+                if item.exchange_id not in exchange_map:
+                    continue
+                contract = ContractData(
+                    symbol=instrument_id,
+                    exchange=exchange_map[item.exchange_id],
+                    name=item.instrument_name,
+                    size=item.volume_multiple,
+                    price_tick=item.price_tick,
+                    max_volume=item.max_limit_order_volume,
                 )
+                self._contracts[contract.symbol] = contract     
+                self._upper_symbols[contract.symbol.rsplit(".")[1].upper()] = contract.symbol
+            logger.info(f"成功加载{len(self._contracts)}个合约")           
             
             # 初始化持仓合约的行情订阅
-            for symbol_key in self._tq_positions:
-                if symbol_key not in self._quotes:
-                    quote = self.api.get_quote(symbol_key)
-                    if quote:
-                        self._quotes[symbol_key] = self._convert_tick(quote, symbol_key)
-            
+            pos_symbols =  [symbol for symbol in self._tq_positions if symbol not in self._quotes]
+            self.subscribe(pos_symbols)
+            self.subscribe(list(self.hist_subs))
+              
             # 转换并缓存数据
             self._convert_and_cache_data()
             
             self.connected = True
             self.trading_day = datetime.now().strftime("%Y%m%d")
             logger.info(f"TqSdk连接成功,交易日: {self.trading_day}")
+
+            # 启动主循环线程
+            loop_thread = threading.Thread(target=self.loop_run, daemon=True)
+            loop_thread.start()
+
             return True
             
         except Exception as e:
-            logger.error(f"TqSdk连接失败: {e}", exc_info=True)
+            logger.exception(f"TqSdk连接失败{e}")
             return False
     
     def disconnect(self) -> bool:
         """断开TqSdk连接"""
         try:
-            if self.api:
-                self.api.close()
+            #只设置连接断开，由主线程释放api
             self.connected = False
             logger.info("TqSdk已断开连接")
             return True
         except Exception as e:
             logger.error(f"TqSdk断开连接失败: {e}", exc_info=True)
             return False
+
+    def loop_run(self) -> None:
+        """主循环运行"""
+        logger.info("Tq主循环已启动")
+        while True:
+            try:
+                # 检查是否有待处理的断开连接请求
+                if not self.connected:
+                    if self.api:
+                        self.api.close()
+                        self.api = None
+                        logger.info("TqSdk已销毁")
+                    break
+
+                self.wait_update()
+            except Exception as e:
+                logger.error(f"主循环更新出错: {e}")
+        logger.info("Tq主循环已退出")
     
     # ==================== 行情订阅 ====================
     
-    def subscribe(self, req: SubscribeRequest) -> bool:
+    def subscribe(self, symbol: Union[str, List[str]]) -> bool:
         """订阅行情"""
         try:
-            for symbol in req.symbols:
-                formatted_symbol = self._format_symbol(symbol)
-                if formatted_symbol:
-                    quote = self.api.get_quote(formatted_symbol)
-                    if quote:
-                        tick = self._convert_tick(quote, formatted_symbol)
-                        self._quotes[formatted_symbol] = tick
-                        self._emit_tick(tick)
-                        logger.debug(f"订阅行情: {formatted_symbol}")
+            if isinstance(symbol, str):
+                symbol = [symbol]
+            
+            # 添加到订阅列表中     
+            self.hist_subs.update(symbol)
+            if not self.connected:
+                return
+
+            # 格式化合约代码
+            std_symbols = [self._format_symbol(sym) for sym in symbol]
+            unsubscribe_symbols = [symbol for symbol in std_symbols if symbol not in self._quotes]
+            quotes: List[Quote] = self.api.get_quote_list(symbols=unsubscribe_symbols)
+            for quote in quotes:
+                self._quotes[quote.instrument_id] = quote       
+            logger.info(f"订阅行情: {unsubscribe_symbols}")
+            
             return True
         except Exception as e:
             logger.error(f"订阅行情失败: {e}")
             return False
     
-    def unsubscribe(self, req: SubscribeRequest) -> bool:
-        """取消订阅"""
-        try:
-            for symbol in req.symbols:
-                formatted_symbol = self._format_symbol(symbol)
-                if formatted_symbol in self._quotes:
-                    del self._quotes[formatted_symbol]
-            return True
-        except Exception as e:
-            logger.error(f"取消订阅失败: {e}")
-            return False
     
-    def subscribe_symbol(self, symbol: str) -> bool:
-        """订阅单个合约(兼容方法)"""
-        req = SubscribeRequest(symbols=[symbol])
-        return self.subscribe(req)
     
-    def unsubscribe_symbol(self, symbol: str) -> bool:
-        """取消订阅单个合约(兼容方法)"""
-        req = SubscribeRequest(symbols=[symbol])
-        return self.unsubscribe(req)
     
     # ==================== 交易接口 ====================
     
@@ -279,70 +301,41 @@ class TqGateway(BaseGateway):
     def query_account(self) -> Optional[AccountData]:
         """查询账户"""
         try:
-            if not self.connected or not self._tq_account:
-                return None
-            
-            # 检查账户数据是否变化
-            if self.api.is_changing(self._tq_account):
-                self._tq_account = self.api.get_account()
-                self._convert_and_cache_data()
-            
+            if not self._account:
+                return None              
             return self._account
         except Exception as e:
             logger.error(f"查询账户失败: {e}")
             return None
-    
-    def query_position(self) -> List[PositionData]:
+
+    def query_position(self) -> dict[str, PositionData]:
         """查询持仓"""
         try:
-            if not self.connected or not self._tq_positions:
-                return []
-            
-            # 检查持仓数据是否变化
-            if self.api.is_changing(self._tq_positions):
-                self._tq_positions = self.api.get_position()
-                self._convert_and_cache_data()
-            
-            result = []
-            for positions in self._positions.values():
-                result.extend(positions)
-            
+            result = {}
+            for symbol, positions_list in self._positions.items():
+                for position in positions_list:
+                    key = f"{symbol}_{position.direction}"
+                    result[key] = position
             return result
         except Exception as e:
             logger.error(f"查询持仓失败: {e}")
-            return []
+            return {}
     
-    def query_orders(self) -> List[OrderData]:
+    def query_orders(self) -> dict[str, OrderData]:
         """查询活动订单"""
         try:
-            if not self.connected or not self._tq_orders:
-                return []
-            
-            # 检查订单数据是否变化
-            if self.api.is_changing(self._tq_orders):
-                self._tq_orders = self.api.get_order()
-                self._convert_and_cache_data()
-            
-            return list(self._orders.values())
+            return self._orders
         except Exception as e:
             logger.error(f"查询订单失败: {e}")
-            return []
-    
-    def query_trades(self) -> List[TradeData]:
+            return {}
+
+    def query_trades(self) -> dict[str, TradeData]:
         """查询今日成交"""
         try:
-            if not self.connected or not self._tq_trades:
-                return []
-            
-            # 检查成交数据是否变化
-            if self.api.is_changing(self._tq_trades):
-                self._tq_trades = self.api.get_trade()
-                self._convert_and_cache_data()
-            
-            return list(self._trades.values())
+            return self._trades
         except Exception as e:
             logger.error(f"查询成交失败: {e}")
-            return []
+            return {}
     
     def query_contracts(self) -> Dict[str, ContractData]:
         """查询合约"""
@@ -369,49 +362,49 @@ class TqGateway(BaseGateway):
     
     def get_account(self) -> Optional[AccountData]:
         """获取账户数据(兼容)"""
-        return self.query_account()
+        return self._account
     
     def get_positions(self) -> Dict[str, Any]:
         """获取持仓数据(兼容,返回原始格式)"""
         try:
             if not self.connected or not self._tq_positions:
                 return {}
-            
+
             if self.api.is_changing(self._tq_positions):
                 self._tq_positions = self.api.get_position()
-                self._convert_and_cache_data()
-            
+                self._update_positions_cache()
+
             # 返回原始tqsdk格式(兼容性)
             return self._tq_positions
         except Exception as e:
             logger.error(f"获取持仓失败: {e}")
             return {}
-    
+
     def get_orders(self) -> Dict[str, Any]:
         """获取订单数据(兼容,返回原始格式)"""
         try:
             if not self.connected or not self._tq_orders:
                 return {}
-            
+
             if self.api.is_changing(self._tq_orders):
                 self._tq_orders = self.api.get_order()
-                self._convert_and_cache_data()
-            
+                self._update_orders_cache()
+
             return self._tq_orders
         except Exception as e:
             logger.error(f"获取订单失败: {e}")
             return {}
-    
+
     def get_trades(self) -> Dict[str, Any]:
         """获取成交数据(兼容,返回原始格式)"""
         try:
             if not self.connected or not self._tq_trades:
                 return {}
-            
+
             if self.api.is_changing(self._tq_trades):
                 self._tq_trades = self.api.get_trade()
-                self.convert_and_cache_data()
-            
+                self._update_trades_cache()
+
             return self._tq_trades
         except Exception as e:
             logger.error(f"获取成交失败: {e}")
@@ -428,48 +421,77 @@ class TqGateway(BaseGateway):
     def wait_update(self, timeout: int = 3) -> bool:
         """
         等待数据更新(兼容方法)
-        
+
         Args:
             timeout: 超时时间(秒)
-        
+
         Returns:
             bool: 是否有数据更新
         """
         try:
             if not self.connected or not self.api:
                 return False
-            
-            has_data = self.api.wait_update(timeout=timeout)
-            
+
+            has_data = self.api.wait_update(time.time()+timeout)
+
             if has_data:
-                # 检查变化并更新缓存
                 if self.api.is_changing(self._tq_account):
                     self._tq_account = self.api.get_account()
-                    self._convert_and_cache_data()
-                
+                    self._account = self._convert_account(self._tq_account)
+                    self._emit_account(self._account)
+
                 if self.api.is_changing(self._tq_positions):
                     self._tq_positions = self.api.get_position()
-                    self._convert_and_cache_data()
-                
+                    self._update_positions_cache()
+                    for positions_list in self._positions.values():
+                        for position in positions_list:
+                            self._emit_position(position)
+
                 if self.api.is_changing(self._tq_quotes):
                     self._tq_quotes = self.api.get_quote()
-                    self._convert_and_cache_data()
-                
+                    self._update_quotes_cache()
+                    for quote in self._quotes.values():
+                        self._emit_tick(quote)
+
                 if self.api.is_changing(self._tq_orders):
                     self._tq_orders = self.api.get_order()
-                    self._convert_and_cache_data()
-                
+                    self._update_orders_cache()
+                    for order in self._orders.values():
+                        self._emit_order(order)
+
                 if self.api.is_changing(self._tq_trades):
                     self._tq_trades = self.api.get_trade()
-                    self._convert_and_cache_data()
-            
+                    self._update_trades_cache()
+                    for trade in self._trades.values():
+                        self._emit_trade(trade)
+
             return has_data
         except Exception as e:
-            logger.error(f"等待更新失败: {e}")
+            logger.exception(f"等待更新失败: {e}")
             return False
     
     # ==================== 数据转换 ====================
-    
+
+    def _update_positions_cache(self):
+        for symbol, pos in self._tq_positions.items():
+            positions_list = self._convert_position(pos, symbol)
+            self._positions[symbol] = positions_list
+
+    def _update_orders_cache(self):
+        for order_id, order in self._tq_orders.items():
+            if order_id not in self._orders or self.api.is_changing(order):
+                self._orders[order_id] = self._convert_order(order)
+
+    def _update_trades_cache(self):
+        for trade_id, trade in self._tq_trades.items():
+            if trade_id not in self._trades or self.api.is_changing(trade):
+                self._trades[trade_id] = self._convert_trade(trade)
+
+    def _update_quotes_cache(self):
+        for symbol, quote in self._tq_quotes.items():
+            if symbol not in self._quotes or self.api.is_changing(quote):
+                self._quotes[symbol] = self._convert_tick(quote, symbol)
+
     def _convert_and_cache_data(self):
         """转换所有数据并缓存"""
         try:
@@ -625,27 +647,16 @@ class TqGateway(BaseGateway):
         """格式化合约代码"""
         if not symbol:
             return None
-        
-        if "." in symbol:
-            parts = symbol.split(".")
-            if len(parts) == 2:
-                # 判断哪种格式
-                if parts[0].upper() in self.exchange_map:
-                    # exchange.symbol 格式
-                    return symbol
-                elif parts[1].upper() in self.exchange_map:
-                    # symbol.exchange 格式,需要转换
-                    return f"{parts[1].upper()}.{parts[0]}"
-        else:
-            # 只有symbol,需要查询交易所
-            # 简化处理：默认返回原值
-            return symbol
-        
+        upper_symbol = symbol.upper()
+        for part in upper_symbol.rsplit("."):
+            if part in self._upper_symbols:
+                return self._upper_symbols[part]
+        logger.warning(f"未找到匹配的合约符号: {symbol}")      
         return None
     
     def _parse_exchange(self, exchange_code: str) -> Exchange:
         """解析交易所代码"""
-        return self.exchange_map.get(exchange_code.upper(), Exchange.NONE)
+        return exchange_map.get(exchange_code.upper(), Exchange.NONE)
     
     def _convert_status(self, status: str) -> Status:
         """转换订单状态"""

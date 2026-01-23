@@ -10,6 +10,7 @@ from src.api.dependencies import get_db_session, get_trading_engine
 from src.api.responses import success_response, error_response
 from src.api.schemas import TradeRes
 from src.models.po import TradePo
+from src.trading_engine import TradingEngine
 
 router = APIRouter(prefix="/api/trade", tags=["成交"])
 
@@ -20,8 +21,8 @@ async def get_trades(
     offset: int = Query(0, ge=0, description="偏移量"),
     date: Optional[str] = Query(None, description="查询日期（YYYY-MM-DD格式），默认为今日"),
     from_db: bool = Query(False, description="强制从数据库查询（覆盖日期判断）"),
-    session = Depends(get_db_session),
-    engine = Depends(get_trading_engine),
+    session  = Depends(get_db_session),
+    engine:TradingEngine = Depends(get_trading_engine),
 ):
     """
     获取成交记录

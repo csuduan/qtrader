@@ -3,7 +3,7 @@ Gateway适配器基类
 定义统一的接口契约，具体Gateway实现继承此类
 """
 from abc import ABC, abstractmethod
-from typing import Optional, Callable, Dict, Any
+from typing import Optional, Callable, Dict, Any,Union,List
 
 from src.models.object import (
     TickData, BarData, OrderData, TradeData,
@@ -116,35 +116,22 @@ class BaseGateway(ABC):
     # ==================== 行情订阅 ====================
 
     @abstractmethod
-    def subscribe(self, req: SubscribeRequest) -> bool:
+    def subscribe(self, symbol: Union[str, List[str]]) -> bool:
         """
         订阅行情
 
         Args:
-            req: 订阅请求
+            symbol: 订阅合约
 
         Returns:
             bool: 订阅是否成功
         """
         pass
 
-    @abstractmethod
-    def unsubscribe(self, req: SubscribeRequest) -> bool:
-        """
-        取消订阅行情
-
-        Args:
-            req: 订阅请求
-
-        Returns:
-            bool: 取消是否成功
-        """
-        pass
-
     # ==================== 交易接口 ====================
 
     @abstractmethod
-    def send_order(self, req: OrderRequest) -> Optional[str]:
+    def send_order(self, req: OrderRequest) -> Optional[OrderData]:
         """
         下单
 
@@ -152,7 +139,7 @@ class BaseGateway(ABC):
             req: 下单请求
 
         Returns:
-            Optional[str]: 订单ID，失败返回None
+            Optional[OrderData]: 报单信息，失败返回None
         """
         pass
 
@@ -182,32 +169,32 @@ class BaseGateway(ABC):
         pass
 
     @abstractmethod
-    def query_position(self) -> list[PositionData]:
+    def query_position(self) -> dict[str,PositionData]:
         """
         查询持仓信息
 
         Returns:
-            list[PositionData]: 持仓列表
+            dict[str,PositionData]: 持仓列表
         """
         pass
 
     @abstractmethod
-    def query_orders(self) -> list[OrderData]:
+    def query_orders(self) -> dict[str,OrderData]:
         """
         查询活动订单
 
         Returns:
-            list[OrderData]: 订单列表
+            dict[str,OrderData]: 订单列表
         """
         pass
 
     @abstractmethod
-    def query_trades(self) -> list[TradeData]:
+    def query_trades(self) -> dict[str,TradeData]:
         """
         查询今日成交
 
         Returns:
-            list[TradeData]: 成交列表
+            dict[str,TradeData]: 成交列表
         """
         pass
 

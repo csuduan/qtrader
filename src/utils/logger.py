@@ -78,6 +78,8 @@ def setup_logger(
         filter=lambda record: "trade" in record["extra"].get("tags", []),
     )
 
+    logger.opt(exception=True)
+
     logger.info(f"日志系统初始化完成，日志目录: {log_dir}")
 
 

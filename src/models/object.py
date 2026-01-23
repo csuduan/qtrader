@@ -292,6 +292,8 @@ class AccountData(BaseModel):
     pre_balance: Optional[float] = Field(None, description="昨结余额")
     hold_profit: Optional[float] = Field(None, description="持仓盈亏")
     close_profit: Optional[float] = Field(None, description="平仓盈亏")
+    float_profit: Optional[float] = Field(None, description="浮动盈亏")
+
 
     risk_ratio: Optional[float] = Field(None, description="风险度")
 
@@ -299,6 +301,9 @@ class AccountData(BaseModel):
 
     # 扩展字段
     extras: Dict[str, Any] = Field(default_factory=dict)
+
+    broker_name: Optional[str] = Field(None, description="经纪商名称")
+    currency: Optional[str] = Field(None, description="交易货币")
 
 
 class ContractData(BaseModel):
@@ -311,7 +316,7 @@ class ContractData(BaseModel):
     symbol: str = Field(..., description="合约代码")
     exchange: Exchange = Field(..., description="交易所")
     name: str = Field(..., description="合约名称")
-    product_type: ProductType = Field(..., description="产品类型")
+    product_type: ProductType = Field(ProductType.FUTURES, description="产品类型")
 
     # 可选字段
     multiple: Optional[int] = Field(None, description="合约乘数")
@@ -355,8 +360,6 @@ class OrderRequest(BaseModel):
 class CancelRequest(BaseModel):
     """撤单请求"""
     order_id: str = Field(..., description="订单ID")
-    gateway_order_id: Optional[str] = Field(None, description="网关订单ID")
-
 
 # ==================== 常量定义 ====================
 

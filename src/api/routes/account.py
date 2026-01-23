@@ -9,6 +9,7 @@ from src.api.dependencies import get_trading_engine
 from src.api.responses import success_response, error_response
 from src.api.schemas import AccountRes
 from src.utils.logger import get_logger
+from src.models.object import AccountData
 
 logger = get_logger(__name__)
 
@@ -44,22 +45,22 @@ async def get_account_info(engine = Depends(get_trading_engine)):
                 message="获取成功"
             )
 
-        account = engine.account
+        account:AccountData = engine.account
         user_id = engine.config.trading_account.user_id if engine.config.account_type == "real" else 'SIM'
 
 
         return success_response(
             data=AccountRes(
                 account_id=engine.account_id,
-                broker_name=account.get("broker_name", ""),
-                currency=account.get("currency", "CNY"),
-                balance=float(account.get("balance", 0)),
-                available=float(account.get("available", 0)),
-                margin=float(account.get("margin", 0)),
-                float_profit=float(account.get("float_profit", 0)),
-                position_profit=float(account.get("position_profit", 0)),
-                close_profit=float(account.get("close_profit", 0)),
-                risk_ratio=float(account.get("risk_ratio", 0)),
+                broker_name=account.broker_name or "",
+                currency=account.currency or "CNY",    
+                balance=float(account.balance or 0),
+                available=float(account.available or 0),
+                margin=float(account.margin or 0),
+                float_profit=float(account.float_profit or 0),
+                position_profit=float(account.hold_profit or 0),
+                close_profit=float(account.close_profit or 0),
+                risk_ratio=float(account.risk_ratio or 0),
                 updated_at=datetime.now(),
                 user_id=user_id,
             ),
