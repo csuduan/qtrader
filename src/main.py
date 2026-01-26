@@ -24,10 +24,10 @@ from src.utils.logger import get_logger, setup_logger
 logger = get_logger(__name__)
 
 # 全局变量
-config: AppConfig = None
-trading_engine: TradingEngine = None
-strategy_manager: StrategyManager = None
-task_scheduler: TaskScheduler = None
+config: AppConfig|None = None
+trading_engine: TradingEngine|None = None
+strategy_manager: StrategyManager|None = None
+task_scheduler: TaskScheduler|None = None
 running = False
 
 

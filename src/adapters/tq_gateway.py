@@ -60,7 +60,7 @@ class TqGateway(BaseGateway):
         
 
         # 历史订阅的合约符号列表
-        self.hist_subs: Set[str] = []
+        self.hist_subs: List[str] = []
         
     
         # 订单引用计数
@@ -127,9 +127,13 @@ class TqGateway(BaseGateway):
                     symbol=instrument_id,
                     exchange=exchange_map[item.exchange_id],
                     name=item.instrument_name,
-                    size=item.volume_multiple,
-                    price_tick=item.price_tick,
-                    max_volume=item.max_limit_order_volume,
+                    product_type=ProductType.FUTURES,
+                    multiple=item.volume_multiple,
+                    pricetick=item.price_tick,
+                    min_volume=1,
+                    option_strike=None,
+                    option_underlying=None,
+                    option_type=None,
                 )
                 self._contracts[contract.symbol] = contract     
                 self._upper_symbols[contract.symbol.rsplit(".")[1].upper()] = contract.symbol
@@ -188,28 +192,30 @@ class TqGateway(BaseGateway):
             if isinstance(symbol, str):
                 symbol = [symbol]
             
-            # 添加到订阅列表中     
+            # 添加到订阅列表中
             self.hist_subs.extend(symbol)
             if not self.connected:
-                return
+                return True
 
             # 格式化合约代码
             std_symbols = [self._format_symbol(sym) for sym in self.hist_subs]
-            unsubscribe_symbols = [symbol for symbol in std_symbols if symbol not in self._quotes]
-            if len(unsubscribe_symbols) ==0:
+            subscribe_symbols = [symbol for symbol in std_symbols if symbol not in self._quotes]
+            if len(subscribe_symbols) == 0:
                 return True
-            quotes: List[Quote] = self.api.get_quote_list(symbols=unsubscribe_symbols)
+            if self.api is None:
+                return True
+            quotes: List[Quote] = self.api.get_quote_list(symbols=subscribe_symbols)
             for quote in quotes:
-                self._quotes[quote.instrument_id] = quote       
-            logger.info(f"订阅行情: {unsubscribe_symbols}")
+                self._quotes[quote.instrument_id] = quote
+            logger.info(f"订阅行情: {subscribe_symbols}")
             
             return True
         except Exception as e:
             logger.exception(f"订阅行情失败: {e}")
             return False
     
-        
-    def send_order(self, req: OrderRequest) -> Optional[str]:
+
+    def send_order(self, req: OrderRequest) -> Optional[OrderData]:
         """下单"""
         try:
             if not self.connected:
@@ -223,7 +229,7 @@ class TqGateway(BaseGateway):
             
             # 获取行情信息(市价单使用对手价)
             price = req.price
-            if price is None or pirce==0:
+            if price is None or price == 0:
                 quote = self._quotes.get(formatted_symbol)
                 if not quote:
                     logger.error(f"未获取到行情信息: {formatted_symbol}")
@@ -236,6 +242,8 @@ class TqGateway(BaseGateway):
                     price = quote.bid_price1
             
             # 调用TqSdk下单
+            if self.api is None:
+                raise Exception("TqSdk未连接")
             order = self.api.insert_order(
                 symbol=formatted_symbol,
                 direction=req.direction.value,
@@ -243,14 +251,15 @@ class TqGateway(BaseGateway):
                 volume=req.volume,
                 limit_price=price
             )
-            
-            order_id = order.get("order_id")
+
+            order_id = order.get("order_id", "")
             logger.info(f"下单成功: {req.symbol} {req.direction.value} {req.offset.value} {req.volume}手 价格：{price}, order_id: {order_id}")
-            
+
             # 更新缓存
             self._orders[order_id] = order
-            self._emit_order(self._convert_order(order))       
-            return order_id
+            order_data = self._convert_order(order)
+            self._emit_order(order_data)
+            return order_data
         except Exception as e:
             logger.exception(f"下单失败: {e}")
             raise e
@@ -266,7 +275,8 @@ class TqGateway(BaseGateway):
             if not order:
                 logger.error(f"订单不存在: {req.order_id}")
                 return False
-            
+            if self.api is None:
+                return False
             self.api.cancel_order(order)
             logger.info(f"撤单成功: {req.order_id}")
             return True
@@ -279,9 +289,11 @@ class TqGateway(BaseGateway):
         try:
             if not self.connected or not self.api:
                 logger.error("TqSdk未连接")
-                return None
+                return {}
             
             if not self._contracts:
+                if self.api is None:
+                    return {}
                 quotes = self.api.query_quotes(ins_class=["FUTURE"], expired=False)
                 for symbol in quotes:
                     self._contracts[symbol] = ContractData(
@@ -289,6 +301,12 @@ class TqGateway(BaseGateway):
                         exchange=self._parse_exchange(symbol),
                         name=symbol,
                         product_type=ProductType.FUTURES,
+                        multiple=1,
+                        pricetick=0.01,
+                        min_volume=1,
+                        option_strike=None,
+                        option_underlying=None,
+                        option_type=None,
                     )
             
             return self._contracts
@@ -376,14 +394,18 @@ class TqGateway(BaseGateway):
             hold_profit=account.position_profit or 0,
             close_profit=account.close_profit or 0,
             risk_ratio=account.risk_ratio or 0,
-            update_time=datetime.now()
+            update_time=datetime.now(),
+            frozen=0,
+            float_profit=account.position_profit or 0,
+            broker_name="TqSdk",
+            currency="CNY",
         )
     
     def _convert_position(self, pos: Position) -> PositionData:
-        """转换持仓数据"""                        
+        """转换持仓数据"""
         return PositionData(
             symbol=pos.instrument_id,
-            exchange=pos.exchange_id,
+            exchange=self._parse_exchange(pos.exchange_id),
             pos=pos.pos_long-pos.pos_short,
             pos_long=int(pos.pos_long),
             pos_short=int(pos.pos_short),
@@ -418,7 +440,8 @@ class TqGateway(BaseGateway):
             status_msg=order.get("last_msg", ""),            
             gateway_order_id=order.get("exchange_order_id", ""),
             insert_time=datetime.fromtimestamp(order.get("insert_date_time", 0) / 1e9) if order.get("insert_date_time") else None,
-            update_time=datetime.now()
+            update_time=datetime.now(),
+            trading_day=self.trading_day,
         )
         if data.status== "FINISHED" and data.status_msg :
             data.status = "REJECTED"
@@ -439,7 +462,9 @@ class TqGateway(BaseGateway):
             offset=Offset(trade.get("offset", "OPEN")),
             price=float(trade.get("price", 0)),
             volume=int(trade.get("volume", 0)),
-            trade_time=datetime.fromtimestamp(trade.get("trade_date_time", 0) / 1e9) if trade.get("trade_date_time") else None
+            trade_time=datetime.fromtimestamp(trade.get("trade_date_time", 0) / 1e9) if trade.get("trade_date_time") else None,
+            trading_day=self.trading_day,
+            commission=0,
         )
     
     def _convert_tick(self, quote: Quote) -> TickData:
