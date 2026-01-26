@@ -311,7 +311,7 @@ def run_rsi_ls_intraday_multi(
         kS.loc[tmp, "entry_rank"] = kS.loc[tmp].groupby(["product", "date_int"]).cumcount() + 1
         kS.loc[~tmp | (kS["entry_rank"] > 1), "entry_sig"] = 0
         kS.drop(columns=["entry_rank"], inplace=True)
-    trades = []
+    trades: list[dict] = []
     keys = kS[["product", "date_int"]].drop_duplicates()
     for _, row in keys.iterrows():
         p = row["product"]
@@ -587,14 +587,14 @@ def combine_legs_equal_weight_active(legs_long: pd.DataFrame, leg_names: Optiona
     if leg_names is None:
         leg_names = sorted(dt["leg"].unique())
     if leg_start is None:
-        leg_start = {lg: -np.inf for lg in leg_names}
+        leg_start = {lg: int(-1e9) for lg in leg_names}
         im_legs = [lg for lg in leg_names if lg.startswith("IM_")]
         for lg in im_legs:
             leg_start[lg] = 20230101
     else:
         missing = [lg for lg in leg_names if lg not in leg_start]
         for m in missing:
-            leg_start[m] = -np.inf
+            leg_start[m] = int(-1e9)
         leg_start = {lg: leg_start[lg] for lg in leg_names}
     all_dates = np.sort(dt["date_int"].unique())
     grid = pd.MultiIndex.from_product([all_dates, leg_names], names=["date_int", "leg"]).to_frame(index=False)
@@ -723,7 +723,7 @@ def calc_yearly_with_all(comb: pd.DataFrame, ann: int = 252, rf: float = 0.0) ->
         )
     r_all = pd.to_numeric(dt["pnl"], errors="coerce").fillna(0.0).to_numpy()
     nav_all = pd.to_numeric(dt["nav"], errors="coerce").replace({np.inf: np.nan, -np.inf: np.nan}).to_numpy()
-    if (not np.isfinite(nav_all)).any():
+    if np.any(~np.isfinite(nav_all)):
         nav_all = 1.0 + np.cumsum(r_all)
     ann_ret_all = float(np.nanmean(r_all)) * ann
     ann_vol_all = float(np.nanstd(r_all)) * np.sqrt(ann)

@@ -15,6 +15,9 @@ python -m src.main
 black src/ --line-length 100 --target py38
 isort src/ --profile black
 
+# 代码静态检查
+mypy src/
+
 # 检查运行进程
 lsof -i :8000  # 后端API
 ```

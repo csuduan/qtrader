@@ -3,7 +3,7 @@ K线生成器
 从tick数据合成多周期bar数据（1m/5m/15m/1h/d），缓存历史数据
 """
 from datetime import datetime, timedelta
-from typing import Dict, List
+from typing import Dict, List, Optional, Any
 from collections import defaultdict
 
 from src.models.object import TickData, BarData, Interval, Exchange
@@ -17,9 +17,9 @@ class BarGenerator:
 
     def __init__(self):
         # 按合约和周期缓存bar数据
-        self.bars: Dict[str, Dict[str, BarData]] = defaultdict(lambda: defaultdict(lambda: None))
+        self.bars: Dict[str, Dict[str, Any]] = defaultdict(lambda: defaultdict(dict))
         # 按合约和周期缓存当前正在生成的bar
-        self._current_bars: Dict[str, Dict[str, dict]] = defaultdict(lambda: defaultdict(lambda: None))
+        self._current_bars: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(lambda: defaultdict(dict))
 
     def update_tick(self, tick: TickData):
         """
@@ -185,7 +185,11 @@ class BarGenerator:
         """获取1分钟bar缓存"""
         interval_key = Interval.MINUTE.value
         if symbol in self.bars and interval_key in self.bars[symbol]:
-            return list(self.bars[symbol][interval_key].values()) if hasattr(self.bars[symbol][interval_key], 'values') else []
+            bar_data = self.bars[symbol][interval_key]
+            if isinstance(bar_data, dict):
+                return [BarData(**v) for v in bar_data.values()]
+            elif isinstance(bar_data, BarData):
+                return [bar_data]
         return []
 
     def _get_bar_start_time(self, dt: datetime, interval: Interval) -> datetime:
@@ -236,11 +240,16 @@ class BarGenerator:
             return None
 
         bars = self.bars[key][interval_key]
+        bar_list: List[BarData] = []
         if isinstance(bars, dict):
-            bars = list(bars.values())
+            bar_list = [BarData(**v) for v in bars.values()] if isinstance(next(iter(bars.values()), {}), dict) else [BarData(**bars)]
+        elif isinstance(bars, BarData):
+            bar_list = [bars]
+        elif isinstance(bars, list):
+            bar_list = bars
 
-        if len(bars) >= n:
-            return sorted(bars, key=lambda b: b.datetime)[-n]
+        if len(bar_list) >= n:
+            return sorted(bar_list, key=lambda b: b.datetime)[-n]
         return None
 
     def get_bars(self, symbol: str, interval: Interval, count: int = 100) -> List[BarData]:
@@ -262,10 +271,15 @@ class BarGenerator:
             return []
 
         bars = self.bars[key][interval_key]
+        bar_list: List[BarData] = []
         if isinstance(bars, dict):
-            bars = list(bars.values())
+            bar_list = [BarData(**v) for v in bars.values()] if isinstance(next(iter(bars.values()), {}), dict) else [BarData(**bars)]
+        elif isinstance(bars, BarData):
+            bar_list = [bars]
+        elif isinstance(bars, list):
+            bar_list = bars
 
-        return sorted(bars, key=lambda b: b.datetime)[-count:]
+        return sorted(bar_list, key=lambda b: b.datetime)[-count:]
 
 
 # 全局K线生成器实例

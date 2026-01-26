@@ -34,7 +34,8 @@ class TradingEngine:
         self.config = config
         self.account_id = config.account_id
 
-        self.gateway = None
+        from src.adapters.base_gateway import BaseGateway
+        self.gateway: BaseGateway | None = None
         self.paused = config.trading.paused
 
         # 缓存的统一格式数据（从Gateway转换）
@@ -57,26 +58,38 @@ class TradingEngine:
 
     @property
     def connected(self) -> bool:
-        return self.gateway.connected    
-    
+        if self.gateway is None:
+            return False
+        return self.gateway.connected
+
     @property
     def trades(self):
+        if self.gateway is None:
+            return {}
         return self.gateway.get_trades()
-    
+
     @property
     def account(self):
+        if self.gateway is None:
+            return None
         return self.gateway.get_account()
-    
+
     @property
     def orders(self):
+        if self.gateway is None:
+            return {}
         return self.gateway.get_orders()
-    
+
     @property
     def positions(self):
+        if self.gateway is None:
+            return {}
         return self.gateway.get_positions()
-    
+
     @property
     def quotes(self):
+        if self.gateway is None:
+            return {}
         return self.gateway.get_quotes()
     
     def reload_risk_control_config(self):
@@ -147,6 +160,8 @@ class TradingEngine:
         """
         try:
             logger.info("连接到交易系统...")
+            if self.gateway is None:
+                return False
             return self.gateway.connect()
 
         except Exception as e:
@@ -162,6 +177,8 @@ class TradingEngine:
         """
         try:
             logger.info("断开与交易系统的连接...")
+            if self.gateway is None:
+                return False
             return self.gateway.disconnect()
 
         except Exception as e:
@@ -190,7 +207,7 @@ class TradingEngine:
         Returns:
             Optional[str]: 委托单ID，失败返回None
         """
-        if not self.gateway.connected:
+        if self.gateway is None or not self.gateway.connected:
             logger.error("交易引擎未连接，无法下单")
             raise Exception("交易引擎未连接，无法下单")
 
@@ -204,6 +221,8 @@ class TradingEngine:
             raise Exception(f"风控检查失败: 手数 {volume} 超过限制")
 
         try:
+            if self.gateway is None:
+                raise Exception("Gateway未初始化")
 
             req = OrderRequest(
                 symbol=symbol,
@@ -213,16 +232,16 @@ class TradingEngine:
                 price=price if price > 0 else None
             )
 
-            order_id = self.gateway.send_order(req)
+            order_data = self.gateway.send_order(req)
 
-            if order_id:
+            if order_data:
                 logger.bind(tags=["trade"]).info(
-                    f"下单: {symbol} {direction} {offset} {volume}手 @{price if price > 0 else 'MARKET'}, 委托单ID: {order_id}"
+                    f"下单: {symbol} {direction} {offset} {volume}手 @{price if price > 0 else 'MARKET'}, 委托单ID: {order_data.order_id}"
                 )
                 # 更新风控计数
                 self.risk_control.on_order_inserted()
 
-            return order_id
+            return order_data.order_id if order_data else None
 
         except Exception as e:
             raise Exception(f"下单失败: {e}")
@@ -275,7 +294,7 @@ class TradingEngine:
             状态字典
         """
         return {
-            "connected": self.gateway.connected,
+            "connected": self.gateway.connected if self.gateway else False,
             "paused": self.paused,
             "account_id": getattr(self.account, "user_id", "") if self.account else "",
             "daily_orders": self.risk_control.daily_order_count,
@@ -293,7 +312,7 @@ class TradingEngine:
             bool: 订阅是否成功
         """
         if self.gateway:
-            return self.gateway.subscribe(symbol)
+            return self.gateway.subscribe(symbol) if symbol else False
         return False
 
 

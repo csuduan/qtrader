@@ -35,12 +35,11 @@ class RiskControl:
     def _reset_if_new_day(self) -> None:
         """如果是新的一天，重置计数器"""
         now = datetime.now()
-        today = now.date()
 
-        if self._last_reset_date is None or self._last_reset_date != today:
+        if self._last_reset_date is None or self._last_reset_date.date() != now.date():
             self.daily_order_count = 0
             self.daily_cancel_count = 0
-            self._last_reset_date = today
+            self._last_reset_date = now
             logger.info("新的一天，风控计数器已重置")
 
     def check_order(self, volume: int) -> bool:

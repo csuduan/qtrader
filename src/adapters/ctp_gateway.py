@@ -49,7 +49,7 @@ class CtpGateway(BaseGateway):
 
     # ==================== 行情订阅 ====================
 
-    def subscribe(self, req: SubscribeRequest) -> bool:
+    def subscribe(self, symbols: str | list[str]) -> bool:
         """订阅行情（待实现）"""
         logger.warning("订阅行情功能待实现")
         return False
@@ -60,7 +60,7 @@ class CtpGateway(BaseGateway):
 
     # ==================== 交易接口 ====================
 
-    def send_order(self, req: OrderRequest) -> Optional[str]:
+    def send_order(self, req: OrderRequest) -> Optional[OrderData]:
         """下单（待实现）"""
         logger.warning("下单功能待实现，需要CTP SDK")
         return None

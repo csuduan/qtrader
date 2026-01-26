@@ -126,7 +126,7 @@ class AppConfig(BaseModel):
         return v
 
 
-app_config:AppConfig = None
+app_config: AppConfig | None = None
 def load_config(config_path: Optional[str] = None) -> AppConfig:
     """
     加载配置文件
@@ -152,9 +152,9 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
                 config_path = path
                 break
 
-    if not os.path.exists(config_path):
+    if config_path is None or not os.path.exists(config_path):
         raise FileNotFoundError(
-            f"配置文件不存在。请创建配置文件或将 config.example.yaml 复制为 {config_path}"
+            f"配置文件不存在。请创建配置文件或将 config.example.yaml 复制为 {config_path or 'config/config.yaml'}"
         )
 
     with open(config_path, "r", encoding="utf-8") as f:
