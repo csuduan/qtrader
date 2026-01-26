@@ -95,15 +95,34 @@ class JobManager:
                 writer.writeheader()
 
                 for symbol, pos in positions.items():
-                    pos_long = pos.get("pos_long", 0)
-                    pos_short = pos.get("pos_short", 0)
-                    if len(symbol) > 12:
-                        #过滤掉合约名特别长的持仓(一般未组合持仓)
-                        continue
-                    #只需要合约代码
-                    symbol= symbol.split(".")[1]         
-                    if pos_long > 0:
-                        # 多头
+                    pos_long = pos.pos_long
+                    pos_short = pos.pos_short
+
+                    # 如果多空都有值，拆分成两条记录
+                    if pos_long > 0 and pos_short > 0:
+                        # 多头记录
+                        row_long = {
+                            "账户ID": self.config.account_id,
+                            "交易日期": today,
+                            "合约代码": symbol,
+                            "方向": "多",
+                            "今仓": pos_long,
+                            "昨仓": 0,
+                        }
+                        writer.writerow(row_long)
+
+                        # 空头记录
+                        row_short = {
+                            "账户ID": self.config.account_id,
+                            "交易日期": today,
+                            "合约代码": symbol,
+                            "方向": "空",
+                            "今仓": pos_short,
+                            "昨仓": 0,
+                        }
+                        writer.writerow(row_short)
+                    elif pos_long > 0:
+                        # 只有多头
                         row = {
                             "账户": self.config.account_id,
                             "交易日期": today,
@@ -181,3 +200,14 @@ class JobManager:
             session.rollback()
         finally:
             session.close()
+
+    def reset_strategies(self) -> None:
+        """重置所有策略"""
+        from src.context import get_strategy_manager
+        strategy_manager = get_strategy_manager()
+        logger.info("开始重置所有策略")
+        try:
+            strategy_manager.reset_all_for_new_day()
+            logger.info("所有策略已重置")
+        except Exception as e:
+            logger.error(f"重置策略失败: {e}")

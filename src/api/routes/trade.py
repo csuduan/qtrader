@@ -59,7 +59,7 @@ async def get_trades(
 
     if query_from_db:
         # 从数据库查询
-        account_id = engine.account.get("account_id", "") if engine.account else ""
+        account_id = engine.account.account_id if engine.account else ""
         query = session.query(TradePo).filter_by(account_id=account_id)
 
         # 如果指定了日期，添加日期过滤
@@ -94,15 +94,15 @@ async def get_trades(
             data=[
                 TradeRes(
                     id=0,
-                    account_id=engine.account.get("account_id", "") if engine.account else "",
-                    trade_id=trade.get("trade_id", ""),
-                    order_id=trade.get("order_id", ""),
-                    symbol=trade.get("instrument_id", ""),
-                    direction=trade.get("direction", ""),
-                    offset=trade.get("offset", ""),
-                    price=float(trade.get("price", 0)),
-                    volume=trade.get("volume", 0),
-                    trade_date_time=datetime.fromtimestamp(trade.trade_date_time/1_000_000_000),
+                    account_id=engine.account.account_id,
+                    trade_id=trade.trade_id,
+                    order_id=trade.order_id,
+                    symbol=trade.symbol,
+                    direction=trade.direction,
+                    offset=trade.offset,
+                    price=float(trade.price),
+                    volume=trade.volume,
+                    trade_date_time=trade.trade_time,
                     created_at=datetime.now(),
                 )
                 for id,trade in paginated_trades.items()
@@ -116,7 +116,7 @@ async def get_trade_by_id(
     trade_id: str,
     from_db: bool = Query(False, description="是否从数据库查询（默认从TradingEngine获取当日数据）"),
     session = Depends(get_db_session),
-    engine = Depends(get_trading_engine),
+    engine:TradingEngine = Depends(get_trading_engine),
 ):
     """
     获取指定成交详情
@@ -125,7 +125,7 @@ async def get_trade_by_id(
     - **from_db**: 是否从数据库查询（默认从TradingEngine获取当日数据）
     """
     if from_db:
-        account_id = engine.account.get("account_id", "") if engine.account else ""
+        account_id = engine.account.account_id if engine.account else ""
         trade = session.query(TradePo).filter_by(
             account_id=account_id, trade_id=trade_id
         ).first()
@@ -141,7 +141,7 @@ async def get_trade_by_id(
         if not engine or not engine.trades:
             return error_response(code=404, message="成交记录不存在")
 
-        trade = next((trade for trade in engine.trades if trade.get("trade_id") == trade_id), None)
+        trade = next((trade for trade in engine.trades.values() if trade.trade_id == trade_id), None)
 
         if not trade:
             return error_response(code=404, message="成交记录不存在")
@@ -149,15 +149,15 @@ async def get_trade_by_id(
         return success_response(
             data=TradeRes(
                 id=0,
-                account_id=engine.account.get("account_id", "") if engine.account else "",
-                trade_id=trade.get("trade_id", ""),
-                order_id=trade.get("order_id", ""),
-                symbol=trade.get("symbol", ""),
-                direction=trade.get("direction", ""),
-                offset=trade.get("offset", ""),
-                price=float(trade.get("price", 0)),
-                volume=trade.get("volume", 0),
-                trade_date_time=trade.get("trade_date_time", 0),
+                account_id=engine.account.account_id,
+                trade_id=trade.trade_id,
+                order_id=trade.order_id,
+                symbol=trade.symbol,
+                direction=trade.direction,
+                offset=trade.offset,
+                price=float(trade.price),
+                volume=trade.volume,
+                trade_date_time=trade.trade_time,
                 created_at=datetime.now(),
             ),
             message="获取成功"
@@ -175,7 +175,7 @@ async def get_trades_by_order(
 
     - **order_id**: 委托单ID
     """
-    account_id = engine.account.get("account_id", "") if engine.account else ""
+    account_id = engine.account.account_id if engine.account else ""
 
     trades = session.query(TradePo).filter_by(
         account_id=account_id, order_id=order_id

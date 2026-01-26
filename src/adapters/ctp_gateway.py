@@ -11,7 +11,7 @@ from src.models.object import (
     TickData, BarData, OrderData, TradeData,
     PositionData, AccountData, ContractData,
     SubscribeRequest, OrderRequest, CancelRequest,
-    Direction, Offset, Status, Exchange
+    Direction, Offset, OrderStatus, Exchange
 )
 from src.utils.logger import get_logger
 
@@ -102,13 +102,13 @@ class CtpGateway(BaseGateway):
         """转换开平标志"""
         return offset
 
-    def _convert_status(self, status: str) -> Status:
+    def _convert_status(self, status: str) -> OrderStatus:
         """转换订单状态"""
         status_map = {
-            "0": Status.NOTTRADED,
-            "1": Status.PARTTRADED,
-            "2": Status.ALLTRADED,
-            "3": Status.CANCELLED,
-            "4": Status.REJECTED,
+            "0": OrderStatus.NOTTRADED,
+            "1": OrderStatus.PARTTRADED,
+            "2": OrderStatus.ALLTRADED,
+            "3": OrderStatus.CANCELLED,
+            "4": OrderStatus.REJECTED,
         }
-        return status_map.get(status, Status.SUBMITTING)
+        return status_map.get(status, OrderStatus.SUBMITTING)

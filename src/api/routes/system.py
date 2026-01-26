@@ -100,7 +100,7 @@ async def connect_system(
 
     建立与TqSdk的连接
     """
-    if engine.connected:
+    if engine.gateway.connected:
         return success_response(data={"connected": True}, message="已连接")
 
     success = engine.connect()
@@ -148,53 +148,6 @@ async def resume_trading(
     """
     engine.resume()
     return success_response(data={"paused": False}, message="交易已恢复")
-
-
-@router.get("/tasks")
-async def get_scheduled_tasks(
-    session = Depends(get_db_session),
-):
-    """
-    获取定时任务列表
-
-    返回当前运行的定时任务信息
-    """
-    try:
-        jobs = session.query(JobPo).order_by(JobPo.job_group, JobPo.job_name).all()
-
-        tasks = []
-        for job in jobs:
-            last_trigger_time = None
-            if job.last_trigger_time:
-                try:
-                    last_trigger_time = job.last_trigger_time.isoformat()
-                except:
-                    last_trigger_time = str(job.last_trigger_time)
-
-            next_trigger_time = None
-            if job.next_trigger_time:
-                try:
-                    next_trigger_time = job.next_trigger_time.isoformat()
-                except:
-                    next_trigger_time = str(job.next_trigger_time)
-
-            task_info = {
-                "job_id": job.job_id,
-                "job_name": job.job_name,
-                "job_group": job.job_group,
-                "job_description": job.job_description,
-                "cron_expression": job.cron_expression,
-                "last_trigger_time": last_trigger_time,
-                "next_trigger_time": next_trigger_time,
-                "enabled": job.enabled,
-                "created_at": job.created_at.isoformat() if job.created_at else None,
-                "updated_at": job.updated_at.isoformat() if job.updated_at else None,
-            }
-            tasks.append(task_info)
-
-        return success_response(data={"tasks": tasks, "count": len(tasks)}, message="获取成功")
-    except Exception as e:
-        return success_response(data={"tasks": [], "count": 0}, message=f"获取任务失败: {str(e)}")
 
 
 @router.post("/log-monitoring/start")

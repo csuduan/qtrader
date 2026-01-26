@@ -1,6 +1,6 @@
 """
 主程序入口
-启动交易引擎、订单扫描器和API服务
+启动交易引擎、策略管理器和API服务
 """
 import asyncio
 import signal
@@ -12,10 +12,11 @@ import uvicorn
 
 from src.api.app import create_app, websocket_manager
 from src.config_loader import AppConfig, ensure_directories, load_config
-from src.context import set_config, set_task_scheduler, set_trading_engine, set_switch_pos_manager
+from src.context import set_config, set_task_scheduler, set_trading_engine, set_switch_pos_manager,set_strategy_manager
 from src.database import init_database
 from src.persistence import init_persistence
 from src.scheduler import TaskScheduler
+from src.strategy.strategy_manager import StrategyManager
 from src.trading_engine import TradingEngine
 from src.switch_mgr import SwitchPosManager
 from src.utils.logger import get_logger, setup_logger
@@ -25,23 +26,9 @@ logger = get_logger(__name__)
 # 全局变量
 config: AppConfig = None
 trading_engine: TradingEngine = None
+strategy_manager: StrategyManager = None
 task_scheduler: TaskScheduler = None
 running = False
-
-
-def load_application_config() -> AppConfig:
-    """加载应用配置"""
-    try:
-        cfg = load_config()
-        ensure_directories(cfg)
-        return cfg
-    except FileNotFoundError as e:
-        logger.error(f"配置文件不存在: {e}")
-        logger.info("请创建 config/config.yaml 文件，可参考 config/config.example.yaml")
-        sys.exit(1)
-    except Exception as e:
-        logger.error(f"加载配置文件失败: {e}")
-        sys.exit(1)
 
 
 
@@ -50,6 +37,10 @@ def signal_handler(signum, frame):
     global running
     logger.info(f"收到信号 {signum}，准备退出...")
     running = False
+
+    # 停止所有策略
+    if strategy_manager:
+        strategy_manager.stop_all()
 
     # 断开连接
     if trading_engine:
@@ -64,10 +55,10 @@ def signal_handler(signum, frame):
 
 def main():
     """主函数"""
-    global config, trading_engine, task_scheduler, running
+    global config, trading_engine, strategy_manager, task_scheduler, running
 
     # 加载配置
-    config = load_application_config()
+    config = load_config()
     set_config(config)
 
     # 设置日志
@@ -100,12 +91,17 @@ def main():
     trading_engine = TradingEngine(config)
     set_trading_engine(trading_engine)
     trading_engine.connect()
-        
+
+    # 初始化策略管理器（在连接后初始化）
+    logger.info("初始化策略管理器...")
+    strategy_manager = StrategyManager()
+    strategy_manager.init(config.paths.strategies, trading_engine)
+    set_strategy_manager(strategy_manager)
+
 
     # 设置信号处理
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
-
 
     # 创建换仓管理器
     logger.info("创建换仓管理器...")
@@ -121,7 +117,6 @@ def main():
     task_scheduler = TaskScheduler(config, trading_engine)
     set_task_scheduler(task_scheduler)
     task_scheduler.start()
-
 
     # 启动FastAPI应用
     logger.info("创建FastAPI应用...")
@@ -141,6 +136,9 @@ def main():
         logger.info("收到键盘中断信号")
     finally:
         running = False
+        # 停止所有策略
+        if strategy_manager:
+            strategy_manager.stop_all()
         if trading_engine:
             trading_engine.disconnect()
         if task_scheduler:

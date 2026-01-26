@@ -5,6 +5,7 @@ from fastapi import Depends, HTTPException, status
 
 from src.database import get_session
 from src.trading_engine import TradingEngine
+from src.strategy.strategy_manager import StrategyManager
 
 
 def get_trading_engine() -> TradingEngine:
@@ -18,6 +19,18 @@ def get_trading_engine() -> TradingEngine:
             detail="交易引擎未初始化"
         )
     return engine
+
+def get_strategy_manager() -> StrategyManager:
+    """获取策略管理器实例（依赖注入）"""
+    from src.context import get_strategy_manager as get_global_manager
+
+    manager = get_global_manager()
+    if manager is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="策略管理器未初始化"
+        )
+    return manager
 
 
 def require_connected(engine: TradingEngine = Depends(get_trading_engine)) -> TradingEngine:

@@ -15,6 +15,7 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+
 class TianqinConfig(BaseModel):
     """天勤账户配置"""
     username: str
@@ -34,6 +35,8 @@ class PathsConfig(BaseModel):
     logs: str = "./data/logs"
     database: str = "./storage/trading.db"
     export: str = "./data/export"
+    strategies: str = "./config/strategies.yaml"
+    params: str = "./config/params"
 
 
 class RiskControlConfig(BaseModel):
@@ -123,6 +126,7 @@ class AppConfig(BaseModel):
         return v
 
 
+app_config:AppConfig = None
 def load_config(config_path: Optional[str] = None) -> AppConfig:
     """
     加载配置文件
@@ -156,7 +160,16 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
     with open(config_path, "r", encoding="utf-8") as f:
         config_data = yaml.safe_load(f)
 
-    return AppConfig(**config_data)
+    app_config = AppConfig(**config_data)
+    ensure_directories(app_config)
+    return app_config
+
+def get_config() -> AppConfig:
+    """获取已加载的配置"""
+    global app_config
+    if app_config is None:
+        app_config = load_config()
+    return app_config
 
 
 def ensure_directories(config: AppConfig) -> None:
@@ -167,6 +180,7 @@ def ensure_directories(config: AppConfig) -> None:
         os.path.dirname(config.paths.database) if os.path.dirname(config.paths.database) else "./storage",
         config.paths.switchPos_files,
         config.paths.export,
+        config.paths.params
     ]
 
     for directory in directories:

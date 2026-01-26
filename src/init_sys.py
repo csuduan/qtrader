@@ -52,9 +52,6 @@ def init_system(config_path: Optional[str] = None, db_path: Optional[str] = None
         logger.info("正在初始化系统参数...")
         _init_system_params(config, db)
 
-        logger.info("正在初始化定时任务...")
-        _init_jobs(config, db)
-
         logger.info("=" * 60)
         logger.info("系统初始化完成！")
         logger.info("=" * 60)
@@ -134,36 +131,6 @@ def _init_system_params(config, db: Database) -> None:
         session.commit()
 
         logger.info(f"已初始化 {len(params)} 个系统参数")
-
-
-def _init_jobs(config, db: Database) -> None:
-    """
-    初始化定时任务
-
-    Args:
-        config: 配置对象
-        db: 数据库实例
-    """
-    with db.get_session() as session:
-        jobs = []
-
-        for job_config in config.scheduler.jobs:
-            job = JobPo(
-                job_id=job_config.job_id,
-                job_name=job_config.job_name,
-                job_group=job_config.job_group,
-                job_description=job_config.job_description,
-                cron_expression=job_config.cron_expression,
-                job_method=job_config.job_method,
-                enabled=job_config.enabled,
-            )
-            jobs.append(job)
-
-        session.add_all(jobs)
-        session.commit()
-
-        logger.info(f"已初始化 {len(jobs)} 个定时任务")
-
 
 if __name__ == "__main__":
     import sys

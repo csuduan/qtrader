@@ -159,11 +159,11 @@ export interface WSMessage<T = any> {
 /** 行情数据 */
 export interface Quote {
   symbol: string
-  last_price: number
-  bid_price1: number
-  ask_price1: number
+  last_price: number | null
+  bid_price1: number | null
+  ask_price1: number | null
   volume: number
-  open_interest: number
+  datetime: string
 }
 
 /** 风控状态 */
@@ -238,10 +238,10 @@ export interface TickData {
   volume?: number
   turnover?: number
   open_interest?: number
-  bid_price_1?: number
-  bid_volume_1?: number
-  ask_price_1?: number
-  ask_volume_1?: number
+  bid_price1?: number
+  bid_volume1?: number
+  ask_price1?: number
+  ask_volume1?: number
   open_price?: number
   high_price?: number
   low_price?: number
@@ -371,11 +371,14 @@ export interface StrategyConfig {
 }
 
 /** 策略状态 */
-export interface StrategyStatus {
+export interface StrategyRes {
   strategy_id: string
   active: boolean
   config: StrategyConfig
 }
+
+/** 兼容旧名称 */
+export type StrategyStatus = StrategyRes
 
 /** 策略事件类型 */
 export type StrategyEventType = 'strategy_status' | 'strategy_signal'

@@ -15,6 +15,7 @@ from src.risk_control import RiskControl
 from src.utils.logger import get_logger
 from src.utils.event import event_engine, EventTypes
 from src.models.object import OrderRequest, Direction, Offset, CancelRequest
+from src.models.object import TradeData
 
 
 
@@ -52,6 +53,11 @@ class TradingEngine:
         self._init_gateway()
         # 加载风控数据
         self.reload_risk_control_config()
+
+
+    @property
+    def connected(self) -> bool:
+        return self.gateway.connected    
     
     @property
     def trades(self):
@@ -108,12 +114,12 @@ class TradingEngine:
         
         # 注册回调（Gateway → EventEngine）
         self.gateway.register_callbacks(
-            on_tick=self._on_tick_from_gateway,
-            on_bar=self._on_bar_from_gateway,
-            on_order=self._on_order_from_gateway,
-            on_trade=self._on_trade_from_gateway,
-            on_position=self._on_position_from_gateway,
-            on_account=self._on_account_from_gateway,
+            on_tick=self._on_tick,
+            on_bar=self._on_bar,
+            on_order=self._on_order,
+            on_trade=self._on_trade,
+            on_position=self._on_position,
+            on_account=self._on_account,
         )
     
     def _load_risk_control_config(self):
@@ -304,86 +310,12 @@ class TradingEngine:
         except Exception as e:
             logger.error(f"推送事件失败 [{event_type}]: {e}")
 
-
-    # ==================== 策略系统支持 ====================
-    def init_strategy_system(self, config_path: str = "config/strategies.yaml"):
-        """
-        初始化策略系统（新增功能）
-
-        Args:
-            config_path: 策略配置文件路径
-        """
-        from src.strategy.strategy_manager import StrategyManager
-
-        self.strategy_manager = StrategyManager()
-        if self.strategy_manager.load_config(config_path):
-            logger.info("策略系统初始化完成")
-            return True
-        return False
-
-    def register_strategy_callbacks(self):
-        """注册策略系统到Gateway（新增）"""
-        if not hasattr(self, 'strategy_manager'):
-            return
-
-        if not hasattr(self, 'gateway_adapter'):
-            logger.warning("Gateway适配器未初始化，无法注册策略回调")
-            return
-
-        # 注册策略回调
-        self.gateway_adapter.register_strategy_callbacks(
-            on_tick=lambda tick: self._dispatch_to_strategies('on_tick', tick),
-            on_bar=lambda bar: self._dispatch_to_strategies('on_bar', bar)
-        )
-
-    def _dispatch_to_strategies(self, method: str, data):
-        """分发数据到所有策略（新增）"""
-        for name, strategy in self.strategy_manager.strategies.items():
-            if strategy.active:
-                try:
-                    getattr(strategy, method)(data)
-                except Exception as e:
-                    logger.error(f"策略 {name} {method} 失败: {e}", exc_info=True)
-
-    def start_all_strategies(self):
-        """启动所有已启用的策略（新增）"""
-        if hasattr(self, 'strategy_manager'):
-            self.strategy_manager.start_all()
-
-    def stop_all_strategies(self):
-        """停止所有策略（新增）"""
-        if hasattr(self, 'strategy_manager'):
-            self.strategy_manager.stop_all()
-
-    def get_strategy_status(self) -> list:
-        """获取所有策略状态（新增）"""
-        if hasattr(self, 'strategy_manager'):
-            return self.strategy_manager.get_status()
-        return []
-
-    # ==================== Gateway回调方法 ====================
     
-    def _on_tick_from_gateway(self, tick):
+    def _on_tick(self, tick):
         """Gateway tick回调 → EventEngine"""
-        # 转换为字典格式（保持兼容性）
-        tick_dict = {
-            "symbol": f"{tick.symbol}.{tick.exchange.value}",
-            "last_price": tick.last_price,
-            "volume": tick.volume or 0,
-            "datetime": tick.datetime.isoformat(),
-            "bid_price1": tick.bid_price_1,
-            "ask_price1": tick.ask_price_1,
-            "bid_volume1": tick.bid_volume_1,
-            "ask_volume1": tick.ask_volume_1,
-            "open_price": tick.open_price,
-            "high_price": tick.high_price,
-            "low_price": tick.low_price,
-            "limit_up": tick.limit_up,
-            "limit_down": tick.limit_down,
-        }
-        self.event_engine.put(EventTypes.TICK_UPDATE, tick_dict)
+        self.event_engine.put(EventTypes.TICK_UPDATE, tick)
     
-    def _on_bar_from_gateway(self, bar):
+    def _on_bar(self, bar):
         """Gateway bar回调 → EventEngine"""
         bar_dict = {
             "symbol": f"{bar.symbol}.{bar.exchange.value}",
@@ -397,62 +329,18 @@ class TradingEngine:
         }
         self.event_engine.put(EventTypes.KLINE_UPDATE, bar_dict)
     
-    def _on_order_from_gateway(self, order):
+    def _on_order(self, order):
         """Gateway order回调 → EventEngine"""
-        order_dict = {
-            "order_id": order.order_id,
-            "symbol": f"{order.symbol}.{order.exchange.value}",
-            "direction": order.direction.value,
-            "offset": order.offset.value,
-            "volume_orign": order.volume,
-            "volume_left": order.volume_left,
-            "limit_price": order.price,
-            "price_type": order.price_type.value,
-            "status": order.status.value,
-            "status_msg": order.status_msg,
-            "gateway_order_id": order.gateway_order_id,
-            "insert_date_time": int(order.insert_time.timestamp() * 1e9) if order.insert_time else 0,
-        }
-        self.event_engine.put(EventTypes.ORDER_UPDATE, order_dict)
+        self.event_engine.put(EventTypes.ORDER_UPDATE, order)
     
-    def _on_trade_from_gateway(self, trade):
+    def _on_trade(self, trade):
         """Gateway trade回调 → EventEngine"""
-        trade_dict = {
-            "trade_id": trade.trade_id,
-            "order_id": trade.order_id,
-            "symbol": f"{trade.symbol}.{trade.exchange.value}",
-            "direction": trade.direction.value,
-            "offset": trade.offset.value,
-            "price": trade.price,
-            "volume": trade.volume,
-            "trade_date_time": int(trade.trade_time.timestamp() * 1e9) if trade.trade_time else 0,
-        }
-        self.event_engine.put(EventTypes.TRADE_UPDATE, trade_dict)
+        self.event_engine.put(EventTypes.TRADE_UPDATE, trade)
     
-    def _on_position_from_gateway(self, position):
+    def _on_position(self, position):
         """Gateway position回调 → EventEngine"""
-        pos_dict = {
-            "symbol": f"{position.symbol}.{position.exchange.value}",
-            "pos_long": position.volume if position.direction.value == "LONG" else 0,
-            "pos_short": position.volume if position.direction.value == "SHORT" else 0,
-            "open_price_long": position.avg_price if position.direction.value == "LONG" else 0,
-            "open_price_short": position.avg_price if position.direction.value == "SHORT" else 0,
-            "float_profit": position.hold_profit or 0,
-            "margin": position.margin or 0,
-        }
-        self.event_engine.put(EventTypes.POSITION_UPDATE, pos_dict)
+        self.event_engine.put(EventTypes.POSITION_UPDATE, position)
     
-    def _on_account_from_gateway(self, account):
+    def _on_account(self, account):
         """Gateway account回调 → EventEngine"""
-        acc_dict = {
-            "account_id": account.account_id,
-            "balance": account.balance,
-            "available": account.available,
-            "frozen": account.frozen or 0,
-            "margin": account.margin or 0,
-            "float_profit": account.hold_profit or 0,
-            "position_profit": account.hold_profit or 0,
-            "close_profit": account.close_profit or 0,
-            "risk_ratio": account.risk_ratio or 0,
-        }
-        self.event_engine.put(EventTypes.ACCOUNT_UPDATE, acc_dict)
+        self.event_engine.put(EventTypes.ACCOUNT_UPDATE, account)

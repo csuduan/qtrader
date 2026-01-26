@@ -207,15 +207,7 @@ class SwitchPosManager:
             logger.info(f"CSV导入完成，成功: {imported_count}, 失败: {failed_count}")
 
             # 对导入的合约进行订阅
-            subscribed_symbols = set()
-            for symbol in [inst.symbol for inst in session.query(RotationInstructionPo).filter_by(
-                trading_date=trading_date,
-                is_deleted=False
-            ).all()]:
-                if symbol not in subscribed_symbols and not self.trading_engine.is_subscribed(symbol):
-                    if self.trading_engine.subscribe_symbol(symbol):
-                        subscribed_symbols.add(symbol)
-                        logger.info(f"导入时订阅合约: {symbol}")
+            self.subscribe_today_symbols()
 
             data={
                     "imported": imported_count,
@@ -245,13 +237,9 @@ class SwitchPosManager:
                 logger.info("今日无换仓记录，无需订阅合约")
                 return
 
-            subscribed_count = 0
-            for instruction in instructions:
-                if not self.trading_engine.is_subscribed(instruction.symbol):
-                    if self.trading_engine.subscribe_symbol(instruction.symbol):
-                        subscribed_count += 1
-
-            logger.info(f"系统启动时已订阅 {subscribed_count} 个换仓合约")
+            symbols = [instruction.symbol for instruction in instructions]
+            self.trading_engine.subscribe_symbol(symbols)
+            logger.info(f"换仓管理器订阅换仓合约完成")
 
         except Exception as e:
             logger.error(f"订阅今日换仓合约时出错: {e}")
@@ -339,17 +327,17 @@ class SwitchPosManager:
                             # 有报单则等待下一次循环
                             if current_order.status == "FINISHED":
                                 instruction.current_order_id = None
-                                instruction.remaining_volume = instruction.remaining_volume - (current_order.volume_orign - current_order.volume_left)
+                                instruction.remaining_volume = instruction.remaining_volume - (current_order.volume - current_order.volume_left)
                                 if instruction.remaining_volume <= 0:
                                     instruction.status = "COMPLETED"
-                                if current_order.is_error:
+                                if current_order.status == "REJECTED":
                                     # 报单错误
                                     instruction.status = "FAILED"
-                                    instruction.error_message = current_order.last_msg
-                                
+                                    instruction.error_message = current_order.status_msg
+
                             else:
                                 # 检测报单是否超时，且剩余可报单次数大于0，才可以撤单
-                                order_age_seconds = (datetime.now() - datetime.fromtimestamp(current_order.insert_date_time/1_000_000_000) ).total_seconds()
+                                order_age_seconds = (datetime.now() - current_order.insert_time).total_seconds() if current_order.insert_time else 0
                                 if order_age_seconds >= self.config.risk_control.order_timeout and int(instruction.remaining_attempts) > 0:
                                     self._cancel_order(str(current_order.order_id))
                                 else:

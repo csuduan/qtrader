@@ -187,7 +187,7 @@
                 </el-table-column>
                 <el-table-column prop="datetime" label="时间" width="80">
                   <template #default="{ row }">
-                    {{ row.datetime.slice(11, 19) }}
+                    {{ formatTime(row.datetime) }}
                   </template>
                 </el-table-column>
               </el-table>
@@ -330,6 +330,103 @@
           <el-empty v-if="store.trades.length === 0" description="暂无成交记录" />
         </el-card>
       </el-tab-pane>
+
+      <el-tab-pane label="策略" name="strategy">
+        <el-card shadow="hover">
+          <template #header>
+            <div class="card-header">
+              <span>策略管理</span>
+              <el-space>
+                <el-button type="success" @click="handleStartAll" :loading="loading">
+                  <el-icon><VideoPlay /></el-icon>
+                  启动全部
+                </el-button>
+                <el-button type="warning" @click="handleStopAll" :loading="loading">
+                  <el-icon><VideoPause /></el-icon>
+                  停止全部
+                </el-button>
+                <el-button @click="loadStrategies" :loading="loading">
+                  <el-icon><Refresh /></el-icon>
+                  刷新
+                </el-button>
+              </el-space>
+            </div>
+          </template>
+
+          <el-table :data="strategies" stripe v-loading="loading" table-layout="fixed">
+            <el-table-column prop="strategy_id" label="策略ID" width="150" />
+            <el-table-column prop="config.strategy_type" label="策略类型" width="100">
+              <template #default="{ row }">
+                <el-tag size="small">
+                  {{ row.config.strategy_type === 'bar' ? 'K线策略' : row.config.strategy_type === 'tick' ? 'Tick策略' : '混合策略' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="config.symbol" label="合约" width="120">
+              <template #default="{ row }">
+                {{ row.config.symbol || '-' }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="config.exchange" label="交易所" width="100">
+              <template #default="{ row }">
+                {{ row.config.exchange || '-' }}
+              </template>
+            </el-table-column>
+            <el-table-column label="运行状态" width="100">
+              <template #default="{ row }">
+                <el-tag :type="row.active ? 'success' : 'info'" size="small">
+                  {{ row.active ? '运行中' : '已停止' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="config.volume_per_trade" label="手数/次" width="90" />
+            <el-table-column prop="config.max_position" label="最大持仓" width="90" />
+            <el-table-column label="策略参数" min-width="200">
+              <template #default="{ row }">
+                <el-descriptions :column="1" size="small" border>
+                  <el-descriptions-item v-if="row.config.rsi_period !== undefined" label="RSI周期">
+                    {{ row.config.rsi_period }}
+                  </el-descriptions-item>
+                  <el-descriptions-item v-if="row.config.rsi_long_threshold !== undefined" label="多头阈值">
+                    {{ row.config.rsi_long_threshold }}
+                  </el-descriptions-item>
+                  <el-descriptions-item v-if="row.config.rsi_short_threshold !== undefined" label="空头阈值">
+                    {{ row.config.rsi_short_threshold }}
+                  </el-descriptions-item>
+                  <el-descriptions-item v-if="row.config.take_profit_pct !== undefined" label="止盈%">
+                    {{ (row.config.take_profit_pct * 100).toFixed(1) }}%
+                  </el-descriptions-item>
+                  <el-descriptions-item v-if="row.config.stop_loss_pct !== undefined" label="止损%">
+                    {{ (row.config.stop_loss_pct * 100).toFixed(1) }}%
+                  </el-descriptions-item>
+                </el-descriptions>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="120" fixed="right">
+              <template #default="{ row }">
+                <el-button
+                  v-if="!row.active"
+                  type="success"
+                  size="small"
+                  @click="handleStartStrategy(row.strategy_id)"
+                >
+                  启动
+                </el-button>
+                <el-button
+                  v-else
+                  type="warning"
+                  size="small"
+                  @click="handleStopStrategy(row.strategy_id)"
+                >
+                  停止
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+
+          <el-empty v-if="strategies.length === 0" description="暂无策略" />
+        </el-card>
+      </el-tab-pane>
     </el-tabs>
 
     <el-dialog v-model="showOrderInputDialog" title="报单" width="500px">
@@ -416,19 +513,40 @@
     </el-dialog>
 
     <el-dialog v-model="showCloseDialog" title="确认平仓" width="500px">
-      <div style="margin-bottom: 15px;">
-        <p><strong>合约：</strong> {{ closeForm.symbol }}</p>
-        <p><strong>方向：</strong>
+      <el-form label-width="100px">
+        <el-form-item label="合约">
+          {{ closeForm.symbol }}
+        </el-form-item>
+        <el-form-item label="方向">
           <el-tag :type="closeForm.direction === 'BUY' ? 'success' : 'danger'" size="small">
             {{ closeForm.direction === 'BUY' ? '卖出' : '买入' }}
           </el-tag>
-        </p>
-        <p><strong>开平：</strong> {{ closeForm.offset === 'OPEN' ? '开仓' : closeForm.offset === 'CLOSE' ? '平仓' : '平今' }}</p>
-        <p><strong>平仓手数：</strong> {{ closeForm.volume }} 手</p>
-        <p><strong>价格：</strong>
-          {{ closeForm.price > 0 ? formatNumber(closeForm.price) : '市价' }}
-        </p>
-      </div>
+        </el-form-item>
+        <el-form-item label="开平">
+          {{ closeForm.offset === 'OPEN' ? '开仓' : closeForm.offset === 'CLOSE' ? '平仓' : '平今' }}
+        </el-form-item>
+        <el-form-item label="平仓手数">
+          <el-input-number
+            v-model="closeForm.volume"
+            :min="1"
+            :max="closeForm.maxVolume"
+            controls-position="right"
+            style="width: 100%"
+          />
+          <span class="text-sm text-gray-500 ml-2">最大可用: {{ closeForm.maxVolume }} 手</span>
+        </el-form-item>
+        <el-form-item label="价格">
+          <el-input-number
+            v-model="closeForm.price"
+            :min="0"
+            :precision="2"
+            placeholder="0表示市价"
+            controls-position="right"
+            style="width: 100%"
+          />
+          <span class="ml-2 text-sm text-gray-500">留空或0为市价</span>
+        </el-form-item>
+      </el-form>
       <template #footer>
         <el-button @click="showCloseDialog = false">取消</el-button>
         <el-button type="danger" @click="handleClosePositionConfirm" :loading="closing">
@@ -458,9 +576,9 @@ import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useStore } from '@/stores'
-import { orderApi, positionApi, quoteApi } from '@/api'
+import { orderApi, positionApi, quoteApi, strategyApi } from '@/api'
 import wsManager from '@/ws'
-import type { ManualOrderRequest, Position, Order, Quote } from '@/types'
+import type { ManualOrderRequest, Position, Order, Quote, StrategyRes } from '@/types'
 
 const route = useRoute()
 const store = useStore()
@@ -481,6 +599,7 @@ const orderTab = ref('PENDING')
 const selectedOrders = ref<Order[]>([])
 const quotes = ref<Quote[]>([])
 const tradeDateFilter = ref(new Date().toISOString().split('T')[0])
+const strategies = ref<StrategyRes[]>([])
 
 const statusMap: Record<string, string> = {
   'PENDING': 'ALIVE',
@@ -510,6 +629,7 @@ const closeForm = reactive({
   direction: 'BUY',
   offset: 'CLOSE',
   volume: 0,
+  maxVolume: 0,
   price: 0
 })
 
@@ -532,9 +652,7 @@ function handleTickUpdate(tickData: Quote) {
     }
   } else {
     quotes.value.push({
-      ...tickData,
-      volume: tickData.volume || 0,
-      open_interest: tickData.open_interest || 0
+      ...tickData
     })
   }
 }
@@ -608,6 +726,57 @@ async function handleSubscribe() {
   }
 }
 
+async function loadStrategies() {
+  loading.value = true
+  try {
+    strategies.value = await strategyApi.getStrategies()
+  } catch (error: any) {
+    ElMessage.error(`加载策略失败: ${error.message}`)
+  } finally {
+    loading.value = false
+  }
+}
+
+async function handleStartStrategy(strategyId: string) {
+  try {
+    await strategyApi.startStrategy(strategyId)
+    ElMessage.success(`策略 ${strategyId} 已启动`)
+    await loadStrategies()
+  } catch (error: any) {
+    ElMessage.error(`启动策略失败: ${error.message}`)
+  }
+}
+
+async function handleStopStrategy(strategyId: string) {
+  try {
+    await strategyApi.stopStrategy(strategyId)
+    ElMessage.success(`策略 ${strategyId} 已停止`)
+    await loadStrategies()
+  } catch (error: any) {
+    ElMessage.error(`停止策略失败: ${error.message}`)
+  }
+}
+
+async function handleStartAll() {
+  try {
+    await strategyApi.startAllStrategies()
+    ElMessage.success('所有策略已启动')
+    await loadStrategies()
+  } catch (error: any) {
+    ElMessage.error(`启动策略失败: ${error.message}`)
+  }
+}
+
+async function handleStopAll() {
+  try {
+    await strategyApi.stopAllStrategies()
+    ElMessage.success('所有策略已停止')
+    await loadStrategies()
+  } catch (error: any) {
+    ElMessage.error(`停止策略失败: ${error.message}`)
+  }
+}
+
 
 
 function handleOrderSelectionChange(selection: Order[]) {
@@ -622,6 +791,7 @@ function handleClosePosition(position: Position, direction: 'BUY' | 'SELL') {
   closeForm.direction = direction
   closeForm.offset = 'CLOSE'
   closeForm.volume = volume
+  closeForm.maxVolume = volume
   closeForm.price = 0
 
   showCloseDialog.value = true
@@ -727,13 +897,23 @@ function getStatusText(status: string): string {
   }
 }
 
-function formatNumber(num: number | null): string {
-  if (num === null) return '0.00'
+function formatNumber(num: number | null | undefined): string {
+  if (num === null || num === undefined) return '0.00'
   return num.toFixed(2)
 }
 
-function formatDateTime(datetime: string): string {
-  return new Date(datetime).toLocaleString('zh-CN')
+function formatDateTime(datetime: string | number): string {
+  const date = typeof datetime === 'number'
+    ? new Date(datetime * 1000)
+    : new Date(datetime)
+  return date.toLocaleString('zh-CN')
+}
+
+function formatTime(datetime: string | number): string {
+  const date = typeof datetime === 'string'
+    ? new Date(datetime)
+    : new Date(datetime * 1000)
+  return date.toTimeString().slice(0, 8)
 }
 
 watch(activeTab, (newTab) => {
@@ -745,6 +925,8 @@ watch(activeTab, (newTab) => {
     loadPositionData()
   } else if (newTab === 'trade') {
     loadTradeData()
+  } else if (newTab === 'strategy') {
+    loadStrategies()
   }
 })
 
@@ -769,6 +951,8 @@ onMounted(() => {
     loadPositionData()
   } else if (activeTab.value === 'trade') {
     loadTradeData()
+  } else if (activeTab.value === 'strategy') {
+    loadStrategies()
   }
 
   wsManager.onTickUpdate(handleTickUpdate)

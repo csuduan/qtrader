@@ -171,3 +171,40 @@ class SystemParamUpdateReq(BaseModel):
     """系统参数更新请求"""
     param_key: str
     param_value: str
+
+class StrategyRes(BaseModel):
+    """策略信息响应"""
+    strategy_id: str
+    active: bool
+    config: "StrategyConfig"
+
+    model_config = {"populate_by_name": True}
+
+
+class StrategyConfig(BaseModel):
+    """策略配置"""
+    enabled: bool
+    strategy_type: str
+    symbol: str
+    exchange: str
+    volume_per_trade: int
+    max_position: int
+    bar: str | None = None
+    params_file: str | None = None
+    take_profit_pct: float | None = None
+    stop_loss_pct: float | None = None
+    fee_rate: float | None = None
+    trade_start_time: str | None = None
+    trade_end_time: str | None = None
+    force_exit_time: str | None = None
+    one_trade_per_day: bool | None = None
+    # RSI策略参数
+    rsi_period: int | None = None
+    rsi_long_threshold: float | None = None
+    rsi_short_threshold: float | None = None
+    short_kline_period: int | None = None
+    long_kline_period: int | None = None
+    dir_threshold: float | None = None
+    used_signal: bool | None = None
+
+    model_config = {"populate_by_name": True}

@@ -1,0 +1,44 @@
+{
+  "Strategys": [
+	{
+        "Id": "StrRsiInDay-AM-IM01",
+        "Type": "StrRsiInDay",
+        "Symbol": "IM2601",
+        "Volume": "3",
+        "Overnight": false,
+        "OrderVolumePer": 6,
+        "ParamFile": "param_strrsi_DQ.csv"
+    },
+    {
+        "Id": "StrRsiInDay-PM-IM01",
+        "Type": "StrRsiInDay",
+        "Symbol": "IM2601",
+        "Volume": "3",
+        "Bar": "M1",
+        "Overnight": false,
+        "OrderVolumePer": 6,
+        "ParamFile": "param_strrsi_DQ.csv"
+    },
+	{
+        "Id": "StrRsiInDay-AM-IC01",
+        "Type": "StrRsiInDay",  
+        "Symbol": "IC2601",
+        "Volume": "3",
+        "Bar": "M1",
+        "Overnight": false,
+        "OrderVolumePer": 6,
+        "ParamFile": "param_strrsi_DQ.csv"
+    },
+    {
+        "Id": "StrRsiInDay-PM-IC01",  
+        "Type": "StrRsiInDay",
+        "Symbol": "IC2601",
+        "Volume": "3",
+        "Bar": "M1",
+        "Overnight": false,
+        "OrderVolumePer": 6,
+        "ParamFile": "param_strrsi_DQ.csv"
+    }
+   
+  ]
+}

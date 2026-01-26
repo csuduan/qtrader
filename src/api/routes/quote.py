@@ -24,20 +24,17 @@ async def get_subscribed_quotes(
     """
     if not engine or not engine.quotes:
         return success_response(
-            data={"count": 0, "symbols": [], "quotes": []},
+            data=[],
             message="获取成功"
         )
-
-    symbols = list(engine.quotes.keys())
-
     quotes_data = [
         {
             "symbol": symbol,
-            "last_price": None if math.isnan(quote.get("last_price", 0)) else quote.get("last_price", 0),
-            "bid_price1": None if math.isnan(quote.get("bid_price1", 0)) else quote.get("bid_price1", 0),
-            "ask_price1": None if math.isnan(quote.get("ask_price1", 0)) else quote.get("ask_price1", 0),
-            "volume": quote.get("volume", 0),
-            "datetime": quote.get("datetime", 0)
+            "last_price": None if math.isnan(quote.last_price) else quote.last_price,
+            "bid_price1": None if math.isnan(quote.bid_price1) else quote.bid_price1,
+            "ask_price1": None if math.isnan(quote.ask_price1) else quote.ask_price1,
+            "volume": quote.volume,
+            "datetime": quote.datetime
         }
         for symbol, quote in engine.quotes.items()
     ]

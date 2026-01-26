@@ -43,18 +43,18 @@ async def get_orders(
             # 废单：状态为REJECTED，或者状态为FINISHED但未成交任何数量
             orders_dict = {
                 k: v for k, v in orders_dict.items()
-                if v.get("status") == "REJECTED" or
-                (v.get("status") == "FINISHED" and v.get("volume_left", 0) == v.get("volume_orign", 0))
+                if v.status == "REJECTED" or
+                (v.status == "FINISHED" and v.volume_left == v.volume)
             }
         elif status == "FINISHED":
             # 已成交：状态为FINISHED且有实际成交
             orders_dict = {
                 k: v for k, v in orders_dict.items()
-                if v.get("status") == "FINISHED" and v.get("volume_left", 0) < v.get("volume_orign", 0)
+                if v.status == "FINISHED" and v.volume_left < v.volume
             }
         else:
             # 其他状态直接匹配
-            orders_dict = {k: v for k, v in orders_dict.items() if v.get("status") == status}
+            orders_dict = {k: v for k, v in orders_dict.items() if v.status == status}
 
     orders_list = list(orders_dict.values())
     total_count = len(orders_list)
@@ -65,19 +65,19 @@ async def get_orders(
         data=[
             OrderRes(
                 id=0,
-                account_id=engine.account.get("account_id", "") if engine.account else "",
-                order_id=order.get("order_id", ""),
-                exchange_order_id=order.get("exchange_order_id", ""),
-                symbol=order.get("exchange_id", "") + "." + order.get("instrument_id", ""),
-                direction=order.get("direction", ""),
-                offset=order.get("offset", ""),
-                volume_orign=order.get("volume_orign", 0),
-                volume_left=order.get("volume_left", 0),
-                limit_price=float(order.get("limit_price", 0)) if order.get("limit_price") else None,
-                price_type=order.get("price_type", ""),
-                status=order.get("status", ""),
-                insert_date_time=datetime.fromtimestamp(order.insert_date_time/1_000_000_000),
-                last_msg=order.get("last_msg", ""),
+                account_id=engine.account.account_id,
+                order_id=order.order_id,
+                exchange_order_id=order.exchange.value,
+                symbol=order.symbol,
+                direction=order.direction,
+                offset=order.offset,
+                volume_orign=order.volume,
+                volume_left=order.volume_left,
+                limit_price=float(order.price) if order.price else None,
+                price_type=order.price_type,
+                status=order.status,
+                insert_date_time=order.insert_time,
+                last_msg=order.status_msg,
                 created_at=datetime.now(),
                 updated_at=datetime.now(),
             )
@@ -110,19 +110,19 @@ async def get_order_by_id(
     return success_response(
         data=OrderRes(
             id=0,
-            account_id=engine.account.get("account_id", "") if engine.account else "",
-            order_id=order.get("order_id", ""),
-            exchange_order_id=order.get("exchange_order_id", ""),
-            symbol=order.get("exchange_id", "") + "." + order.get("instrument_id", ""),
-            direction=order.get("direction", ""),
-            offset=order.get("offset", ""),
-            volume_orign=order.get("volume_orign", 0),
-            volume_left=order.get("volume_left", 0),
-            limit_price=float(order.get("limit_price", 0)) if order.get("limit_price") else None,
-            price_type=order.get("price_type", ""),
-            status=order.get("status", ""),
-            insert_date_time=order.get("insert_date_time", 0),
-            last_msg=order.get("last_msg", ""),
+            account_id=engine.account.account_id if engine.account else "",
+            order_id=order.order_id,
+            exchange_order_id=order.gateway_order_id,
+            symbol=order.symbol,
+            direction=order.direction.value,
+            offset=order.offset.value,
+            volume_orign=order.volume,
+            volume_left=order.volume_left,
+            limit_price=float(order.price) if order.price else None,
+            price_type=order.price_type.value,
+            status=order.status,
+            insert_date_time=order.insert_time or datetime.now(),
+            last_msg=order.status_msg,
             created_at=datetime.now(),
             updated_at=datetime.now(),
         ),

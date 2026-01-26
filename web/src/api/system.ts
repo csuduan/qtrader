@@ -67,7 +67,7 @@ export const systemApi = {
    * 获取定时任务列表
    */
   getScheduledTasks: async (): Promise<{ tasks: Job[], count: number }> => {
-    return await api.get<{ tasks: Job[], count: number }>('/system/tasks') as unknown as { tasks: Job[], count: number }
+    return api.get<{ tasks: Job[], count: number }>('/jobs')
   },
 
   /**

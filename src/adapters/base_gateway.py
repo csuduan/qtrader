@@ -8,7 +8,7 @@ from typing import Optional, Callable, Dict, Any,Union,List
 from src.models.object import (
     TickData, BarData, OrderData, TradeData,
     PositionData, AccountData, ContractData,
-    SubscribeRequest, OrderRequest, CancelRequest, Status
+    SubscribeRequest, OrderRequest, CancelRequest, OrderStatus
 )
 from src.utils.logger import get_logger
 
@@ -159,7 +159,7 @@ class BaseGateway(ABC):
     # ==================== 查询接口 ====================
 
     @abstractmethod
-    def query_account(self) -> Optional[AccountData]:
+    def get_account(self) -> Optional[AccountData]:
         """
         查询账户信息
 
@@ -169,7 +169,7 @@ class BaseGateway(ABC):
         pass
 
     @abstractmethod
-    def query_position(self) -> dict[str,PositionData]:
+    def get_positions(self) -> dict[str,PositionData]:
         """
         查询持仓信息
 
@@ -179,7 +179,7 @@ class BaseGateway(ABC):
         pass
 
     @abstractmethod
-    def query_orders(self) -> dict[str,OrderData]:
+    def get_orders(self) -> dict[str,OrderData]:
         """
         查询活动订单
 
@@ -189,7 +189,7 @@ class BaseGateway(ABC):
         pass
 
     @abstractmethod
-    def query_trades(self) -> dict[str,TradeData]:
+    def get_trades(self) -> dict[str,TradeData]:
         """
         查询今日成交
 
@@ -199,7 +199,7 @@ class BaseGateway(ABC):
         pass
 
     @abstractmethod
-    def query_contracts(self) -> Dict[str, ContractData]:
+    def get_contracts(self) -> Dict[str, ContractData]:
         """
         查询所有合约信息
 
@@ -228,11 +228,13 @@ class BaseGateway(ABC):
 
     def _emit_order(self, order: OrderData):
         """推送订单数据"""
+        logger.info(f"保单回报: {order}")
         if self.on_order_callback:
             self.on_order_callback(order)
 
     def _emit_trade(self, trade: TradeData):
         """推送成交数据"""
+        logger.info(f"成交回报: {trade}")
         if self.on_trade_callback:
             self.on_trade_callback(trade)
 

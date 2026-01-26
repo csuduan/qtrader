@@ -11,13 +11,13 @@ from src.api.dependencies import get_trading_engine, require_connected
 from src.api.responses import success_response, error_response
 from src.api.schemas import PositionRes
 from src.trading_engine import TradingEngine
+from src.models.object import PositionData
 
 router = APIRouter(prefix="/api/position", tags=["持仓"])
 
 
 @router.get("")
 async def get_positions(
-    symbol: Optional[str] = Query(None, description="合约代码，不填则返回所有持仓"),
     engine: TradingEngine = Depends(get_trading_engine),
 ):
     """
@@ -31,10 +31,8 @@ async def get_positions(
             message="获取成功"
         )
 
-    positions_dict = engine.positions
+    positions_dict:dict[str,PositionData] = engine.positions
 
-    if symbol:
-        positions_dict = {k: v for k, v in positions_dict.items() if k == symbol}
 
     return success_response(
         data=[
@@ -44,12 +42,12 @@ async def get_positions(
                 exchange_id=symbol.split(".")[0] if "." in symbol else None,
                 instrument_id=symbol.split(".")[1] if "." in symbol else None,
                 symbol=symbol,
-                pos_long=pos.get("pos_long", 0),
-                pos_short=pos.get("pos_short", 0),
-                open_price_long=None if math.isnan(pos.get("open_price_long", 0)) else pos.get("open_price_long", 0),
-                open_price_short=None if math.isnan(pos.get("open_price_short", 0)) else pos.get("open_price_short", 0),
-                float_profit=float(pos.get("float_profit", 0)),
-                margin=float(pos.get("margin", 0)),
+                pos_long=pos.pos_long,
+                pos_short=pos.pos_short,
+                open_price_long=None if math.isnan(pos.open_price_long) else pos.open_price_long,
+                open_price_short=None if math.isnan(pos.open_price_short) else pos.open_price_short,
+                float_profit=float(pos.float_profit_long)+float(pos.float_profit_short),
+                margin=float(pos.margin_long)+float(pos.margin_short),
                 updated_at=datetime.now(),
             )
             for symbol, pos in positions_dict.items()
@@ -86,16 +84,16 @@ async def get_position_by_symbol(
         data=[
             PositionRes(
                 id=0,
-                account_id=engine.account.get("account_id", "") if engine.account else "",
+                account_id=engine.account.account_id if engine.account else "",
                 exchange_id=symbol.split(".")[0] if "." in symbol else None,
                 instrument_id=symbol.split(".")[1] if "." in symbol else None,
                 symbol=symbol,
-                pos_long=position.get("pos_long", 0),
-                pos_short=position.get("pos_short", 0),
-                open_price_long=position.get("open_price_long", 0),
-                open_price_short=position.get("open_price_short", 0),
-                float_profit=float(position.get("float_profit", 0)),
-                margin=float(position.get("margin", 0)),
+                pos_long=position.pos_long,
+                pos_short=position.pos_short,
+                open_price_long=position.open_price_long,
+                open_price_short=position.open_price_short,
+                float_profit=float(position.float_profit_long) + float(position.float_profit_short),
+                margin=float(position.margin_long) + float(position.margin_short),
                 updated_at=datetime.now(),
             )
         ],

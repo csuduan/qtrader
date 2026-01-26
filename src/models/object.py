@@ -33,7 +33,7 @@ class Offset(str, Enum):
     CLOSEYESTERDAY = "CLOSEYESTERDAY"
 
 
-class Status(str, Enum):
+class OrderStatus(str, Enum):
     """订单状态"""
     SUBMITTING = "SUBMITTING"
     NOTTRADED = "NOTTRADED"
@@ -115,10 +115,10 @@ class TickData(BaseModel):
     open_interest: Optional[float] = Field(None, description="持仓量")
 
     # 盘口数据（建议提供）
-    bid_price_1: Optional[float] = Field(None, description="买一价")
-    bid_volume_1: Optional[float] = Field(None, description="买一量")
-    ask_price_1: Optional[float] = Field(None, description="卖一价")
-    ask_volume_1: Optional[float] = Field(None, description="卖一量")
+    bid_price1: Optional[float] = Field(None, description="买一价")
+    bid_volume1: Optional[float] = Field(None, description="买一量")
+    ask_price1: Optional[float] = Field(None, description="卖一价")
+    ask_volume1: Optional[float] = Field(None, description="卖一量")
 
     # 日内数据
     open_price: Optional[float] = Field(None, description="开盘价")
@@ -189,7 +189,8 @@ class OrderData(BaseModel):
     price: Optional[float] = Field(None, description="委托价格（None=市价单）")
     price_type: OrderType = Field(default=OrderType.LIMIT, description="订单类型")
 
-    status: Status = Field(default=Status.SUBMITTING, description="订单状态")
+    #status: OrderStatus = Field(default=OrderStatus.SUBMITTING, description="订单状态")
+    status: str = Field(default=OrderStatus.SUBMITTING.value, description="订单状态")
     status_msg: str = Field(default="", description="状态消息")
 
     # 可选字段
@@ -209,7 +210,7 @@ class OrderData(BaseModel):
 
     def is_active(self) -> bool:
         """是否为活动订单"""
-        return self.status in [Status.SUBMITTING, Status.NOTTRADED, Status.PARTTRADED]
+        return self.status in [OrderStatus.SUBMITTING, OrderStatus.NOTTRADED, OrderStatus.PARTTRADED]
 
 
 class TradeData(BaseModel):
@@ -248,30 +249,30 @@ class PositionData(BaseModel):
     # 必需字段
     symbol: str = Field(..., description="合约代码")
     exchange: Exchange = Field(..., description="交易所")
-    direction: PosDirection = Field(..., description="持仓方向")
 
-    volume: int = Field(..., description="持仓数量")
+    pos: int = Field(..., description="净持仓数量")
+    pos_long: int = Field(..., description="多头持仓数量")
+    pos_short: int = Field(..., description="空头持仓数量")
 
-    # 可选字段
-    yd_volume: Optional[int] = Field(None, description="昨仓")
-    td_volume: Optional[int] = Field(None, description="今仓")
-    frozen: Optional[int] = Field(None, description="冻结数量")
-    available: Optional[int] = Field(None, description="可平数量")
+    pos_long_yd: int = Field(..., description="昨仓多头持仓数量")
+    pos_short_yd: int = Field(..., description="昨仓空头持仓数量")
+    pos_long_td: int = Field(..., description="今仓多头持仓数量")
+    pos_short_td: int = Field(..., description="今仓空头持仓数量")
+    
+    open_price_long: float = Field(..., description="多头持仓均价")
+    open_price_short: float = Field(..., description="空头持仓均价")
 
-    avg_price: Optional[float] = Field(None, description="持仓均价")
-    hold_cost: Optional[float] = Field(None, description="持仓成本")
-    hold_profit: Optional[float] = Field(None, description="持仓盈亏")
-    close_profit: Optional[float] = Field(None, description="平仓盈亏")
+    float_profit_long: float = Field(..., description="多头持仓浮动盈亏")
+    float_profit_short: float = Field(..., description="空头持仓浮动盈亏")
 
-    margin: Optional[float] = Field(None, description="保证金占用")
+    hold_profit_long: float = Field(..., description="多头持仓持仓盈亏(相对昨结)")
+    hold_profit_short: float = Field(..., description="空头持仓持仓盈亏(相对昨结)")
+
+    margin_long: float = Field(..., description="多头持仓保证金占用")
+    margin_short: float = Field(..., description="空头持仓保证金占用")
 
     # 扩展字段
     extras: Dict[str, Any] = Field(default_factory=dict)
-
-    @property
-    def position_id(self) -> str:
-        """持仓唯一标识"""
-        return f"{self.symbol}.{self.exchange.value}.{self.direction.value}"
 
 
 class AccountData(BaseModel):
@@ -363,4 +364,4 @@ class CancelRequest(BaseModel):
 
 # ==================== 常量定义 ====================
 
-ACTIVE_STATUSES = {Status.SUBMITTING, Status.NOTTRADED, Status.PARTTRADED}
+ACTIVE_STATUSES = {OrderStatus.SUBMITTING, OrderStatus.NOTTRADED, OrderStatus.PARTTRADED}

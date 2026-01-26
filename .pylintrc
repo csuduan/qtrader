@@ -1,0 +1,7 @@
+// pyrightconfig.json
+{
+  "typeCheckingMode": "strict",
+  "reportUnnecessaryTypeIgnoreComment": true,
+  "reportUnnecessaryCast": true,
+  "reportUnnecessaryIsInstance": true
+}

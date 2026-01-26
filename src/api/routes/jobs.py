@@ -40,6 +40,8 @@ async def get_jobs(
     - **group**: 任务分组筛选
     - **enabled**: 是否启用筛选
     """
+    from src.context import get_task_scheduler
+    from src.scheduler import TaskScheduler
     query = session.query(JobPo)
 
     if group:
@@ -47,24 +49,12 @@ async def get_jobs(
 
     if enabled is not None:
         query = query.filter_by(enabled=enabled)
-
-    jobs = query.order_by(JobPo.job_group, JobPo.job_name).all()
-
-    result = []
-    for job in jobs:
-        result.append({
-            "job_id": job.job_id,
-            "job_name": job.job_name,
-            "job_group": job.job_group,
-            "job_description": job.job_description,
-            "cron_expression": job.cron_expression,
-            "last_trigger_time": job.last_trigger_time.isoformat() if job.last_trigger_time else None,
-            "enabled": job.enabled,
-            "created_at": job.created_at.isoformat(),
-            "updated_at": job.updated_at.isoformat(),
-        })
-
-    return success_response(data=result, message="获取成功")
+    
+    scheduler: TaskScheduler = get_task_scheduler()
+    if not scheduler:
+        return error_response(code=500, message="任务调度器未初始化")
+    jobs = scheduler.get_jobs()   
+    return success_response(data={"tasks": [job for id,job in jobs.items()], "count": len(jobs)}, message="获取成功")
 
 
 @router.get("/{job_id}")
@@ -112,17 +102,6 @@ async def toggle_job(
     - **request**: 包含enabled的请求体
     """
     from src.context import get_task_scheduler
-
-    job = session.query(JobPo).filter_by(job_id=job_id).first()
-
-    if not job:
-        return error_response(code=404, message="任务不存在")
-
-    job.enabled = request.enabled
-    job.updated_at = datetime.now()
-    session.add(job)
-    session.commit()
-    session.refresh(job)
 
     # 更新调度器中的任务状态
     scheduler = get_task_scheduler()

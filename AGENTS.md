@@ -1,53 +1,83 @@
-# Agent Guidelines
+# Agent 开发指南
 
-## Commands
-### Backend (Python)
-- **Run main**: `python -m src.main`
-- **Format**: `black src/` (line-length: 100, target: py38)
-- **Sort imports**: `isort src/` (black profile, line-length: 100)
-- **Tests**: Not configured yet (pytest recommended for future)
+## 启动
+### 后端 (Python)
+```bash
+# 激活虚拟环境
+conda activate qts
+# 安装依赖(可选)
+pip install -r requirements.txt
 
-### Frontend (Vue)
-- **Install deps**: `cd web && npm install`
-- **Dev server**: `cd web && npm run dev`
-- **Build**: `cd web && npm run build`
-- **Preview**: `cd web && npm run preview`
+# 运行主服务
+python -m src.main
 
-## Code Style
-### Backend (Python)
-- **Python**: 3.8+, use type hints from `typing` module
-- **Formatting**: Black 100-char line length
-- **Imports**: Standard lib → third-party → local modules
-- **Naming**: snake_case for functions/vars, CamelCase for classes
-- **Docstrings**: Chinese, triple quotes, describe Args/Returns
-- **Logging**: Use `get_logger(__name__)` from `src.utils.logger`
-- **Error handling**: Try/except with logger.error()
-- **Models**: SQLAlchemy ORM with `__repr__`, Pydantic for API schemas
-- **API**: FastAPI with async endpoints, `from_attributes = True` in Config
-- **Comments**: Chinese, concise (NO inline comments unless requested)
-- **Event System**: Use event engine for decoupled communication, define event types in `EventTypes` class
+# 格式化代码
+black src/ --line-length 100 --target py38
+isort src/ --profile black
 
-### Frontend (Vue + TypeScript)
-- **Framework**: Vue 3 with Composition API (`<script setup>`)
-- **Language**: TypeScript with strict mode
-- **Components**: PascalCase for .vue files
-- **Files**: PascalCase for components, camelCase for utils
-- **State**: Pinia stores in `src/stores/`
-- **API**: Axios HTTP client in `src/api/`
-- **WebSocket**: Custom manager in `src/ws.ts`
-- **UI**: Element Plus components
-- **Charts**: ECharts for data visualization
+# 检查运行进程
+lsof -i :8000  # 后端API
+```
 
-## Architecture Notes
+### 前端 (Vue)
+```bash
+cd web
+npm install
+npm run dev     # 开发服务器 (默认端口5173，代理到8000)
+```
 
-### Event-Driven System
-- Trading engine uses event engine for decoupled notifications
-- Events are emitted after `api.wait_update()` in `update()` method
-- Event types defined in `src.trading_engine.EventTypes` class
-- Global event engine: `src.utils.event.event_engine`
-- Example usage in `examples/event_usage.py`
+### 使用 Chrome DevTools 测试
+使用 `chrome-devtools` MCP 工具测试前端：
+1. 启动后端 (`python -m src.main`) 和前端 (`cd web && npm run dev`)
+2. 使用 `new_page` 导航到 `http://localhost:5173`
+3. 使用 `take_snapshot` 检查页面结构
+4. 使用 `list_console_messages` 检查错误
 
-### Frontend-Backend Communication Standards
+
+## 代码规范
+
+### 后端 (Python)
+- **Python版本**: 3.8+，使用 `typing` 模块的类型提示
+- **格式化**: Black 100字符行长度
+- **导入顺序**: 标准库 → 第三方库 → 本地模块
+- **命名规范**: 函数/变量使用 snake_case，类使用 CamelCase
+- **文档字符串**: 中文，三引号，描述 Args/Returns
+- **日志记录**: 使用 `src.utils.logger` 的 `get_logger(__name__)`
+- **错误处理**: Try/except 配合 logger.exception()
+- **数据模型**: SQLAlchemy ORM 使用 `__repr__`，API 模式使用 Pydantic
+- **API开发**: FastAPI 异步端点，Config 中设置 `from_attributes = True`
+- **注释**: 中文，简洁（除非有特殊要求，否则不写行内注释）
+- **事件系统**: 使用事件引擎进行解耦通信，在 `EventTypes` 类中定义事件类型
+- **强类型约束**: 方法的输出及输出应当明确指明类型
+
+### 前端 (Vue + TypeScript)
+- **框架**: Vue 3 组合式 API (`<script setup>`)
+- **语言**: TypeScript 严格模式
+- **组件命名**: .vue 文件使用 PascalCase
+- **文件命名**: 组件用 PascalCase，工具函数用 camelCase
+- **状态管理**: Pinia stores 位于 `src/stores/`
+- **API调用**: Axios HTTP 客户端位于 `src/api/`
+- **WebSocket**: 自定义管理器位于 `src/ws.ts`
+- **UI组件**: Element Plus
+- **图表**: ECharts 数据可视化
+
+## 架构说明
+
+### 事件驱动系统
+- 交易引擎使用事件引擎进行解耦通知
+- 事件在 `update()` 方法中的 `api.wait_update()` 之后触发
+- 事件类型在 `src.trading_engine.EventTypes` 类中定义
+- 全局事件引擎: `src.utils.event.event_engine`
+- 使用示例见 `examples/event_usage.py`
+
+### 重要约束
+1. **策略不得直接访问 `trading_engine`** - 必须使用 `strategy_manager`
+2. **Pydantic模型始终使用属性访问** (`order.order_id` 而非 `order.get("order_id")`)
+3. **事件处理器应在 Gateway 的 `update()` 方法中的 `api.wait_update()` 之后触发**
+4. **账户信息采用缓存机制** - 每3秒批量更新并通过WebSocket推送
+5. **追踪订单所有权** - 每个订单映射到创建它的策略，据此进行事件路由
+
+### 前后端通信规范
 
 #### HTTP API 规范
 **请求格式**

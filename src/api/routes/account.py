@@ -46,7 +46,10 @@ async def get_account_info(engine = Depends(get_trading_engine)):
             )
 
         account:AccountData = engine.account
-        user_id = engine.config.trading_account.user_id if engine.config.account_type == "real" else 'SIM'
+        # 安全获取 user_id，trading_account 可能为 None
+        user_id = 'SIM'
+        if engine.config.account_type == "real" and engine.config.trading_account:
+            user_id = engine.config.trading_account.user_id or 'SIM'
 
 
         return success_response(

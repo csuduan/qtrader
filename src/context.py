@@ -8,12 +8,15 @@ from src.config_loader import AppConfig
 from src.trading_engine import TradingEngine
 from src.utils.event import EventTypes, event_engine
 from src.switch_mgr import SwitchPosManager
+from src.strategy.strategy_manager import StrategyManager
+from src.scheduler import TaskScheduler
 
 
 
 trading_engine: Optional[TradingEngine] = None
+strategy_manager: Optional[StrategyManager] = None
 config: AppConfig = None
-task_scheduler = None
+task_scheduler: Optional[TaskScheduler] = None
 switch_pos_manager: Optional[SwitchPosManager] = None
 
 
@@ -59,3 +62,13 @@ def set_switch_pos_manager(manager):
 def get_switch_pos_manager() -> Optional[SwitchPosManager]:
     """获取全局换仓管理器实例"""
     return switch_pos_manager
+
+def get_strategy_manager() -> Optional[StrategyManager]:
+    """获取全局策略管理器实例"""
+    from src.strategy.strategy_manager import StrategyManager
+    return strategy_manager
+
+def set_strategy_manager(manager: StrategyManager):
+    """设置全局策略管理器实例"""
+    global strategy_manager
+    strategy_manager = manager
