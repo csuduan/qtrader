@@ -1,6 +1,21 @@
 import { ref, type Ref } from 'vue'
 import type { WSMessage, Account, Position, Trade, Order, SystemStatus, Alarm } from '@/types'
 
+/**
+ * 获取 WebSocket URL
+ * 根据环境自动选择正确的 URL
+ */
+function getWebSocketUrl(): string {
+  // 开发环境：使用相对路径，由 Vite 代理转发
+  if (import.meta.env.DEV) {
+    return '/ws'
+  }
+  // 生产环境：使用完整的 WebSocket URL
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const host = window.location.host
+  return `${protocol}//${host}/ws`
+}
+
 class WebSocketManager {
   private ws: WebSocket | null = null
   private reconnectAttempts = 0
@@ -12,6 +27,7 @@ class WebSocketManager {
    private onConnectedCallbacks: Array<() => void> = []
    private onDisconnectedCallbacks: Array<() => void> = []
    private onAccountUpdateCallbacks: Array<(data: Account) => void> = []
+   private onAccountsUpdateCallbacks: Array<(data: Account[]) => void> = []
    private onPositionUpdateCallbacks: Array<(data: Position) => void> = []
    private onTradeUpdateCallbacks: Array<(data: Trade) => void> = []
    private onOrderUpdateCallbacks: Array<(data: Order) => void> = []
@@ -26,7 +42,7 @@ class WebSocketManager {
   /**
    * 连接 WebSocket
    */
-  connect(url: string = 'ws://localhost:8000/ws'): void {
+  connect(url: string = getWebSocketUrl()): void {
     if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) {
       console.log('WebSocket 已连接或正在连接')
       return
@@ -104,6 +120,9 @@ class WebSocketManager {
          case 'account_update':
            this.onAccountUpdateCallbacks.forEach(cb => cb(message.data))
            break
+         case 'accounts_update':
+           this.onAccountsUpdateCallbacks.forEach(cb => cb(message.data))
+           break
          case 'position_update':
            this.onPositionUpdateCallbacks.forEach(cb => cb(message.data))
            break
@@ -163,6 +182,19 @@ class WebSocketManager {
       const index = this.onAccountUpdateCallbacks.indexOf(callback)
       if (index > -1) {
         this.onAccountUpdateCallbacks.splice(index, 1)
+      }
+    }
+  }
+
+  /**
+   * 订阅所有账户更新事件（多账号模式）
+   */
+  onAccountsUpdate(callback: (data: Account[]) => void): () => void {
+    this.onAccountsUpdateCallbacks.push(callback)
+    return () => {
+      const index = this.onAccountsUpdateCallbacks.indexOf(callback)
+      if (index > -1) {
+        this.onAccountsUpdateCallbacks.splice(index, 1)
       }
     }
   }

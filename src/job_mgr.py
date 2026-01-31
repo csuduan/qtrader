@@ -2,16 +2,17 @@
 任务执行管理器模块
 管理所有定时任务的执行方法
 """
+
 import csv
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from src.config_loader import AppConfig
-from src.database import get_session
+from src.utils.config_loader import TraderConfig
+from src.db.database import get_session
 from src.models.po import AlarmPo as AlarmModel
-from src.switch_mgr import SwitchPosManager
-from src.trading_engine import TradingEngine
+from src.trader.core.trading_engine import TradingEngine
+from src.trader.switch_mgr import SwitchPosManager
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -20,7 +21,12 @@ logger = get_logger(__name__)
 class JobManager:
     """任务执行管理器类"""
 
-    def __init__(self, config: AppConfig, trading_engine: TradingEngine, position_manager: SwitchPosManager):
+    def __init__(
+        self,
+        config: TraderConfig,
+        trading_engine: TradingEngine,
+        position_manager: SwitchPosManager,
+    ):
         """
         初始化任务管理器
 
@@ -164,10 +170,10 @@ class JobManager:
 
     def scan_orders(self) -> None:
         """扫描并处理订单"""
-        #logger.info("开始扫描订单任务")
+        # logger.info("开始扫描订单任务")
         try:
             self.position_manager.scan_and_process_orders()
-            #logger.info("扫描订单任务完成")
+            # logger.info("扫描订单任务完成")
         except Exception as e:
             logger.error(f"扫描订单任务执行失败: {e}")
 
@@ -181,12 +187,11 @@ class JobManager:
 
         try:
             from datetime import timedelta
+
             three_days_ago = datetime.now() - timedelta(days=3)
 
             deleted_count = (
-                session.query(AlarmModel)
-                .filter(AlarmModel.created_at < three_days_ago)
-                .delete()
+                session.query(AlarmModel).filter(AlarmModel.created_at < three_days_ago).delete()
             )
 
             session.commit()
@@ -203,8 +208,10 @@ class JobManager:
 
     def reset_strategies(self) -> None:
         """重置所有策略"""
-        from src.context import get_strategy_manager
-        strategy_manager = get_strategy_manager()
+        from src.app_context import get_app_context
+
+        ctx = get_app_context()
+        strategy_manager = ctx.get_strategy_manager()
         logger.info("开始重置所有策略")
         try:
             strategy_manager.reset_all_for_new_day()

@@ -2,11 +2,12 @@
 K线生成器
 从tick数据合成多周期bar数据（1m/5m/15m/1h/d），缓存历史数据
 """
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
-from collections import defaultdict
 
-from src.models.object import TickData, BarData, Interval, Exchange
+from collections import defaultdict
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional
+
+from src.models.object import BarData, Exchange, Interval, TickData
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -19,7 +20,9 @@ class BarGenerator:
         # 按合约和周期缓存bar数据
         self.bars: Dict[str, Dict[str, Any]] = defaultdict(lambda: defaultdict(dict))
         # 按合约和周期缓存当前正在生成的bar
-        self._current_bars: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(lambda: defaultdict(dict))
+        self._current_bars: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(
+            lambda: defaultdict(dict)
+        )
 
     def update_tick(self, tick: TickData):
         """
@@ -50,52 +53,52 @@ class BarGenerator:
         # 检查是否需要新建bar
         if self._current_bars[key][interval_key] is None:
             self._current_bars[key][interval_key] = {
-                'symbol': tick.symbol,
-                'exchange': tick.exchange,
-                'interval': interval,
-                'datetime': self._get_bar_start_time(tick.datetime, interval),
-                'open_price': tick.last_price,
-                'high_price': tick.last_price,
-                'low_price': tick.last_price,
-                'close_price': tick.last_price,
-                'volume': tick.volume or 0,
-                'turnover': tick.turnover or 0,
-                'open_interest': tick.open_interest or 0,
+                "symbol": tick.symbol,
+                "exchange": tick.exchange,
+                "interval": interval,
+                "datetime": self._get_bar_start_time(tick.datetime, interval),
+                "open_price": tick.last_price,
+                "high_price": tick.last_price,
+                "low_price": tick.last_price,
+                "close_price": tick.last_price,
+                "volume": tick.volume or 0,
+                "turnover": tick.turnover or 0,
+                "open_interest": tick.open_interest or 0,
             }
         else:
             # 检查是否跨越bar周期
             current = self._current_bars[key][interval_key]
             bar_start = self._get_bar_start_time(tick.datetime, interval)
 
-            if bar_start != current['datetime']:
+            if bar_start != current["datetime"]:
                 # 保存完成的bar
                 self.bars[key][interval_key] = BarData(**current)
                 logger.debug(f"生成新bar: {key} {interval_key} {current['datetime']}")
 
                 # 创建新bar
                 self._current_bars[key][interval_key] = {
-                    'symbol': tick.symbol,
-                    'exchange': tick.exchange,
-                    'interval': interval,
-                    'datetime': bar_start,
-                    'open_price': tick.last_price,
-                    'high_price': tick.last_price,
-                    'low_price': tick.last_price,
-                    'close_price': tick.last_price,
-                    'volume': tick.volume or 0,
-                    'turnover': tick.turnover or 0,
-                    'open_interest': tick.open_interest or 0,
+                    "symbol": tick.symbol,
+                    "exchange": tick.exchange,
+                    "interval": interval,
+                    "datetime": bar_start,
+                    "open_price": tick.last_price,
+                    "high_price": tick.last_price,
+                    "low_price": tick.last_price,
+                    "close_price": tick.last_price,
+                    "volume": tick.volume or 0,
+                    "turnover": tick.turnover or 0,
+                    "open_interest": tick.open_interest or 0,
                 }
             else:
                 # 更新当前bar
-                current['high_price'] = max(current['high_price'], tick.last_price)
-                current['low_price'] = min(current['low_price'], tick.last_price)
-                current['close_price'] = tick.last_price
+                current["high_price"] = max(current["high_price"], tick.last_price)
+                current["low_price"] = min(current["low_price"], tick.last_price)
+                current["close_price"] = tick.last_price
                 if tick.volume:
-                    current['volume'] += tick.volume
+                    current["volume"] += tick.volume
                 if tick.turnover:
-                    current['turnover'] += tick.turnover
-                current['open_interest'] = tick.open_interest or 0
+                    current["turnover"] += tick.turnover
+                current["open_interest"] = tick.open_interest or 0
 
     def _generate_higher_bars(self, tick: TickData):
         """
@@ -121,9 +124,9 @@ class BarGenerator:
         # 生成日bar
         self._generate_bar_from_minute_bars(minute_bars, Interval.MINUTE, 1440, tick)
 
-    def _generate_bar_from_minute_bars(self, minute_bars: List[BarData],
-                                       base_interval: Interval, multiplier: int,
-                                       tick: TickData):
+    def _generate_bar_from_minute_bars(
+        self, minute_bars: List[BarData], base_interval: Interval, multiplier: int, tick: TickData
+    ):
         """
         从1分钟bar生成更高周期bar
 
@@ -134,8 +137,10 @@ class BarGenerator:
             tick: 当前tick
         """
         key = tick.std_symbol
-        interval = Interval(f"{multiplier}m") if multiplier < 60 else (
-            Interval.HOUR if multiplier == 60 else Interval.DAILY
+        interval = (
+            Interval(f"{multiplier}m")
+            if multiplier < 60
+            else (Interval.HOUR if multiplier == 60 else Interval.DAILY)
         )
         interval_key = interval.value
 
@@ -145,9 +150,10 @@ class BarGenerator:
 
         # 筛选属于当前周期的bar
         period_bars = [
-            b for b in minute_bars
-            if b.datetime >= bar_start and
-               b.datetime < bar_start + timedelta(minutes=period_minutes)
+            b
+            for b in minute_bars
+            if b.datetime >= bar_start
+            and b.datetime < bar_start + timedelta(minutes=period_minutes)
         ]
 
         if not period_bars:
@@ -155,24 +161,24 @@ class BarGenerator:
 
         # 聚合OHLCV
         current = {
-            'symbol': tick.symbol,
-            'exchange': tick.exchange,
-            'interval': interval,
-            'datetime': bar_start,
-            'open_price': period_bars[0].open_price,
-            'high_price': max(b.high_price for b in period_bars),
-            'low_price': min(b.low_price for b in period_bars),
-            'close_price': period_bars[-1].close_price,
-            'volume': sum(b.volume for b in period_bars if b.volume),
-            'turnover': sum(b.turnover for b in period_bars if b.turnover),
-            'open_interest': period_bars[-1].open_interest,
+            "symbol": tick.symbol,
+            "exchange": tick.exchange,
+            "interval": interval,
+            "datetime": bar_start,
+            "open_price": period_bars[0].open_price,
+            "high_price": max(b.high_price for b in period_bars),
+            "low_price": min(b.low_price for b in period_bars),
+            "close_price": period_bars[-1].close_price,
+            "volume": sum(b.volume for b in period_bars if b.volume),
+            "turnover": sum(b.turnover for b in period_bars if b.turnover),
+            "open_interest": period_bars[-1].open_interest,
         }
 
         # 更新或创建bar
         if self._current_bars[key][interval_key] is None:
             self._current_bars[key][interval_key] = current
         else:
-            prev_start = self._current_bars[key][interval_key]['datetime']
+            prev_start = self._current_bars[key][interval_key]["datetime"]
             if bar_start != prev_start:
                 # 保存完成的bar
                 self.bars[key][interval_key] = BarData(**self._current_bars[key][interval_key])
@@ -214,12 +220,12 @@ class BarGenerator:
             return dt.replace(hour=0, minute=0, second=0, microsecond=0)
         else:
             # 其他周期（5分钟、15分钟）
-            minutes = int(interval.value.replace('m', ''))
+            minutes = int(interval.value.replace("m", ""))
             total_minutes = dt.hour * 60 + dt.minute
             period_minutes = (total_minutes // minutes) * minutes
-            return dt.replace(hour=period_minutes // 60,
-                           minute=period_minutes % 60,
-                           second=0, microsecond=0)
+            return dt.replace(
+                hour=period_minutes // 60, minute=period_minutes % 60, second=0, microsecond=0
+            )
 
     def get_bar(self, symbol: str, interval: Interval, n: int = 1) -> Optional[BarData]:
         """
@@ -242,7 +248,11 @@ class BarGenerator:
         bars = self.bars[key][interval_key]
         bar_list: List[BarData] = []
         if isinstance(bars, dict):
-            bar_list = [BarData(**v) for v in bars.values()] if isinstance(next(iter(bars.values()), {}), dict) else [BarData(**bars)]
+            bar_list = (
+                [BarData(**v) for v in bars.values()]
+                if isinstance(next(iter(bars.values()), {}), dict)
+                else [BarData(**bars)]
+            )
         elif isinstance(bars, BarData):
             bar_list = [bars]
         elif isinstance(bars, list):
@@ -273,7 +283,11 @@ class BarGenerator:
         bars = self.bars[key][interval_key]
         bar_list: List[BarData] = []
         if isinstance(bars, dict):
-            bar_list = [BarData(**v) for v in bars.values()] if isinstance(next(iter(bars.values()), {}), dict) else [BarData(**bars)]
+            bar_list = (
+                [BarData(**v) for v in bars.values()]
+                if isinstance(next(iter(bars.values()), {}), dict)
+                else [BarData(**bars)]
+            )
         elif isinstance(bars, BarData):
             bar_list = [bars]
         elif isinstance(bars, list):

@@ -2,17 +2,17 @@
 定时任务调度器模块
 使用APScheduler管理定时任务，直接从config.yaml加载配置
 """
+
 from datetime import datetime
-from typing import List, Callable
+from typing import Callable, List
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from pydantic import BaseModel
 
-from src.config_loader import AppConfig
+from src.utils.config_loader import SchedulerConfig
 from src.job_mgr import JobManager
-from src.switch_mgr import SwitchPosManager
-from src.trading_engine import TradingEngine
+from src.trader.switch_mgr import SwitchPosManager
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -20,22 +20,24 @@ logger = get_logger(__name__)
 
 class Job(BaseModel):
     """定时任务"""
-    job_id:str = None
-    job_name:str = None
-    job_group:str = None
-    job_description:str = None
-    cron_expression:str = None
-    job_method:str = None
-    last_trigger_time:datetime = None
-    next_trigger_time:datetime = None
-    enabled:bool = None
-    created_at:datetime = None
-    updated_at:datetime = None
+
+    job_id: str = None
+    job_name: str = None
+    job_group: str = None
+    job_description: str = None
+    cron_expression: str = None
+    job_method: str = None
+    last_trigger_time: datetime | None = None
+    next_trigger_time: datetime | None = None
+    enabled: bool | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
 
 class TaskScheduler:
     """任务调度器类"""
 
-    def __init__(self, config: AppConfig, trading_engine: TradingEngine):
+    def __init__(self, config: SchedulerConfig, job_manager: JobManager):
         """
         初始化任务调度器
 
@@ -44,12 +46,9 @@ class TaskScheduler:
             trading_engine: 交易引擎实例
         """
         self.config = config
-        self.trading_engine = trading_engine
         self.scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
-        self.position_manager = SwitchPosManager(config, trading_engine)
-        self.job_manager = JobManager(config, trading_engine, self.position_manager)
-
-        # 内存中的任务配置（从config.yaml加载）
+        self.job_manager = job_manager
+        # 内存中的任务配置
         self._jobs: dict[str, Job] = {}
 
         # 从配置文件加载任务
@@ -58,12 +57,11 @@ class TaskScheduler:
         logger.info("任务调度器初始化完成")
 
     def _load_jobs_from_config(self) -> None:
-        """从config.yaml加载任务配置"""
-        if not self.config or not self.config.scheduler or not self.config.scheduler.jobs:
+        if not self.config or not self.config.jobs:
             logger.warning("配置文件中没有任务配置")
             return
 
-        for job_config in self.config.scheduler.jobs:
+        for job_config in self.config.jobs:
             job = Job(
                 job_id=job_config.job_id,
                 job_name=job_config.job_name,
@@ -80,7 +78,7 @@ class TaskScheduler:
 
         logger.info(f"已从配置文件加载 {len(self._jobs)} 个任务")
 
-    def _setup_job(self, job:Job) -> None:
+    def _setup_job(self, job: Job) -> None:
         """设置单个任务"""
         job_method = job.job_method
         if not job_method:
@@ -92,7 +90,7 @@ class TaskScheduler:
         if not job_func:
             logger.error(f"任务 {job.job_name} 的执行方法 {job_method} 不存在，跳过")
             return
-        
+
         # 包装任务函数，在执行后更新触发时间
         def wrap_job_func(func: Callable, job: Job) -> Callable:
             def wrapped():
@@ -100,7 +98,9 @@ class TaskScheduler:
                     func()
                 finally:
                     job.last_trigger_time = datetime.now()
+
             return wrapped
+
         wrapped_func = wrap_job_func(job_func, job)
 
         # 解析CRON表达式
@@ -120,10 +120,11 @@ class TaskScheduler:
             )
             if not job.enabled:
                 self.scheduler.pause_job(job.job_id)
-            logger.info(f"已添加任务: {job.job_name}, 方法: {job_method}, CRON: {job.cron_expression}, 状态: {'暂停' if not job.enabled else '运行'}")
+            logger.info(
+                f"已添加任务: {job.job_name}, 方法: {job_method}, CRON: {job.cron_expression}, 状态: {'暂停' if not job.enabled else '运行'}"
+            )
         except Exception as e:
             logger.error(f"添加任务 {job.job_name} 失败: {e}")
-
 
     def _get_job_function(self, job_method: str) -> Callable:
         """
@@ -178,8 +179,10 @@ class TaskScheduler:
 
     def _reset_strategies(self) -> None:
         """重置所有策略（开盘前调用）"""
-        from src.context import get_strategy_manager
-        strategy_manager = get_strategy_manager()
+        from src.app_context import get_app_context
+
+        ctx = get_app_context()
+        strategy_manager = ctx.get_strategy_manager()
         if strategy_manager:
             strategy_manager.reset_all_for_new_day()
 
@@ -199,7 +202,7 @@ class TaskScheduler:
         except Exception as e:
             logger.error(f"关闭任务调度器时出错: {e}")
 
-    def get_jobs(self) -> List[dict]:
+    def get_jobs(self) -> dict[str, Job]:
         """
         获取所有任务信息
 
@@ -227,7 +230,7 @@ class TaskScheduler:
             # 立即执行任务
             self.scheduler.add_job(
                 job.func,
-                trigger='date',
+                trigger="date",
                 id=f"{job_id}_manual_{int(datetime.now().timestamp())}",
                 name=f"{job.name} (手动)",
             )
@@ -300,5 +303,7 @@ class TaskScheduler:
         else:
             self.scheduler.pause_job(job_id)
 
-        logger.info(f"任务 {self._jobs[job_id].job_name} ({job_id}) 已{'启用' if enabled else '禁用'}")
+        logger.info(
+            f"任务 {self._jobs[job_id].job_name} ({job_id}) 已{'启用' if enabled else '禁用'}"
+        )
         return True

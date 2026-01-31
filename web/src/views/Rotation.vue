@@ -231,7 +231,10 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox, type UploadInstance, type UploadUserFile } from 'element-plus'
 import { VideoPlay, Refresh, Delete, Upload } from '@element-plus/icons-vue'
 import { rotationApi } from '@/api'
+import { useStore } from '@/stores'
 import type { RotationInstruction } from '@/types'
+
+const store = useStore()
 
  const loading = ref(false)
  const creating = ref(false)
@@ -283,7 +286,7 @@ async function handleStartRotation() {
     })
 
     rotating.value = true
-    await rotationApi.startRotation()
+    await rotationApi.startRotation(store.selectedAccountId || undefined)
     ElMessage.success('换仓流程已启动，正在执行...')
     await loadData()
   } catch (error: any) {
@@ -308,7 +311,7 @@ async function handleBatchDelete() {
 
     batchDeleting.value = true
     const ids = selectedInstructions.value.map(item => item.id)
-    const result = await rotationApi.batchDeleteInstructions(ids)
+    const result = await rotationApi.batchDeleteInstructions(ids, store.selectedAccountId || undefined)
     ElMessage.success(`删除成功，共 ${result.deleted} 条`)
     selectedInstructions.value = []
     await loadData()
@@ -393,7 +396,9 @@ const handleFileChange = (file: UploadUserFile) => {
 async function loadData() {
   loading.value = true
   try {
-    const result = await rotationApi.getRotationInstructions()
+    const result = await rotationApi.getRotationInstructions({
+      account_id: store.selectedAccountId || undefined
+    })
     instructions.value = result.instructions
     Object.assign(rotationStatus, result.rotation_status)
   } catch (error: any) {
@@ -412,7 +417,10 @@ async function handleCreate() {
 
   creating.value = true
   try {
-    await rotationApi.createRotationInstruction(form)
+    await rotationApi.createRotationInstruction({
+      ...form,
+      account_id: store.selectedAccountId || form.account_id
+    })
     ElMessage.success('创建成功')
     showCreateDialog.value = false
     await loadData()
@@ -425,7 +433,10 @@ async function handleCreate() {
 
 async function handleToggleEnable(row: RotationInstruction) {
   try {
-    await rotationApi.updateRotationInstruction(row.id, { enabled: row.enabled })
+    await rotationApi.updateRotationInstruction(row.id, {
+      enabled: row.enabled,
+      account_id: store.selectedAccountId || undefined
+    })
     ElMessage.success('更新成功')
   } catch (error: any) {
     ElMessage.error(`操作失败: ${error.message}`)
@@ -439,7 +450,7 @@ async function handleClear() {
       type: 'warning'
     })
 
-    await rotationApi.clearRotationInstructions('COMPLETED')
+    await rotationApi.clearRotationInstructions('COMPLETED', store.selectedAccountId || undefined)
     ElMessage.success('清除成功')
     await loadData()
   } catch (error: any) {

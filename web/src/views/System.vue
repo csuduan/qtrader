@@ -12,25 +12,25 @@
 
           <el-descriptions :column="2" border>
             <el-descriptions-item label="连接状态">
-              <el-tag :type="store.systemStatus.connected ? 'success' : 'danger'" size="large">
-                {{ store.systemStatus.connected ? '已连接' : '未连接' }}
+              <el-tag :type="getAccountStatusType(store.currentAccount)" size="large">
+                {{ getAccountStatusText(store.currentAccount) }}
               </el-tag>
             </el-descriptions-item>
             <el-descriptions-item label="交易状态">
               <el-tag
-                v-if="store.systemStatus.connected"
-                :type="store.systemStatus.paused ? 'warning' : 'success'"
+                v-if="store.currentAccount?.status === 'connected'"
+                :type="store.currentAccount?.trade_paused ? 'warning' : 'success'"
                 size="large"
               >
-                {{ store.systemStatus.paused ? '已暂停' : '正常' }}
+                {{ store.currentAccount?.trade_paused ? '已暂停' : '正常' }}
               </el-tag>
               <span v-else>-</span>
             </el-descriptions-item>
             <el-descriptions-item label="今日报单">
-              {{ store.systemStatus.daily_orders }} 次
+              {{ currentRiskStatus.daily_order_count }} 次
             </el-descriptions-item>
             <el-descriptions-item label="今日撤单">
-              {{ store.systemStatus.daily_cancels }} 次
+              {{ currentRiskStatus.daily_cancel_count }} 次
             </el-descriptions-item>
           </el-descriptions>
         </el-card>
@@ -38,129 +38,69 @@
     </el-row>
 
     <el-row :gutter="20" class="mt-4">
-      <!-- 交易控制面板（合并连接和交易控制） -->
-      <el-col :span="12">
-        <el-card shadow="hover">
-          <template #header>
-            <div class="card-header">
-              <span>交易控制</span>
-            </div>
-          </template>
-
-          <el-space direction="vertical" :size="20" style="width: 100%">
-            <!-- 连接控制 -->
-            <div class="control-section">
-              <div class="section-title">连接控制</div>
-              <el-button
-                v-if="!store.systemStatus.connected"
-                type="primary"
-                size="large"
-                @click="handleConnect"
-                :loading="connecting"
-              >
-                <el-icon><Connection /></el-icon>
-                连接系统
-              </el-button>
-
-              <el-button
-                v-else
-                type="danger"
-                size="large"
-                @click="handleDisconnect"
-                :loading="disconnecting"
-              >
-                <el-icon><SwitchButton /></el-icon>
-                断开连接
-              </el-button>
-            </div>
-
-            <!-- 交易控制 -->
-            <div class="control-section">
-              <div class="section-title">交易控制</div>
-              <el-button
-                v-if="store.systemStatus.connected && store.systemStatus.paused"
-                type="success"
-                size="large"
-                @click="handleResume"
-                :loading="resuming"
-              >
-                <el-icon><VideoPlay /></el-icon>
-                恢复交易
-              </el-button>
-
-              <el-button
-                v-if="store.systemStatus.connected && !store.systemStatus.paused"
-                type="warning"
-                size="large"
-                @click="handlePause"
-                :loading="pausing"
-              >
-                <el-icon><VideoPause /></el-icon>
-                暂停交易
-              </el-button>
-
-              <el-alert
-                v-if="!store.systemStatus.connected"
-                title="请先连接系统"
-                type="info"
-                :closable="false"
-              />
-            </div>
-          </el-space>
-        </el-card>
-      </el-col>
-
       <!-- 风控参数配置 -->
-      <el-col :span="12">
+      <el-col :span="24">
         <el-card shadow="hover">
           <template #header>
             <div class="card-header">
               <span>风控参数配置</span>
-              <el-button @click="loadRiskControl" :loading="loadingRisk">
-                <el-icon><Refresh /></el-icon>
-                刷新
-              </el-button>
             </div>
           </template>
 
           <el-form :model="riskForm" label-width="140px">
-            <el-form-item label="单日最大报单次数">
-              <el-input-number
-                v-model="riskForm.max_daily_orders"
-                :min="0"
-                :disabled="updatingRisk"
-              />
-              <span class="ml-2">今日: {{ riskControlStatus.daily_order_count }} / {{ riskControlStatus.max_daily_orders }}</span>
-            </el-form-item>
-            <el-form-item label="单日最大撤单次数">
-              <el-input-number
-                v-model="riskForm.max_daily_cancels"
-                :min="0"
-                :disabled="updatingRisk"
-              />
-              <span class="ml-2">今日: {{ riskControlStatus.daily_cancel_count }} / {{ riskControlStatus.max_daily_cancels }}</span>
-            </el-form-item>
-            <el-form-item label="单笔最大报单手数">
-              <el-input-number
-                v-model="riskForm.max_order_volume"
-                :min="1"
-                :disabled="updatingRisk"
-              />
-            </el-form-item>
-            <el-form-item label="单笔最大拆单手数">
-              <el-input-number
-                v-model="riskForm.max_split_volume"
-                :min="1"
-                :disabled="updatingRisk"
-              />
-            </el-form-item>
-            <el-form-item label="报单超时时间（秒）">
-              <el-input-number
-                v-model="riskForm.order_timeout"
-                :min="1"
-                :disabled="updatingRisk"
-              />
-            </el-form-item>
+            <el-row :gutter="20">
+              <el-col :span="12">
+                <el-form-item label="单日最大报单次数">
+                  <el-input-number
+                    v-model="riskForm.max_daily_orders"
+                    :min="0"
+                    :disabled="updatingRisk"
+                  />
+                  <span class="ml-2">今日: {{ currentRiskStatus.daily_order_count }} / {{ currentRiskStatus.max_daily_orders }}</span>
+                </el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item label="单日最大撤单次数">
+                  <el-input-number
+                    v-model="riskForm.max_daily_cancels"
+                    :min="0"
+                    :disabled="updatingRisk"
+                  />
+                  <span class="ml-2">今日: {{ currentRiskStatus.daily_cancel_count }} / {{ currentRiskStatus.max_daily_cancels }}</span>
+                </el-form-item>
+              </el-col>
+            </el-row>
+            <el-row :gutter="20">
+              <el-col :span="12">
+                <el-form-item label="单笔最大报单手数">
+                  <el-input-number
+                    v-model="riskForm.max_order_volume"
+                    :min="1"
+                    :disabled="updatingRisk"
+                  />
+                </el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item label="单笔最大拆单手数">
+                  <el-input-number
+                    v-model="riskForm.max_split_volume"
+                    :min="1"
+                    :disabled="updatingRisk"
+                  />
+                </el-form-item>
+              </el-col>
+            </el-row>
+            <el-row :gutter="20">
+              <el-col :span="12">
+                <el-form-item label="报单超时时间（秒）">
+                  <el-input-number
+                    v-model="riskForm.order_timeout"
+                    :min="1"
+                    :disabled="updatingRisk"
+                  />
+                </el-form-item>
+              </el-col>
+            </el-row>
             <el-form-item>
               <el-button
                 type="primary"
@@ -266,14 +206,41 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { ElSpace } from 'element-plus'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ElMessage, ElMessageBox, ElSpace } from 'element-plus'
 import { useStore } from '@/stores'
-import { systemApi } from '@/api'
+import { systemApi, accountApi } from '@/api'
 import { jobsApi } from '@/api'
-import type { Job, RiskControlStatus } from '@/types'
+import type { Job, RiskControlStatus, Account } from '@/types'
 import wsManager from '@/ws'
+
+// 获取账户状态标签类型
+function getAccountStatusType(account: Account | null): string {
+  if (!account) return 'info'
+  switch (account.status) {
+    case 'connected':
+      return 'success'
+    case 'connecting':
+      return 'warning'
+    case 'stopped':
+    default:
+      return 'info'
+  }
+}
+
+// 获取账户状态文本
+function getAccountStatusText(account: Account | null): string {
+  if (!account) return '未连接'
+  switch (account.status) {
+    case 'connected':
+      return '已连接'
+    case 'connecting':
+      return '连接中'
+    case 'stopped':
+    default:
+      return '已停止'
+  }
+}
 
 const store = useStore()
 const connecting = ref(false)
@@ -281,26 +248,28 @@ const disconnecting = ref(false)
 const pausing = ref(false)
 const resuming = ref(false)
 const showConnectDialog = ref(false)
-const loadingRisk = ref(false)
 const updatingRisk = ref(false)
 const loadingTasks = ref(false)
 const operatingJob = ref<string | null>(null)
+const tasks = ref<Job[]>([])
 
 const connectForm = reactive({
   username: '',
   password: ''
 })
 
-const riskControlStatus = reactive<RiskControlStatus>({
-  daily_order_count: 0,
-  daily_cancel_count: 0,
-  max_daily_orders: 100,
-  max_daily_cancels: 50,
-  max_order_volume: 50,
-  max_split_volume: 5,
-  order_timeout: 5,
-  remaining_orders: 100,
-  remaining_cancels: 50
+const currentRiskStatus = computed<RiskControlStatus>(() => {
+  return store.currentAccount?.risk_status || {
+    daily_order_count: 0,
+    daily_cancel_count: 0,
+    max_daily_orders: 100,
+    max_daily_cancels: 50,
+    max_order_volume: 50,
+    max_split_volume: 5,
+    order_timeout: 5,
+    remaining_orders: 100,
+    remaining_cancels: 50
+  }
 })
 
 const riskForm = reactive({
@@ -311,15 +280,13 @@ const riskForm = reactive({
   order_timeout: 5
 })
 
-const tasks = ref<Job[]>([])
-
 async function handleConnect() {
   connecting.value = true
   try {
-    await systemApi.connect(connectForm.username, connectForm.password)
+    await accountApi.connectGateway(store.selectedAccountId || '')
     ElMessage.success('连接成功')
     showConnectDialog.value = false
-    await store.loadSystemStatus()
+    await store.loadAllAccounts()
     if (!wsManager.connected.value) {
       wsManager.connect()
     }
@@ -337,9 +304,9 @@ async function handleDisconnect() {
     })
 
     disconnecting.value = true
-    await systemApi.disconnect()
+    await accountApi.disconnectGateway(store.selectedAccountId || '')
     ElMessage.success('已断开连接')
-    await store.loadSystemStatus()
+    await store.loadAllAccounts()
   } catch (error: any) {
     if (error !== 'cancel') {
       ElMessage.error(`断开失败: ${error.message}`)
@@ -356,9 +323,9 @@ async function handlePause() {
     })
 
     pausing.value = true
-    await systemApi.pause()
+    await accountApi.pauseTrading(store.selectedAccountId || '')
     ElMessage.success('交易已暂停')
-    await store.loadSystemStatus()
+    await store.loadAllAccounts()
   } catch (error: any) {
     if (error !== 'cancel') {
       ElMessage.error(`暂停失败: ${error.message}`)
@@ -375,32 +342,15 @@ async function handleResume() {
     })
 
     resuming.value = true
-    await systemApi.resume()
+    await systemApi.resume(store.selectedAccountId || undefined)
     ElMessage.success('交易已恢复')
-    await store.loadSystemStatus()
+    await store.loadAllAccounts()
   } catch (error: any) {
     if (error !== 'cancel') {
       ElMessage.error(`恢复失败: ${error.message}`)
     }
   } finally {
     resuming.value = false
-  }
-}
-
-async function loadRiskControl() {
-  loadingRisk.value = true
-  try {
-    const data = await systemApi.getRiskControlStatus()
-    Object.assign(riskControlStatus, data)
-    riskForm.max_daily_orders = data.max_daily_orders
-    riskForm.max_daily_cancels = data.max_daily_cancels
-    riskForm.max_order_volume = data.max_order_volume
-    riskForm.max_split_volume = data.max_split_volume
-    riskForm.order_timeout = data.order_timeout
-  } catch (error: any) {
-    ElMessage.error(`加载风控参数失败: ${error.message}`)
-  } finally {
-    loadingRisk.value = false
   }
 }
 
@@ -412,16 +362,11 @@ async function updateRiskControl() {
       riskForm.max_daily_cancels,
       riskForm.max_order_volume,
       riskForm.max_split_volume,
-      riskForm.order_timeout
+      riskForm.order_timeout,
+      store.selectedAccountId || undefined
     )
-    console.log('更新风控参数成功:', result)
-    Object.assign(riskControlStatus, result)
-    riskForm.max_daily_orders = result.max_daily_orders
-    riskForm.max_daily_cancels = result.max_daily_cancels
-    riskForm.max_order_volume = result.max_order_volume
-    riskForm.max_split_volume = result.max_split_volume
-    riskForm.order_timeout = result.order_timeout
     ElMessage.success('风控参数已更新')
+    await store.loadAllAccounts()
   } catch (error: any) {
     console.error('更新风控参数失败:', error)
     ElMessage.error(`更新风控参数失败: ${error.message}`)
@@ -433,7 +378,9 @@ async function updateRiskControl() {
 async function loadTasks() {
   loadingTasks.value = true
   try {
-    const result = await systemApi.getScheduledTasks()
+    // 多账号模式：传递当前选中的账户ID
+    const accountId = store.isMultiAccountMode ? store.selectedAccountId : undefined
+    const result = await systemApi.getScheduledTasks(accountId)
     tasks.value = result.tasks
   } catch (error: any) {
     ElMessage.error(`加载定时任务失败: ${error.message}`)
@@ -447,7 +394,7 @@ async function handleOperateJob(row: Job, action: 'pause' | 'resume' | 'trigger'
   const actionKey = `${row.job_id}_${action}`
   operatingJob.value = actionKey
   try {
-    await jobsApi.operateJob(row.job_id, action)
+    await jobsApi.operateJob(row.job_id, action, store.selectedAccountId || undefined)
     const actionText = action === 'pause' ? '暂停' : action === 'resume' ? '恢复' : '触发'
     ElMessage.success(`任务 ${row.job_name} 已${actionText}`)
     if (action === 'pause') {
@@ -468,7 +415,6 @@ function formatDateTime(datetime: string): string {
 }
 
 onMounted(() => {
-  loadRiskControl()
   loadTasks()
 })
 </script>

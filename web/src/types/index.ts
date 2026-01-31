@@ -24,6 +24,10 @@ export interface Account {
   risk_ratio: number
   updated_at: string
   user_id?: string | null
+  status?: 'stopped' | 'connecting' | 'connected'
+  gateway_connected?: boolean
+  trade_paused?: boolean
+  risk_status?: RiskControlStatus
 }
 
 /** 持仓信息 */
@@ -107,6 +111,7 @@ export interface ManualOrderRequest {
   offset: 'OPEN' | 'CLOSE' | 'CLOSETODAY'
   volume: number
   price: number | null
+  account_id?: string
 }
 
 /** 换仓指令 */
@@ -141,6 +146,7 @@ export interface RotationInstruction {
 export type WSMessageType =
   | 'connected'
   | 'account_update'
+  | 'accounts_update'
   | 'position_update'
   | 'trade_update'
   | 'order_update'
@@ -392,4 +398,20 @@ export interface StrategySignal {
   volume?: number
   reason?: string
   timestamp?: string
+}
+
+/** Trader状态 */
+export interface TraderStatus {
+  account_id: string
+  state: 'stopped' | 'connecting' | 'connected'
+  running: boolean
+  alive: boolean
+  connected: boolean
+  connecting: boolean
+  created_process: boolean
+  pid: number | null
+  start_time: string | null
+  last_heartbeat: string | null
+  restart_count: number
+  socket_path: string | null
 }

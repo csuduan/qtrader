@@ -2,6 +2,7 @@
 数据库持久化对象模型定义
 使用SQLAlchemy ORM定义所有数据表结构
 """
+
 from datetime import datetime
 from typing import Optional
 
@@ -22,11 +23,13 @@ from sqlalchemy.orm import DeclarativeBase, relationship
 
 class Base(DeclarativeBase):
     """ORM基类"""
+
     pass
 
 
 class AccountPo(Base):
     """账户信息表"""
+
     __tablename__ = "accounts"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -52,6 +55,7 @@ class AccountPo(Base):
 
 class PositionPo(Base):
     """持仓信息表"""
+
     __tablename__ = "positions"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -75,6 +79,7 @@ class PositionPo(Base):
 
 class TradePo(Base):
     """成交记录表"""
+
     __tablename__ = "trades"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -97,6 +102,7 @@ class TradePo(Base):
 
 class OrderPo(Base):
     """委托单记录表"""
+
     __tablename__ = "orders"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -124,6 +130,7 @@ class OrderPo(Base):
 
 class SwitchPosImportPo(Base):
     """订单文件记录表"""
+
     __tablename__ = "switchPos_import"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -137,6 +144,7 @@ class SwitchPosImportPo(Base):
 
 class RotationInstructionPo(Base):
     """换仓指令表"""
+
     __tablename__ = "rotation_instructions"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -151,7 +159,9 @@ class RotationInstructionPo(Base):
     order_time = Column(String(20), nullable=True)
     trading_date = Column(String(8), nullable=True, index=True)
     enabled = Column(Boolean, nullable=False, default=True)
-    status = Column(String(20), nullable=False, default="PENDING") #PENDING, RUNNING, COMPLETED, FAILED
+    status = Column(
+        String(20), nullable=False, default="PENDING"
+    )  # PENDING, RUNNING, COMPLETED, FAILED
     attempt_count = Column(Integer, nullable=False, default=0)
     remaining_attempts = Column(Integer, nullable=False, default=0)
     remaining_volume = Column(Integer, nullable=False, default=0)
@@ -170,6 +180,7 @@ class RotationInstructionPo(Base):
 
 class JobPo(Base):
     """定时任务配置表"""
+
     __tablename__ = "jobs"
 
     job_id = Column(String(50), primary_key=True, nullable=False)
@@ -190,6 +201,7 @@ class JobPo(Base):
 
 class QuotePo(Base):
     """行情数据表"""
+
     __tablename__ = "quotes"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -208,6 +220,7 @@ class QuotePo(Base):
 
 class AlarmPo(Base):
     """告警信息表"""
+
     __tablename__ = "alarms"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -226,6 +239,7 @@ class AlarmPo(Base):
 
 class SystemParamPo(Base):
     """系统参数表"""
+
     __tablename__ = "system_params"
 
     id = Column(Integer, primary_key=True, autoincrement=True)

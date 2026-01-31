@@ -2,12 +2,13 @@
 告警日志处理器
 监听ERROR级别日志并自动创建告警记录
 """
+
 from datetime import datetime
 from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from src.database import get_session
+from src.db.database import get_session
 from src.models.po import AlarmPo
 from src.utils.logger import get_logger
 
@@ -15,9 +16,7 @@ logger = get_logger(__name__)
 
 
 def create_alarm_from_log(
-    log_message: str,
-    module: Optional[str] = None,
-    function: Optional[str] = None
+    log_message: str, module: Optional[str] = None, function: Optional[str] = None
 ) -> bool:
     """
     从日志记录创建告警
@@ -47,7 +46,7 @@ def create_alarm_from_log(
             source="LOG",
             title=f"系统错误: {module or '未知模块'}",
             detail=log_message,
-            status="UNCONFIRMED"
+            status="UNCONFIRMED",
         )
 
         session.add(alarm)

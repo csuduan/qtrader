@@ -2,23 +2,26 @@
 抽象数据模型层
 统一tqsdk和CTP的数据格式，作为所有外部接口的契约
 """
+
 from datetime import datetime as DateTime
 from enum import Enum
-from typing import Optional, Dict, List, Any
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-
 # ==================== 枚举定义 ====================
+
 
 class Direction(str, Enum):
     """买卖方向"""
+
     BUY = "BUY"
     SELL = "SELL"
 
 
 class PosDirection(str, Enum):
     """持仓方向"""
+
     LONG = "LONG"
     SHORT = "SHORT"
     NET = "NET"
@@ -26,6 +29,7 @@ class PosDirection(str, Enum):
 
 class Offset(str, Enum):
     """开平类型"""
+
     NONE = ""
     OPEN = "OPEN"
     CLOSE = "CLOSE"
@@ -33,8 +37,15 @@ class Offset(str, Enum):
     CLOSEYESTERDAY = "CLOSEYESTERDAY"
 
 
+class TraderState(str, Enum):
+    """Trader Proxy 状态"""
+    STOPPED = "stopped"      # 已停止
+    CONNECTING = "connecting"  # 连接中
+    CONNECTED = "connected"    # 已连接
+
 class OrderStatus(str, Enum):
     """订单状态"""
+
     SUBMITTING = "SUBMITTING"
     NOTTRADED = "NOTTRADED"
     PARTTRADED = "PARTTRADED"
@@ -45,6 +56,7 @@ class OrderStatus(str, Enum):
 
 class ProductType(str, Enum):
     """产品类型"""
+
     FUTURES = "FUTURES"
     OPTION = "OPTION"
     SPOT = "SPOT"
@@ -54,6 +66,7 @@ class ProductType(str, Enum):
 
 class OrderType(str, Enum):
     """订单类型"""
+
     LIMIT = "LIMIT"
     MARKET = "MARKET"
     FOK = "FOK"
@@ -62,6 +75,7 @@ class OrderType(str, Enum):
 
 class Exchange(str, Enum):
     """交易所"""
+
     # 中国期货交易所
     CFFEX = "CFFEX"
     SHFE = "SHFE"
@@ -79,6 +93,7 @@ class Exchange(str, Enum):
 
 class Interval(str, Enum):
     """K线周期"""
+
     TICK = "tick"
     MINUTE = "1m"
     HOUR = "1h"
@@ -88,12 +103,14 @@ class Interval(str, Enum):
 
 class StrategyType(str, Enum):
     """策略类型"""
+
     TICK_DRIVEN = "tick"
     BAR_DRIVEN = "bar"
     BOTH = "both"
 
 
 # ==================== 核心数据模型 ====================
+
 
 class TickData(BaseModel):
     """
@@ -103,11 +120,12 @@ class TickData(BaseModel):
     可选字段：提供完整五档行情
     扩展字段：使用extras存放特定Gateway的数据
     """
+
     # 必需字段（所有Gateway必须提供）
     symbol: str = Field(..., description="合约代码")
     exchange: Exchange = Field(..., description="交易所")
     datetime: DateTime = Field(..., description="行情时间")
-    last_price: float = Field(..., description="最新价")
+    last_price: Optional[float] = Field(..., description="最新价")
 
     # 可选字段（建议提供，但不强制）
     volume: Optional[float] = Field(None, description="成交量")
@@ -145,6 +163,7 @@ class BarData(BaseModel):
 
     必需字段：symbol, exchange, interval, datetime, open_price, high_price, low_price, close_price
     """
+
     # 必需字段
     symbol: str = Field(..., description="合约代码")
     exchange: Exchange = Field(..., description="交易所")
@@ -175,6 +194,7 @@ class OrderData(BaseModel):
 
     必需字段：order_id, symbol, direction, offset, volume, status
     """
+
     # 必需字段
     order_id: str = Field(..., description="订单ID（系统内部唯一标识）")
     symbol: str = Field(..., description="合约代码")
@@ -189,9 +209,12 @@ class OrderData(BaseModel):
     price: Optional[float] = Field(None, description="委托价格（None=市价单）")
     price_type: OrderType = Field(default=OrderType.LIMIT, description="订单类型")
 
-    #status: OrderStatus = Field(default=OrderStatus.SUBMITTING, description="订单状态")
+    # status: OrderStatus = Field(default=OrderStatus.SUBMITTING, description="订单状态")
     status: str = Field(default=OrderStatus.SUBMITTING.value, description="订单状态")
     status_msg: str = Field(default="", description="状态消息")
+
+    # 账号标识（多账号支持）
+    account_id: str = Field(..., description="账户ID")
 
     # 可选字段
     gateway_order_id: Optional[str] = Field(None, description="网关订单ID（如CTP的OrderSysID）")
@@ -210,7 +233,11 @@ class OrderData(BaseModel):
 
     def is_active(self) -> bool:
         """是否为活动订单"""
-        return self.status in [OrderStatus.SUBMITTING, OrderStatus.NOTTRADED, OrderStatus.PARTTRADED]
+        return self.status in [
+            OrderStatus.SUBMITTING,
+            OrderStatus.NOTTRADED,
+            OrderStatus.PARTTRADED,
+        ]
 
 
 class TradeData(BaseModel):
@@ -219,6 +246,7 @@ class TradeData(BaseModel):
 
     必需字段：trade_id, order_id, symbol, direction, offset, price, volume
     """
+
     # 必需字段
     trade_id: str = Field(..., description="成交ID")
     order_id: str = Field(..., description="关联订单ID")
@@ -230,6 +258,9 @@ class TradeData(BaseModel):
 
     price: float = Field(..., description="成交价格")
     volume: int = Field(..., description="成交数量")
+
+    # 账号标识（多账号支持）
+    account_id: str = Field(..., description="账户ID")
 
     # 可选字段
     trading_day: Optional[str] = Field(None, description="交易日")
@@ -246,6 +277,7 @@ class PositionData(BaseModel):
 
     必需字段：symbol, exchange, direction, volume
     """
+
     # 必需字段
     symbol: str = Field(..., description="合约代码")
     exchange: Exchange = Field(..., description="交易所")
@@ -254,22 +286,25 @@ class PositionData(BaseModel):
     pos_long: int = Field(..., description="多头持仓数量")
     pos_short: int = Field(..., description="空头持仓数量")
 
-    pos_long_yd: int = Field(..., description="昨仓多头持仓数量")
-    pos_short_yd: int = Field(..., description="昨仓空头持仓数量")
-    pos_long_td: int = Field(..., description="今仓多头持仓数量")
-    pos_short_td: int = Field(..., description="今仓空头持仓数量")
-    
-    open_price_long: float = Field(..., description="多头持仓均价")
-    open_price_short: float = Field(..., description="空头持仓均价")
+    pos_long_yd: Optional[int] = Field(None, description="昨仓多头持仓数量")
+    pos_short_yd: Optional[int] = Field(None, description="昨仓空头持仓数量")
+    pos_long_td: Optional[int] = Field(None, description="今仓多头持仓数量")
+    pos_short_td: Optional[int] = Field(None, description="今仓空头持仓数量")
 
-    float_profit_long: float = Field(..., description="多头持仓浮动盈亏")
-    float_profit_short: float = Field(..., description="空头持仓浮动盈亏")
+    open_price_long: Optional[float] = Field(None, description="多头持仓均价")
+    open_price_short: Optional[float] = Field(None, description="空头持仓均价")
 
-    hold_profit_long: float = Field(..., description="多头持仓持仓盈亏(相对昨结)")
-    hold_profit_short: float = Field(..., description="空头持仓持仓盈亏(相对昨结)")
+    float_profit_long: Optional[float] = Field(None, description="多头持仓浮动盈亏")
+    float_profit_short: Optional[float] = Field(None, description="空头持仓浮动盈亏")
 
-    margin_long: float = Field(..., description="多头持仓保证金占用")
-    margin_short: float = Field(..., description="空头持仓保证金占用")
+    hold_profit_long: Optional[float] = Field(None, description="多头持仓持仓盈亏(相对昨结)")
+    hold_profit_short: Optional[float] = Field(None, description="空头持仓持仓盈亏(相对昨结)")
+
+    margin_long: Optional[float] = Field(None, description="多头持仓保证金占用")
+    margin_short: Optional[float] = Field(None, description="空头持仓保证金占用")
+
+    # 账号标识（多账号支持）
+    account_id: Optional[str] = Field(None, description="账户ID")
 
     # 扩展字段
     extras: Dict[str, Any] = Field(default_factory=dict)
@@ -281,10 +316,11 @@ class AccountData(BaseModel):
 
     必需字段：account_id, balance, available
     """
+
     # 必需字段
     account_id: str = Field(..., description="账户ID")
-    balance: float = Field(..., description="账户余额")
-    available: float = Field(..., description="可用资金")
+    balance: float = Field(0, description="账户余额")
+    available: float = Field(0, description="可用资金")
 
     # 可选字段
     frozen: Optional[float] = Field(None, description="冻结资金")
@@ -295,16 +331,24 @@ class AccountData(BaseModel):
     close_profit: Optional[float] = Field(None, description="平仓盈亏")
     float_profit: Optional[float] = Field(None, description="浮动盈亏")
 
-
     risk_ratio: Optional[float] = Field(None, description="风险度")
 
     update_time: Optional[DateTime] = Field(None, description="更新时间")
 
     # 扩展字段
     extras: Dict[str, Any] = Field(default_factory=dict)
-
     broker_name: Optional[str] = Field(None, description="经纪商名称")
     currency: Optional[str] = Field(None, description="交易货币")
+    user_id: Optional[str] = Field(None, description="用户ID")
+    trade_paused: bool = False  #是否暂停交易
+    gateway_connected: bool = False  #网关是否已连接
+    risk_status: dict = Field(default_factory=dict, description="风控状态")
+    
+    #账户状态
+    status: Optional[TraderState] = Field(TraderState.STOPPED, description="交易状态")
+
+
+
 
 
 class ContractData(BaseModel):
@@ -313,6 +357,7 @@ class ContractData(BaseModel):
 
     必需字段：symbol, exchange, name, product_type
     """
+
     # 必需字段
     symbol: str = Field(..., description="合约代码")
     exchange: Exchange = Field(..., description="交易所")
@@ -338,15 +383,21 @@ class ContractData(BaseModel):
         return f"{self.symbol}.{self.exchange.value}"
 
 
+
+
+
 # ==================== 请求模型 ====================
+
 
 class SubscribeRequest(BaseModel):
     """订阅请求"""
+
     symbols: List[str] = Field(..., description="合约代码列表")
 
 
 class OrderRequest(BaseModel):
     """下单请求"""
+
     symbol: str = Field(..., description="合约代码")
     exchange: Exchange = Field(default=Exchange.NONE, description="交易所")
 
@@ -360,7 +411,9 @@ class OrderRequest(BaseModel):
 
 class CancelRequest(BaseModel):
     """撤单请求"""
+
     order_id: str = Field(..., description="订单ID")
+
 
 # ==================== 常量定义 ====================
 

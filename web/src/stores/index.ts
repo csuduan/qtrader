@@ -9,6 +9,9 @@ export const useStore = defineStore('main', () => {
   const account = ref<Account | null>(null)
   const accounts = ref<Account[]>([])
 
+  // 多账号模式
+  const selectedAccountId = ref<string | null>(null)
+
   // 持仓信息
   const positions = ref<Position[]>([])
 
@@ -30,13 +33,69 @@ export const useStore = defineStore('main', () => {
     daily_cancels: 0
   })
 
-  // 计算属性
+  // ==================== 计算属性 ====================
+
+  // 是否为多账号模式
+  const isMultiAccountMode = computed(() => {
+    return accounts.value.length > 1
+  })
+
+  // 当前账户（多账号模式下使用选中的账户）
+  const currentAccount = computed(() => {
+    if (isMultiAccountMode.value) {
+      if (selectedAccountId.value) {
+        return accounts.value.find(acc => acc.account_id === selectedAccountId.value) || null
+      }
+      // 如果没有选中，返回第一个
+      return accounts.value[0] || null
+    }
+    return account.value
+  })
+
+  // 活动订单
   const activeOrders = computed(() => {
     return orders.value.filter(order => order.status === 'ALIVE')
   })
 
+  // 当前账户的持仓
+  const currentPositions = computed(() => {
+    if (!selectedAccountId.value) return positions.value
+    return positions.value.filter(pos => pos.account_id === selectedAccountId.value)
+  })
+
+  // 当前账户的成交
+  const currentTrades = computed(() => {
+    if (!selectedAccountId.value) return trades.value
+    return trades.value.filter(trade => trade.account_id === selectedAccountId.value)
+  })
+
+  // 当前账户的订单
+  const currentOrders = computed(() => {
+    if (!selectedAccountId.value) return orders.value
+    return orders.value.filter(order => order.account_id === selectedAccountId.value)
+  })
+
+  // 账户汇总信息
+  const accountsSummary = computed(() => {
+    const totalBalance = accounts.value.reduce((sum, acc) => sum + acc.balance, 0)
+    const totalAvailable = accounts.value.reduce((sum, acc) => sum + acc.available, 0)
+    const totalMargin = accounts.value.reduce((sum, acc) => sum + acc.margin, 0)
+    const totalFloatProfit = accounts.value.reduce((sum, acc) => sum + (acc.float_profit || 0), 0)
+
+    return {
+      totalBalance,
+      totalAvailable,
+      totalMargin,
+      totalFloatProfit,
+      accountCount: accounts.value.length
+    }
+  })
+
+  // ==================== 方法 ====================
+
   /**
    * 加载账户信息
+   * @deprecated 已废弃，请使用 loadAllAccounts() 代替
    */
   async function loadAccount() {
     try {
@@ -52,17 +111,34 @@ export const useStore = defineStore('main', () => {
   async function loadAllAccounts() {
     try {
       accounts.value = await accountApi.getAllAccounts()
+      // 如果有多个账户但还没选中，默认选中第一个已连接的账户
+      if (accounts.value.length > 1 && !selectedAccountId.value) {
+        const firstConnected = accounts.value.find(acc => acc.status === 'connected')
+        if (firstConnected) {
+          selectedAccountId.value = firstConnected.account_id
+        }
+      }
     } catch (error) {
       console.error('加载账户列表失败:', error)
     }
   }
 
   /**
+   * 切换账户
+   */
+  function switchAccount(accountId: string) {
+    selectedAccountId.value = accountId
+    console.log('切换到账户:', accountId)
+  }
+
+  /**
    * 加载持仓信息
    */
-  async function loadPositions() {
+  async function loadPositions(accountId?: string) {
     try {
-      positions.value = await positionApi.getPositions()
+      // 如果没有指定 accountId，使用当前选中的账户
+      const targetAccountId = accountId || selectedAccountId.value
+      positions.value = await positionApi.getPositions(targetAccountId)
     } catch (error) {
       console.error('加载持仓信息失败:', error)
     }
@@ -71,9 +147,11 @@ export const useStore = defineStore('main', () => {
   /**
    * 加载成交记录
    */
-  async function loadTrades(date?: string) {
+  async function loadTrades(date?: string, accountId?: string) {
     try {
-      trades.value = await tradeApi.getTrades({ date })
+      // 如果没有指定 accountId，使用当前选中的账户
+      const targetAccountId = accountId || selectedAccountId.value
+      trades.value = await tradeApi.getTrades({ date, account_id: targetAccountId })
     } catch (error) {
       console.error('加载成交记录失败:', error)
     }
@@ -82,47 +160,68 @@ export const useStore = defineStore('main', () => {
   /**
    * 加载委托单
    */
-  async function loadOrders(status?: string) {
+  async function loadOrders(status?: string, accountId?: string) {
     try {
-      orders.value = await orderApi.getOrders(status)
+      // 如果没有指定 accountId，使用当前选中的账户
+      const targetAccountId = accountId || selectedAccountId.value
+      orders.value = await orderApi.getOrders(status, targetAccountId)
     } catch (error) {
       console.error('加载委托单失败:', error)
     }
   }
 
   /**
-   * 加载系统状态
+   * 加载系统状态（已废弃，状态信息现在直接从account接口获取）
+   * @deprecated 请直接从账户数据中获取状态
    */
-  async function loadSystemStatus() {
-    try {
-      systemStatus.value = await systemApi.getStatus()
-    } catch (error) {
-      console.error('加载系统状态失败:', error)
-    }
+  async function loadSystemStatus(accountId?: string) {
+    // 此函数已废弃，状态信息直接从account接口获取
+    console.log('loadSystemStatus已废弃，状态信息直接从account接口获取')
   }
 
   /**
    * 加载所有数据
    */
   async function loadAllData() {
-    await Promise.all([
-      loadAccount(),
-      loadPositions(),
-      loadTrades(),
-      loadOrders(),
-      loadSystemStatus()
-    ])
+    // 统一使用 account/all 接口加载所有账户
+    await loadAllAccounts()
+
+    // 如果有账户数据，加载持仓、成交、订单
+    if (accounts.value.length > 0) {
+      await Promise.all([
+        loadPositions(),
+        loadTrades(),
+        loadOrders()
+      ])
+    }
   }
 
   /**
    * 更新账户信息
    */
   function updateAccount(data: Account) {
-    account.value = data
-    // 更新账户列表中的对应账户
+    // 如果是当前选中的账户，更新主账户
+    if (isMultiAccountMode.value && data.account_id === selectedAccountId.value) {
+      account.value = { ...account.value, ...data }
+    }
+    // 更新账户列表中的对应账户，保留未更新的字段
     const index = accounts.value.findIndex(acc => acc.account_id === data.account_id)
     if (index > -1) {
-      accounts.value[index] = data
+      accounts.value[index] = { ...accounts.value[index], ...data }
+    }
+  }
+
+  /**
+   * 更新所有账户信息（多账号模式）
+   */
+  function updateAccounts(data: Account[]) {
+    accounts.value = data
+    // 如果当前选中的账户不在新列表中，选择第一个
+    if (selectedAccountId.value) {
+      const exists = data.some(acc => acc.account_id === selectedAccountId.value)
+      if (!exists && data.length > 0) {
+        selectedAccountId.value = data[0].account_id
+      }
     }
   }
 
@@ -190,6 +289,7 @@ export const useStore = defineStore('main', () => {
    */
   function initWebSocket() {
     wsManager.onAccountUpdate(updateAccount)
+    wsManager.onAccountsUpdate(updateAccounts)
     wsManager.onPositionUpdate(updatePosition)
     wsManager.onTradeUpdate(addTrade)
     wsManager.onOrderUpdate(updateOrder)
@@ -203,6 +303,7 @@ export const useStore = defineStore('main', () => {
     // 状态
     account,
     accounts,
+    selectedAccountId,
     positions,
     trades,
     orders,
@@ -212,11 +313,18 @@ export const useStore = defineStore('main', () => {
     systemStatus,
 
     // 计算属性
+    isMultiAccountMode,
+    currentAccount,
     activeOrders,
+    currentPositions,
+    currentTrades,
+    currentOrders,
+    accountsSummary,
 
     // 方法
     loadAccount,
     loadAllAccounts,
+    switchAccount,
     loadPositions,
     loadTrades,
     loadOrders,

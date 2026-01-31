@@ -8,15 +8,17 @@ export const positionApi = {
   /**
    * 获取持仓列表
    */
-  getPositions: async (): Promise<Position[]> => {
-    return await api.get<Position[]>('/position') as unknown as Position[]
+  getPositions: async (accountId?: string): Promise<Position[]> => {
+    return api.get<Position[]>('/position', accountId ? { params: { account_id: accountId } } : undefined)
   },
 
   /**
    * 获取指定合约持仓
    */
-  getPositionBySymbol: async (symbol: string): Promise<Position[]> => {
-    return await api.get<Position[]>(`/position/${symbol}`) as unknown as Position[]
+  getPositionBySymbol: async (symbol: string, accountId?: string): Promise<Position[]> => {
+    const params: any = { symbol }
+    if (accountId) params.account_id = accountId
+    return api.get<Position[]>(`/position/${symbol}`, { params })
   },
 
   /**
@@ -28,8 +30,9 @@ export const positionApi = {
     offset: string
     volume: number
     price?: number
+    accountId?: string
   }): Promise<{ order_id: string }> => {
-    return await api.post<{ order_id: string }>('/position/close', data) as unknown as { order_id: string }
+    return api.post<{ order_id: string }>('/position/close', data)
   },
 
   /**
@@ -41,7 +44,10 @@ export const positionApi = {
     offset: string
     volume: number
     price?: number
-  }>): Promise<{ success_count: number; total: number; failed_orders: any[] }> => {
-    return await api.post<{ success_count: number; total: number; failed_orders: any[] }>('/position/close-batch', { positions }) as unknown as { success_count: number; total: number; failed_orders: any[] }
+  }>, accountId?: string): Promise<{ success_count: number; total: number; failed_orders: any[] }> => {
+    return api.post<{ success_count: number; total: number; failed_orders: any[] }>('/position/close-batch', {
+      positions,
+      account_id: accountId
+    })
   }
 }

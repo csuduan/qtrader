@@ -2,13 +2,14 @@
 系统参数加载器
 从数据库加载系统参数并转换为配置对象
 """
+
 from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from src.config_loader import RiskControlConfig
-from src.database import get_session
+from src.db.database import get_session
 from src.models.po import SystemParamPo
+from src.utils.config_loader import RiskControlConfig
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -31,8 +32,7 @@ def load_risk_control_config() -> RiskControlConfig:
 
     try:
         params = {
-            param.param_key: param.param_value
-            for param in session.query(SystemParamPo).all()
+            param.param_key: param.param_value for param in session.query(SystemParamPo).all()
         }
 
         risk_control_params = {

@@ -95,7 +95,7 @@ Gateway -> TradingEngine.emit() -> EventTypes -> StrategyManager._dispatch_event
 | 文件 | 用途 |
 |------|------|
 | `src/main.py` | 应用入口 |
-| `src/config_loader.py` | YAML配置解析 (account_type, paths, risk_control) |
+| `src/utils/config_loader.py` | YAML配置解析 (account_type, paths, risk_control) |
 | `src/trading_engine.py` | 中央协调器 |
 | `src/adapters/base_gateway.py` | Gateway接口 |
 | `src/models/object.py` | Pydantic数据模型 |

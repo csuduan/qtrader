@@ -2,6 +2,7 @@
 系统初始化脚本
 根据 config.yaml 初始化系统数据库和参数
 """
+
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -9,9 +10,9 @@ from typing import Optional
 import yaml
 from sqlalchemy.orm import Session
 
-from src.config_loader import load_config
-from src.database import Database, get_database
+from src.db.database import Database, get_database
 from src.models.po import JobPo, SystemParamPo
+from src.utils.config_loader import PathsConfig, get_config_loader
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -33,16 +34,17 @@ def init_system(config_path: Optional[str] = None, db_path: Optional[str] = None
     logger.info("=" * 60)
 
     try:
-        config = load_config(config_path)
+        config = get_config_loader().load_config()
 
         if db_path:
             final_db_path = db_path
         else:
-            final_db_path = config.paths.database
+            paths_config = PathsConfig()
+            final_db_path = paths_config.database
 
         logger.info(f"数据库路径: {final_db_path}")
 
-        from src.database import init_database
+        from src.db.database import init_database
 
         db: Database = init_database(final_db_path, echo=False)
 
@@ -50,7 +52,7 @@ def init_system(config_path: Optional[str] = None, db_path: Optional[str] = None
         db.drop_and_recreate()
 
         logger.info("正在初始化系统参数...")
-        _init_system_params(config, db)
+        _init_system_params(db)
 
         logger.info("=" * 60)
         logger.info("系统初始化完成！")
@@ -64,18 +66,20 @@ def init_system(config_path: Optional[str] = None, db_path: Optional[str] = None
         raise
 
 
-def _init_system_params(config, db: Database) -> None:
+def _init_system_params(db: Database) -> None:
     """
     初始化系统参数
 
     Args:
-        config: 配置对象
         db: 数据库实例
     """
+    from src.utils.config_loader import RiskControlConfig
+
     with db.get_session() as session:
         params = []
 
-        risk_control = config.risk_control
+        # 使用默认风控配置
+        risk_control = RiskControlConfig()
 
         params.append(
             SystemParamPo(
@@ -131,6 +135,7 @@ def _init_system_params(config, db: Database) -> None:
         session.commit()
 
         logger.info(f"已初始化 {len(params)} 个系统参数")
+
 
 if __name__ == "__main__":
     import sys

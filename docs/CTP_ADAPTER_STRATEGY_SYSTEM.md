@@ -283,7 +283,7 @@ a27cecd [feature] 实现CTP适配器和策略系统基础架构
 
 ### 修改文件（7个）
 - `src/trading_engine.py` - 添加Gateway和策略系统支持
-- `src/config_loader.py` - 添加策略配置加载
+- `src/utils/config_loader.py` - 添加策略配置加载
 - `src/api/app.py` - 注册策略路由
 - `src/api/websocket_manager.py` - 添加策略事件推送
 - `web/src/types/index.ts` - 同步前端类型定义

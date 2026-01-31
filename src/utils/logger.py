@@ -1,7 +1,11 @@
 """
 日志工具模块
 基于loguru实现日志记录功能
+
+当前日志文件：{app_name}_app.log
+轮转后的历史文件：{app_name}_app_YYYYMMDD.log
 """
+
 import sys
 from pathlib import Path
 from typing import Optional
@@ -10,6 +14,7 @@ from loguru import logger
 
 
 def setup_logger(
+    app_name: str,
     log_dir: str = "./data/logs",
     log_level: str = "INFO",
     rotation: str = "00:00",  # 每天午夜轮转
@@ -19,7 +24,12 @@ def setup_logger(
     """
     配置loguru日志系统
 
+    日志文件名格式：
+    - 当前日志：{app_name}_app.log
+    - 历史日志：{app_name}_app_YYYYMMDD.log（轮转后自动添加日期）
+
     Args:
+        app_name: 应用名称，用于日志文件名
         log_dir: 日志目录
         log_level: 日志级别
         rotation: 日志轮转设置
@@ -36,16 +46,16 @@ def setup_logger(
     logger.add(
         sys.stderr,
         format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
-               "<level>{level: <8}</level> | "
-               "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | "
-               "<level>{message}</level>",
+        "<level>{level: <8}</level> | "
+        "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | "
+        "<level>{message}</level>",
         level=log_level,
         colorize=True,
     )
 
     # 添加通用日志文件handler
     logger.add(
-        f"{log_dir}/app_{{time:YYYY-MM-DD}}.log",
+        f"{log_dir}/{app_name}_app.log",
         format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} | {message}",
         level=log_level,
         rotation=rotation,
@@ -57,7 +67,7 @@ def setup_logger(
 
     # 添加错误日志文件handler
     logger.add(
-        f"{log_dir}/error_{{time:YYYY-MM-DD}}.log",
+        f"{log_dir}/{app_name}_error.log",
         format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} | {message}",
         level="ERROR",
         rotation=rotation,
@@ -66,20 +76,7 @@ def setup_logger(
         encoding="utf-8",
     )
 
-    # 添加交易日志文件handler
-    logger.add(
-        f"{log_dir}/trade_{{time:YYYY-MM-DD}}.log",
-        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {message}",
-        level="INFO",
-        rotation=rotation,
-        retention=retention,
-        compression=compression,
-        encoding="utf-8",
-        filter=lambda record: "trade" in record["extra"].get("tags", []),
-    )
-
     logger.opt(exception=True)
-
     logger.info(f"日志系统初始化完成，日志目录: {log_dir}")
 
 
@@ -90,11 +87,7 @@ def enable_alarm_handler():
     """
     from src.utils.alarm_handler import alarm_handler
 
-    logger.add(
-        lambda record: alarm_handler(record),
-        level="ERROR",
-        enqueue=False
-    )
+    logger.add(lambda record: alarm_handler(record), level="ERROR", enqueue=False)
     logger.info("告警日志处理器已启用")
 
 

@@ -214,60 +214,22 @@ npm run dev     # 开发服务器 (默认端口5173，代理到8000)
 
 ## 测试方法
 
-### 启动后端服务
+### 快速测试
 ```bash
-# 方式1：直接运行
-python -m src.main
+# 激活虚拟环境
+conda activate qts
 
-# 方式2：后台运行（推荐）
-powershell -Command "Start-Process -FilePath 'python' -ArgumentList '-m','src.main' -WorkingDirectory 'D:\dev\py-trade' -WindowStyle Hidden"
+# 安装测试依赖
+pip install -r requirements-test.txt
 
-# 检查后端是否启动
-netstat -ano | findstr ":8000"
+# 运行所有测试
+pytest tests/ -v
+
+# 生成覆盖率报告
+pytest tests/ --cov=src --cov-report=html
 ```
 
-### 启动前端服务
-```bash
-cd web
-npm run dev
+### 详细文档
 
-# 默认端口3000，如果被占用会自动使用其他端口（如3001）
-# 访问地址：http://localhost:3000
-```
-
-### 使用Chrome DevTools测试
-1. 启动后端和前端服务
-2. 使用Chrome DevTools工具打开浏览器访问前端
-3. 测试流程：
-   - 登录系统（如需要）
-   - 连接交易系统
-   - 测试账户信息显示
-   - 测试持仓列表
-   - 测试报单功能
-   - 测试平仓功能
-   - 测试成交记录查询
-   - 测试定时任务操作
-
-### 常见测试场景
-1. **交易功能测试**
-   - 下单（开仓、平仓、市价、限价）
-   - 撤单
-   - 查看持仓变化
-   - 查看成交记录
-
-2. **数据查询测试**
-   - 查询今日成交（内存查询）
-   - 查询历史成交（数据库查询）
-   - 查询账户信息
-   - 查询持仓信息
-
-3. **定时任务测试**
-   - 查看任务列表
-   - 暂停/恢复任务
-   - 手动触发任务
-   - 验证任务执行日志
-
-4. **WebSocket测试**
-   - 检查连接状态
-   - 验证实时数据更新
-   - 测试断线重连
+- **[TESTING.md](./TESTING.md)** - 测试规范（流程、标准、报告）
+- **[tests/README.md](./tests/README.md)** - 测试操作指南（运行、编写、调试）

@@ -2,7 +2,7 @@
   <div class="account-tabs">
     <el-tabs v-model="activeTab" class="account-tabs-inner">
       <el-tab-pane label="账户信息" name="account">
-        <el-card shadow="hover" v-if="store.account">
+        <el-card shadow="hover" v-if="store.currentAccount">
           <template #header>
             <div class="card-header">
               <span>账户信息</span>
@@ -14,39 +14,39 @@
           </template>
 
           <el-descriptions :column="2" border>
-            <el-descriptions-item label="账户ID">{{ store.account.user_id || '-'}}</el-descriptions-item>
-            <el-descriptions-item label="券商">{{ store.account.broker_name || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="币种">{{ store.account.currency }}</el-descriptions-item>
+            <el-descriptions-item label="用户ID">{{ store.currentAccount.user_id || '-'}}</el-descriptions-item>
+            <el-descriptions-item label="券商">{{ store.currentAccount.broker_name || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="币种">{{ store.currentAccount.currency }}</el-descriptions-item>
             <el-descriptions-item label="风险率">
-              <el-tag :type="store.account.risk_ratio > 1 ? 'danger' : 'success'">
-                {{ formatNumber(store.account.risk_ratio) }}%
+              <el-tag :type="store.currentAccount.risk_ratio > 1 ? 'danger' : 'success'">
+                {{ formatNumber(store.currentAccount.risk_ratio) }}%
               </el-tag>
             </el-descriptions-item>
             <el-descriptions-item label="总资产" :span="2">
-              <span class="balance">¥{{ formatNumber(store.account.balance) }}</span>
+              <span class="balance">¥{{ formatNumber(store.currentAccount.balance) }}</span>
             </el-descriptions-item>
             <el-descriptions-item label="可用资金">
-              <span class="available">¥{{ formatNumber(store.account.available) }}</span>
+              <span class="available">¥{{ formatNumber(store.currentAccount.available) }}</span>
             </el-descriptions-item>
             <el-descriptions-item label="保证金占用">
-              ¥{{ formatNumber(store.account.margin) }}
+              ¥{{ formatNumber(store.currentAccount.margin) }}
             </el-descriptions-item>
             <el-descriptions-item label="浮动盈亏">
-              <span :class="store.account.float_profit >= 0 ? 'profit' : 'loss'">
-                ¥{{ formatNumber(store.account.float_profit) }}
+              <span :class="store.currentAccount.float_profit >= 0 ? 'profit' : 'loss'">
+                ¥{{ formatNumber(store.currentAccount.float_profit) }}
               </span>
             </el-descriptions-item>
             <el-descriptions-item label="持仓盈亏">
-              <span :class="store.account.position_profit >= 0 ? 'profit' : 'loss'">
-                ¥{{ formatNumber(store.account.position_profit) }}
+              <span :class="store.currentAccount.position_profit >= 0 ? 'profit' : 'loss'">
+                ¥{{ formatNumber(store.currentAccount.position_profit) }}
               </span>
             </el-descriptions-item>
             <el-descriptions-item label="平仓盈亏">
-              <span :class="store.account.close_profit >= 0 ? 'profit' : 'loss'">
-                ¥{{ formatNumber(store.account.close_profit) }}
+              <span :class="store.currentAccount.close_profit >= 0 ? 'profit' : 'loss'">
+                ¥{{ formatNumber(store.currentAccount.close_profit) }}
               </span>
             </el-descriptions-item>
-            <el-descriptions-item label="更新时间">{{ formatDateTime(store.account.updated_at) }}</el-descriptions-item>
+            <el-descriptions-item label="更新时间">{{ formatDateTime(store.currentAccount.updated_at) }}</el-descriptions-item>
           </el-descriptions>
         </el-card>
 
@@ -62,7 +62,7 @@
           </template>
 
           <el-table
-            :data="store.positions"
+            :data="store.currentPositions"
             stripe
             v-loading="loading"
             table-layout="fixed"
@@ -133,7 +133,7 @@
             </el-table-column>
           </el-table>
 
-          <el-empty v-if="store.positions.length === 0" description="暂无持仓" />
+          <el-empty v-if="store.currentPositions.length === 0" description="暂无持仓" />
         </el-card>
       </el-tab-pane>
 
@@ -219,7 +219,7 @@
               </template>
 
               <el-table
-                :data="store.orders"
+                :data="store.currentOrders"
                 stripe
                 v-loading="loading"
                 height="calc(100vh - 380px)"
@@ -274,7 +274,7 @@
                 </el-table-column>
               </el-table>
 
-              <el-empty v-if="store.orders.length === 0" description="暂无委托单" />
+              <el-empty v-if="store.currentOrders.length === 0" description="暂无委托单" />
             </el-card>
           </el-col>
         </el-row>
@@ -302,7 +302,7 @@
             </div>
           </template>
 
-          <el-table :data="filteredTrades" stripe v-loading="loading" height="400">
+          <el-table :data="store.currentTrades" stripe v-loading="loading" height="400">
             <el-table-column prop="trade_id" label="成交ID" width="180" show-overflow-tooltip />
             <el-table-column prop="symbol" label="合约" width="120" />
             <el-table-column prop="direction" label="方向" width="80">
@@ -327,104 +327,7 @@
             </el-table-column>
           </el-table>
 
-          <el-empty v-if="store.trades.length === 0" description="暂无成交记录" />
-        </el-card>
-      </el-tab-pane>
-
-      <el-tab-pane label="策略" name="strategy">
-        <el-card shadow="hover">
-          <template #header>
-            <div class="card-header">
-              <span>策略管理</span>
-              <el-space>
-                <el-button type="success" @click="handleStartAll" :loading="loading">
-                  <el-icon><VideoPlay /></el-icon>
-                  启动全部
-                </el-button>
-                <el-button type="warning" @click="handleStopAll" :loading="loading">
-                  <el-icon><VideoPause /></el-icon>
-                  停止全部
-                </el-button>
-                <el-button @click="loadStrategies" :loading="loading">
-                  <el-icon><Refresh /></el-icon>
-                  刷新
-                </el-button>
-              </el-space>
-            </div>
-          </template>
-
-          <el-table :data="strategies" stripe v-loading="loading" table-layout="fixed">
-            <el-table-column prop="strategy_id" label="策略ID" width="150" />
-            <el-table-column prop="config.strategy_type" label="策略类型" width="100">
-              <template #default="{ row }">
-                <el-tag size="small">
-                  {{ row.config.strategy_type === 'bar' ? 'K线策略' : row.config.strategy_type === 'tick' ? 'Tick策略' : '混合策略' }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column prop="config.symbol" label="合约" width="120">
-              <template #default="{ row }">
-                {{ row.config.symbol || '-' }}
-              </template>
-            </el-table-column>
-            <el-table-column prop="config.exchange" label="交易所" width="100">
-              <template #default="{ row }">
-                {{ row.config.exchange || '-' }}
-              </template>
-            </el-table-column>
-            <el-table-column label="运行状态" width="100">
-              <template #default="{ row }">
-                <el-tag :type="row.active ? 'success' : 'info'" size="small">
-                  {{ row.active ? '运行中' : '已停止' }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column prop="config.volume_per_trade" label="手数/次" width="90" />
-            <el-table-column prop="config.max_position" label="最大持仓" width="90" />
-            <el-table-column label="策略参数" min-width="200">
-              <template #default="{ row }">
-                <el-descriptions :column="1" size="small" border>
-                  <el-descriptions-item v-if="row.config.rsi_period !== undefined" label="RSI周期">
-                    {{ row.config.rsi_period }}
-                  </el-descriptions-item>
-                  <el-descriptions-item v-if="row.config.rsi_long_threshold !== undefined" label="多头阈值">
-                    {{ row.config.rsi_long_threshold }}
-                  </el-descriptions-item>
-                  <el-descriptions-item v-if="row.config.rsi_short_threshold !== undefined" label="空头阈值">
-                    {{ row.config.rsi_short_threshold }}
-                  </el-descriptions-item>
-                  <el-descriptions-item v-if="row.config.take_profit_pct !== undefined" label="止盈%">
-                    {{ (row.config.take_profit_pct * 100).toFixed(1) }}%
-                  </el-descriptions-item>
-                  <el-descriptions-item v-if="row.config.stop_loss_pct !== undefined" label="止损%">
-                    {{ (row.config.stop_loss_pct * 100).toFixed(1) }}%
-                  </el-descriptions-item>
-                </el-descriptions>
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="120" fixed="right">
-              <template #default="{ row }">
-                <el-button
-                  v-if="!row.active"
-                  type="success"
-                  size="small"
-                  @click="handleStartStrategy(row.strategy_id)"
-                >
-                  启动
-                </el-button>
-                <el-button
-                  v-else
-                  type="warning"
-                  size="small"
-                  @click="handleStopStrategy(row.strategy_id)"
-                >
-                  停止
-                </el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-
-          <el-empty v-if="strategies.length === 0" description="暂无策略" />
+          <el-empty v-if="store.currentTrades.length === 0" description="暂无成交记录" />
         </el-card>
       </el-tab-pane>
     </el-tabs>
@@ -576,9 +479,9 @@ import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useStore } from '@/stores'
-import { orderApi, positionApi, quoteApi, strategyApi } from '@/api'
+import { orderApi, positionApi, quoteApi } from '@/api'
 import wsManager from '@/ws'
-import type { ManualOrderRequest, Position, Order, Quote, StrategyRes } from '@/types'
+import type { ManualOrderRequest, Position, Order, Quote } from '@/types'
 
 const route = useRoute()
 const store = useStore()
@@ -599,7 +502,6 @@ const orderTab = ref('PENDING')
 const selectedOrders = ref<Order[]>([])
 const quotes = ref<Quote[]>([])
 const tradeDateFilter = ref(new Date().toISOString().split('T')[0])
-const strategies = ref<StrategyRes[]>([])
 
 const statusMap: Record<string, string> = {
   'PENDING': 'ALIVE',
@@ -612,7 +514,8 @@ const orderForm = reactive<ManualOrderRequest>({
   direction: 'BUY',
   offset: 'OPEN',
   volume:1,
-  price: null
+  price: null,
+  account_id: store.selectedAccountId || undefined
 })
 
 const cancelForm = reactive({
@@ -637,10 +540,6 @@ const subscribeForm = reactive({
   symbol: ''
 })
 
-const filteredTrades = computed(() => {
-  return store.trades
-})
-
 function handleTickUpdate(tickData: Quote) {
   if (!tickData || !tickData.symbol) return
 
@@ -660,7 +559,8 @@ function handleTickUpdate(tickData: Quote) {
 async function loadAccountData() {
   loading.value = true
   try {
-    await store.loadAccount()
+    // 统一使用 loadAllAccounts 刷新账户数据
+    await store.loadAllAccounts()
   } finally {
     loading.value = false
   }
@@ -669,7 +569,7 @@ async function loadAccountData() {
 async function loadPositionData() {
   loading.value = true
   try {
-    await store.loadPositions()
+    await store.loadPositions(store.selectedAccountId || undefined)
   } finally {
     loading.value = false
   }
@@ -679,7 +579,7 @@ async function loadOrderData() {
   loading.value = true
   try {
     const backendStatus = statusMap[orderTab.value]
-    await store.loadOrders(backendStatus)
+    await store.loadOrders(backendStatus, store.selectedAccountId || undefined)
   } finally {
     loading.value = false
   }
@@ -688,7 +588,7 @@ async function loadOrderData() {
 async function loadTradeData() {
   loading.value = true
   try {
-    await store.loadTrades(tradeDateFilter.value)
+    await store.loadTrades(tradeDateFilter.value, store.selectedAccountId || undefined)
   } finally {
     loading.value = false
   }
@@ -697,7 +597,7 @@ async function loadTradeData() {
 async function loadQuotes() {
   loadingQuotes.value = true
   try {
-    const result = await quoteApi.getSubscribedQuotes()
+    const result = await quoteApi.getSubscribedQuotes(store.selectedAccountId || undefined)
     quotes.value = result || []
   } catch (error: any) {
     ElMessage.error(`加载行情失败: ${error.message}`)
@@ -714,7 +614,7 @@ async function handleSubscribe() {
 
   subscribing.value = true
   try {
-    await quoteApi.subscribeSymbol(subscribeForm.symbol)
+    await quoteApi.subscribeSymbol(subscribeForm.symbol, store.selectedAccountId || undefined)
     ElMessage.success(`已订阅 ${subscribeForm.symbol}`)
     showSubscribeDialog.value = false
     subscribeForm.symbol = ''
@@ -725,59 +625,6 @@ async function handleSubscribe() {
     subscribing.value = false
   }
 }
-
-async function loadStrategies() {
-  loading.value = true
-  try {
-    strategies.value = await strategyApi.getStrategies()
-  } catch (error: any) {
-    ElMessage.error(`加载策略失败: ${error.message}`)
-  } finally {
-    loading.value = false
-  }
-}
-
-async function handleStartStrategy(strategyId: string) {
-  try {
-    await strategyApi.startStrategy(strategyId)
-    ElMessage.success(`策略 ${strategyId} 已启动`)
-    await loadStrategies()
-  } catch (error: any) {
-    ElMessage.error(`启动策略失败: ${error.message}`)
-  }
-}
-
-async function handleStopStrategy(strategyId: string) {
-  try {
-    await strategyApi.stopStrategy(strategyId)
-    ElMessage.success(`策略 ${strategyId} 已停止`)
-    await loadStrategies()
-  } catch (error: any) {
-    ElMessage.error(`停止策略失败: ${error.message}`)
-  }
-}
-
-async function handleStartAll() {
-  try {
-    await strategyApi.startAllStrategies()
-    ElMessage.success('所有策略已启动')
-    await loadStrategies()
-  } catch (error: any) {
-    ElMessage.error(`启动策略失败: ${error.message}`)
-  }
-}
-
-async function handleStopAll() {
-  try {
-    await strategyApi.stopAllStrategies()
-    ElMessage.success('所有策略已停止')
-    await loadStrategies()
-  } catch (error: any) {
-    ElMessage.error(`停止策略失败: ${error.message}`)
-  }
-}
-
-
 
 function handleOrderSelectionChange(selection: Order[]) {
   selectedOrders.value = selection
@@ -806,7 +653,12 @@ async function handleCreateOrder() {
 
   creating.value = true
   try {
-    const result = await orderApi.createOrder(orderForm)
+    // 动态设置当前选中的账户ID
+    const orderData = {
+      ...orderForm,
+      account_id: store.selectedAccountId || undefined
+    }
+    const result = await orderApi.createOrder(orderData)
     ElMessage.success(`报单成功，委托单ID: ${result.order_id}`)
     showOrderConfirmDialog.value = false
     showOrderInputDialog.value = false
@@ -824,7 +676,7 @@ async function handleCreateOrder() {
 }
 
 async function handleCancel(orderId: string) {
-  const order = store.orders.find(o => o.order_id === orderId)
+  const order = store.currentOrders.find(o => o.order_id === orderId)
   if (!order) return
 
   cancelForm.orderId = orderId
@@ -839,7 +691,7 @@ async function handleCancel(orderId: string) {
 
 async function handleCancelOrderConfirm() {
   try {
-    await orderApi.cancelOrder(cancelForm.orderId)
+    await orderApi.cancelOrder(cancelForm.orderId, store.selectedAccountId || undefined)
     ElMessage.success('撤单成功')
     showCancelDialog.value = false
     await loadOrderData()
@@ -856,7 +708,8 @@ async function handleClosePositionConfirm() {
       direction: closeForm.direction,
       offset: closeForm.offset,
       volume: closeForm.volume,
-      price: closeForm.price
+      price: closeForm.price,
+      accountId: store.selectedAccountId || undefined
     })
     ElMessage.success('平仓成功')
     showCloseDialog.value = false
@@ -925,8 +778,6 @@ watch(activeTab, (newTab) => {
     loadPositionData()
   } else if (newTab === 'trade') {
     loadTradeData()
-  } else if (newTab === 'strategy') {
-    loadStrategies()
   }
 })
 
@@ -942,7 +793,8 @@ watch(orderTab, () => {
   }
 })
 
-onMounted(() => {
+onMounted(async () => {
+  // 根据当前标签加载相应数据
   if (activeTab.value === 'trading') {
     loadQuotes()
     loadOrderData()
@@ -951,8 +803,6 @@ onMounted(() => {
     loadPositionData()
   } else if (activeTab.value === 'trade') {
     loadTradeData()
-  } else if (activeTab.value === 'strategy') {
-    loadStrategies()
   }
 
   wsManager.onTickUpdate(handleTickUpdate)

@@ -9,13 +9,19 @@ const routes: RouteRecordRaw[] = [
     path: '/dashboard',
     name: 'Dashboard',
     component: () => import('@/views/Dashboard.vue'),
-    meta: { title: '总览' }
+    meta: { title: '总览', hideHeader: true }
   },
   {
     path: '/account',
     name: 'Account',
     component: () => import('@/views/Account.vue'),
     meta: { title: '账户' }
+  },
+  {
+    path: '/strategy',
+    name: 'Strategy',
+    component: () => import('@/views/Strategy.vue'),
+    meta: { title: '策略' }
   },
   {
     path: '/rotation',
