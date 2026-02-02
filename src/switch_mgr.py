@@ -79,7 +79,11 @@ class SwitchPosManager:
         try:
             lines = csv_text.strip().split("\n")
             if len(lines) < 2:
-                raise ValueError("CSV文件为空或格式错误")
+                logger.warning(f"换仓文件 {filename} 为空或格式错误")
+                return {
+                    "imported": 0,
+                    "failed": 0,
+                }
 
             header = lines[0].strip().split(",")
             logger.info(f"准备导入换仓文件，文件名: {filename}, 模式: {mode}, 列: {header}")
@@ -256,17 +260,17 @@ class SwitchPosManager:
 
     def scan_and_process_orders(self) -> None:
         """扫描并处理交易指令文件"""
-        try:
-            today_dir = Path(self.switchPos_files_dir) / datetime.now().strftime("%Y%m%d")
-            today_str = datetime.now().strftime("%Y%m%d")
-            csv_files = [f for f in today_dir.glob("*.csv") if today_str in f.name and self.config.account_id in f.name]
-            if not csv_files:
-                return
+        today_dir = Path(self.switchPos_files_dir) / datetime.now().strftime("%Y%m%d")
+        today_str = datetime.now().strftime("%Y%m%d")
+        csv_files = [f for f in today_dir.glob("*.csv") if today_str in f.name and self.config.account_id in f.name]
+        if not csv_files:
+            return
 
-            #logger.info(f"扫描到 {len(csv_files)} 个换仓文件")
-            session = get_session()
-            for csv_file in csv_files:
-                # 检查该文件是否已导入
+        #logger.info(f"扫描到 {len(csv_files)} 个换仓文件")
+        session = get_session()
+        for csv_file in csv_files:
+            # 检查该文件是否已导入
+            try:
                 existing = session.query(OrderFile).filter_by(file_name=csv_file.name).first()
                 if existing:
                     continue
@@ -274,7 +278,7 @@ class SwitchPosManager:
                 # 导入文件
                 result = self.import_csv(csv_file.read_text(encoding="gbk"), csv_file.name, mode="replace")
                 # 记录导入成功，写入导入记录
-                if result and result.get("imported", 0) > 0:
+                if result :
                     record = OrderFile(
                         file_name=csv_file.name,
                         file_path=str(csv_file.parent),
@@ -283,9 +287,8 @@ class SwitchPosManager:
                     session.add(record)
                     session.commit()
                     logger.info(f"文件 {csv_file.name} 导入记录已保存")
-
-        except Exception as e:
-            logger.error(f"扫描订单文件时出错: {e}")
+            except Exception as e:
+                logger.error(f"处理文件 {csv_file.name} 时出错: {e}")
 
     def execute_position_rotation(self, trading_type: str = "", is_manual: bool = False) -> None:
         """
@@ -627,3 +630,74 @@ class SwitchPosManager:
         except Exception as e:
             logger.error(f"执行订单指令时出错: {e}")
             return False
+
+    def initialize_for_new_trading_day(self) -> None:
+        """
+        为新交易日初始化换仓管理器
+        重置工作状态，清理过期数据
+        """
+        try:
+            logger.info("开始初始化换仓管理器以迎接新交易日...")
+
+            # 重置工作状态
+            self.working = False
+            self.running_instructions = None
+            self.is_manual = False
+
+            # 获取数据库会话
+            session = get_session()
+            if not session:
+                logger.error("无法获取数据库会话，跳过初始化")
+                return
+
+            try:
+                from datetime import datetime, timedelta
+
+                # 获取昨日日期
+                yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
+                today = datetime.now().strftime("%Y%m%d")
+
+                # 清理昨日未完成的指令（将其标记为过期）
+                expired_count = (
+                    session.query(RotationInstructionPo)
+                    .filter(
+                        RotationInstructionPo.trading_date == yesterday,
+                        RotationInstructionPo.status.notin_(["COMPLETED"]),
+                        RotationInstructionPo.is_deleted == False
+                    )
+                    .update({
+                        "status": "EXPIRED",
+                        "error_message": "交易日切换，指令过期"
+                    }, synchronize_session=False)
+                )
+
+                if expired_count > 0:
+                    logger.info(f"已将 {expired_count} 条昨日未完成指令标记为过期")
+
+                # 检查今日是否有换仓指令
+                today_count = (
+                    session.query(RotationInstructionPo)
+                    .filter(
+                        RotationInstructionPo.trading_date == today,
+                        RotationInstructionPo.is_deleted == False,
+                        RotationInstructionPo.enabled == True
+                    )
+                    .count()
+                )
+
+                if today_count > 0:
+                    logger.info(f"今日有 {today_count} 条换仓指令等待执行")
+                else:
+                    logger.info("今日暂无换仓指令")
+
+                session.commit()
+                logger.info("换仓管理器初始化完成")
+
+            except Exception as e:
+                session.rollback()
+                logger.error(f"初始化换仓管理器数据库操作时出错: {e}")
+            finally:
+                session.close()
+
+        except Exception as e:
+            logger.error(f"初始化换仓管理器时出错: {e}", exc_info=True)
