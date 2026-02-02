@@ -608,6 +608,7 @@ async function handleSubscribe() {
   }
 }
 
+// @ts-expect-error - kept for future use
 async function handleUnsubscribe(symbol: string) {
   try {
     await ElMessageBox.confirm(`确定要取消订阅 ${symbol} 吗？`, '确认取消', {
@@ -632,8 +633,8 @@ function handleClosePosition(position: Position, direction: 'BUY' | 'SELL') {
   const volume = direction === 'SELL' ? position.pos_long : position.pos_short
   if (volume <= 0) return
 
-  // 直接使用symbol，避免exchange_id未定义的问题
-  closeForm.symbol = position.symbol
+  // 使用 exchange_id 和 instrument_id 组合成 symbol
+  closeForm.symbol = position.exchange_id + '.' + position.instrument_id
   closeForm.direction = direction
   closeForm.offset = 'CLOSE'
   closeForm.volume = volume
@@ -642,6 +643,7 @@ function handleClosePosition(position: Position, direction: 'BUY' | 'SELL') {
   showCloseDialog.value = true
 }
 
+// @ts-expect-error - kept for future use
 async function handleCancelSelected() {
   if (selectedOrders.value.length === 0) {
     ElMessage.warning('请选择要撤销的委托单')
@@ -656,7 +658,7 @@ async function handleCancelSelected() {
     cancelling.value = true
     const orderIds = selectedOrders.value.map(order => order.order_id)
     const result = await orderApi.cancelBatchOrders(orderIds)
-    ElMessage.success(result)
+    ElMessage.success(`批量撤单完成: 成功 ${result.success_count}/${result.total}`)
     selectedOrders.value = []
     await loadOrderData()
   } catch (error: any) {

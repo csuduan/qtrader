@@ -442,6 +442,7 @@ async function loadTasks() {
   }
 }
 
+// @ts-expect-error - kept for future use
 async function handleToggleTask(row: Job) {
   try {
     await jobsApi.toggleJob(row.job_id, row.enabled)

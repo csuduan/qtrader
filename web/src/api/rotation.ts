@@ -14,28 +14,32 @@ export const rotationApi = {
     status?: string
     enabled?: boolean
   }): Promise<{ instructions: RotationInstruction[], rotation_status: { working: boolean, is_manual: boolean } }> => {
-    return await api.get<{ instructions: RotationInstruction[], rotation_status: { working: boolean, is_manual: boolean } }>('/rotation', { params })
+    const result = await api.get<{ instructions: RotationInstruction[], rotation_status: { working: boolean, is_manual: boolean } }>('/rotation', { params })
+    return result as unknown as { instructions: RotationInstruction[], rotation_status: { working: boolean, is_manual: boolean } }
   },
 
   /**
    * 获取指定换仓指令
    */
   getRotationInstruction: async (id: number): Promise<RotationInstruction> => {
-    return await api.get<RotationInstruction>(`/rotation/${id}`)
+    const result = await api.get<RotationInstruction>(`/rotation/${id}`)
+    return result as unknown as RotationInstruction
   },
 
   /**
    * 创建换仓指令
    */
   createRotationInstruction: async (data: any): Promise<RotationInstruction> => {
-    return await api.post<RotationInstruction>('/rotation', data)
+    const result = await api.post<RotationInstruction>('/rotation', data)
+    return result as unknown as RotationInstruction
   },
 
   /**
    * 更新换仓指令
    */
   updateRotationInstruction: async (id: number, data: any): Promise<RotationInstruction> => {
-    return await api.put<RotationInstruction>(`/rotation/${id}`, data)
+    const result = await api.put<RotationInstruction>(`/rotation/${id}`, data)
+    return result as unknown as RotationInstruction
   },
 
   /**
@@ -49,7 +53,8 @@ export const rotationApi = {
    * 执行换仓指令
    */
   executeRotationInstruction: async (id: number): Promise<RotationInstruction> => {
-    return await api.post<RotationInstruction>(`/rotation/${id}/execute`)
+    const result = await api.post<RotationInstruction>(`/rotation/${id}/execute`)
+    return result as unknown as RotationInstruction
   },
 
   /**
@@ -63,14 +68,16 @@ export const rotationApi = {
    * 批量执行换仓指令
    */
   batchExecuteInstructions: async (ids: number[]): Promise<{ success: number; failed: number; total: number }> => {
-    return await api.post<{ success: number; failed: number; total: number }>('/rotation/batch/execute', { ids })
+    const result = await api.post<{ success: number; failed: number; total: number }>('/rotation/batch/execute', { ids })
+    return result as unknown as { success: number; failed: number; total: number }
   },
 
   /**
    * 批量删除换仓指令
    */
   batchDeleteInstructions: async (ids: number[]): Promise<{ deleted: number }> => {
-    return await api.post<{ deleted: number }>('/rotation/batch/delete', { ids })
+    const result = await api.post<{ deleted: number }>('/rotation/batch/delete', { ids })
+    return result as unknown as { deleted: number }
   },
 
   /**

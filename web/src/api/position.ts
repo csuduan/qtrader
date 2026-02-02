@@ -9,14 +9,14 @@ export const positionApi = {
    * 获取持仓列表
    */
   getPositions: async (): Promise<Position[]> => {
-    return api.get<Position[]>('/position')
+    return await api.get<Position[]>('/position') as unknown as Position[]
   },
 
   /**
    * 获取指定合约持仓
    */
   getPositionBySymbol: async (symbol: string): Promise<Position[]> => {
-    return api.get<Position[]>(`/position/${symbol}`)
+    return await api.get<Position[]>(`/position/${symbol}`) as unknown as Position[]
   },
 
   /**
@@ -29,7 +29,7 @@ export const positionApi = {
     volume: number
     price?: number
   }): Promise<{ order_id: string }> => {
-    return api.post<{ order_id: string }>('/position/close', data)
+    return await api.post<{ order_id: string }>('/position/close', data) as unknown as { order_id: string }
   },
 
   /**
@@ -42,6 +42,6 @@ export const positionApi = {
     volume: number
     price?: number
   }>): Promise<{ success_count: number; total: number; failed_orders: any[] }> => {
-    return api.post<{ success_count: number; total: number; failed_orders: any[] }>('/position/close-batch', { positions })
+    return await api.post<{ success_count: number; total: number; failed_orders: any[] }>('/position/close-batch', { positions }) as unknown as { success_count: number; total: number; failed_orders: any[] }
   }
 }

@@ -12,27 +12,27 @@ export const jobsApi = {
     group?: string
     enabled?: boolean
   }): Promise<Job[]> => {
-    return api.get<Job[]>('/jobs', { params })
+    return await api.get<Job[]>('/jobs', { params }) as unknown as Job[]
   },
 
   /**
    * 获取指定任务
    */
   getJob: async (jobId: string): Promise<Job> => {
-    return api.get<Job>(`/jobs/${jobId}`)
+    return await api.get<Job>(`/jobs/${jobId}`) as unknown as Job
   },
 
   /**
    * 切换任务启用状态
    */
   toggleJob: async (jobId: string, enabled: boolean): Promise<void> => {
-    return api.put(`/jobs/${jobId}/toggle`, { enabled })
+    await api.put(`/jobs/${jobId}/toggle`, { enabled })
   },
 
   /**
    * 操作任务（暂停/恢复/触发）
    */
   operateJob: async (jobId: string, action: 'pause' | 'resume' | 'trigger'): Promise<void> => {
-    return api.post(`/jobs/${jobId}/operate`, { action })
+    await api.post(`/jobs/${jobId}/operate`, { action })
   }
 }

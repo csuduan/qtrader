@@ -326,6 +326,7 @@ function getProgress(total: number, remaining: number): number {
   return Math.round(((total - remaining) / total) * 100)
 }
 
+// @ts-expect-error - kept for future use
 function getProgressStatus(total: number, remaining: number): string {
   const percentage = getProgress(total, remaining)
   if (percentage === 100) return 'success'
