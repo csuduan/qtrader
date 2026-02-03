@@ -435,7 +435,7 @@ class Trader:
             logger.error(f"Trader [{self.account_id}] 下单失败: {e}")
             return None
 
-    @request("cancel")
+    @request("cancel_req")
     async def _req_cancel(self, data: dict) -> bool:
         """
         处理撤单请求

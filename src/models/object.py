@@ -93,21 +93,13 @@ class Exchange(str, Enum):
 
 class Interval(str, Enum):
     """K线周期"""
-
     TICK = "tick"
-    MINUTE = "1m"
-    HOUR = "1h"
-    DAILY = "d"
-    WEEKLY = "w"
-
-
-class StrategyType(str, Enum):
-    """策略类型"""
-
-    TICK_DRIVEN = "tick"
-    BAR_DRIVEN = "bar"
-    BOTH = "both"
-
+    MINUTE = "M1m"
+    MINUTE_5 = "M5"
+    MINUTE_15 = "M15"
+    MINUTE_30 = "M30"
+    HOUR = "H1"
+    DAILY = "D1"
 
 # ==================== 核心数据模型 ====================
 
@@ -166,8 +158,7 @@ class BarData(BaseModel):
 
     # 必需字段
     symbol: str = Field(..., description="合约代码")
-    exchange: Exchange = Field(..., description="交易所")
-    interval: Interval = Field(..., description="K线周期")
+    interval: str = Field(..., description="K线周期")
     datetime: DateTime = Field(..., description="K线时间")
 
     open_price: float = Field(..., description="开盘价")
@@ -185,7 +176,11 @@ class BarData(BaseModel):
 
     @property
     def std_symbol(self) -> str:
-        return f"{self.symbol}.{self.exchange.value}"
+        return f"{self.symbol}"
+    
+    @property
+    def id(self) -> str:
+        return f"{self.symbol}-{self.interval}"
 
 
 class OrderData(BaseModel):

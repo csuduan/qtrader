@@ -3,12 +3,14 @@ TqSdk Gateway适配器
 """
 
 import threading
+import asyncio
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Set, Union
 
 from tqsdk import TqAccount, TqApi, TqAuth, TqKq, TqSim, data_extension
 from tqsdk.objs import Account, Order, Position, Quote, Trade
+from pandas import DataFrame
 
 from src.utils.config_loader import GatewayConfig
 from src.models.object import (
@@ -63,10 +65,12 @@ class TqGateway(BaseGateway):
         # TqSdk原始数据缓存(用于is_changing检查)
         self._account: Optional[Account] = None
         self._positions: Dict[str, Position] = {}
-        self._orders: Dict[str, Order] = {}
+        self._orders: Dict[str, Order] = {} 
         self._trades: Dict[str, Trade] = {}
         self._quotes: Dict[str, Quote] = {}
-
+        # 自定义换仓
+        self._klines: Dict[str, DataFrame] = {}
+        self._pending_orders: Dict[str, Order] = {}
         # 合约符号映射(原始symbol -> 统一symbol)
         self._upper_symbols: Dict[str, str] = {}
         self._contracts: Dict[str, ContractData] = {}
@@ -124,10 +128,10 @@ class TqGateway(BaseGateway):
 
             # 发送初始数据
             self._emit_account(self._convert_account(self._account))
-            for position in self._positions.values():
-                self._emit_position(self._convert_position(position))
-            for order in self._orders.values():
-                self._emit_order(self._convert_order(order))
+            # for position in self._positions.values():
+            #     self._emit_position(self._convert_position(position))
+            # for order in self._orders.values():
+            #     self._emit_order(self._convert_order(order))
 
             # 获取合约列表
             ls = self.api.query_quotes(ins_class=["FUTURE"], expired=False)
@@ -217,15 +221,23 @@ class TqGateway(BaseGateway):
                 return True
             if self.api is None:
                 return True
-            quotes: List[Quote] = self.api.get_quote_list(symbols=subscribe_symbols)
-            for quote in quotes:
-                self._quotes[quote.instrument_id] = quote
+            for symbol in subscribe_symbols:
+                quote = self.api.get_quote(symbol)
+                self._quotes[symbol] = quote
             logger.info(f"订阅行情: {subscribe_symbols}")
 
             return True
         except Exception as e:
             logger.exception(f"订阅行情失败: {e}")
             return False
+
+    def subscribe_bars(self, symbol: str, interval: str) -> bool:
+        """订阅K线数据"""
+        seconds = self._interval_to_seconds(interval)
+        data_length = 3600*24//seconds
+        kline = self.api.get_kline_serial( symbol=self._format_symbol(symbol),duration_seconds=seconds,data_length=data_length)
+        self._klines[(symbol,interval)] = kline
+        logger.info(f"订阅K线数据: {symbol} {interval}")
 
     def send_order(self, req: OrderRequest) -> Optional[OrderData]:
         """下单"""
@@ -269,8 +281,8 @@ class TqGateway(BaseGateway):
                 f"下单成功: {req.symbol} {req.direction.value} {req.offset.value} {req.volume}手 价格：{price}, order_id: {order_id}"
             )
 
-            # 更新缓存
-            self._orders[order_id] = order
+            # 推送通知
+            self._pending_orders[order_id] = order
             order_data = self._convert_order(order)
             self._emit_order(order_data)
             return order_data
@@ -368,25 +380,41 @@ class TqGateway(BaseGateway):
 
             has_data = self.api.wait_update(time.time() + timeout)
             if has_data:
-                if self.api.is_changing(self._account):
-                    self._emit_account(self._convert_account(self._account))
-
-                if self.api.is_changing(self._positions):
-                    for position in self._positions.values():
-                        self._emit_position(self._convert_position(position))
-
-                for quote in self._quotes.values():
-                    if self.api.is_changing(quote):
-                        self._emit_tick(self._convert_tick(quote))
-
-                if self.api.is_changing(self._orders):
-                    self._orders = self.api.get_order()
-                    for order in self._orders.values():
+                for order in self._pending_orders.values():
+                    # 检查报单变动
+                    if self.api.is_changing(order):
                         self._emit_order(self._convert_order(order))
+                        if order.status == 'FINISHED':
+                            # 移除已完成交挂单
+                            self._pending_orders.pop(order.order_id, None)
 
                 if self.api.is_changing(self._trades):
+                    # 检查成交变动
                     for trade in self._trades.values():
-                        self._emit_trade(self._convert_trade(trade))
+                        if self.api.is_changing(trade):
+                            self._emit_trade(self._convert_trade(trade))
+
+                             
+                if self.api.is_changing(self._positions):
+                    # 检查持仓变动
+                    for position in self._positions.values():
+                        if self.api.is_changing(position):
+                            self._emit_position(self._convert_position(position))
+                
+                if self.api.is_changing(self._account):
+                    # 检查账户变动
+                    self._emit_account(self._convert_account(self._account))
+                
+                for quote in self._quotes.values():
+                    # 检查行情变动
+                    if self.api.is_changing(quote):
+                        self._emit_tick(self._convert_tick(quote))
+                
+                for (symbol,interval),kline in self._klines.items():
+                    # 检查K线变动
+                    if self.api.is_changing(kline.iloc[-1], "datetime"):
+                        self._emit_bar(self._convert_bar(symbol,interval,kline.iloc[-1]))
+
 
             return has_data  # type: ignore[no-any-return]
         except Exception as e:
@@ -394,6 +422,15 @@ class TqGateway(BaseGateway):
             return False
 
     # ==================== 数据转换 ====================
+    def _interval_to_seconds(self, interval: str) -> int:
+        """将时间间隔转换为秒数"""
+        if interval.startswith("M"):
+            return int(interval[1:]) * 60
+        elif interval.startswith("H"):
+            return int(interval[1:]) * 60 * 60
+        else:
+            raise ValueError(f"暂不支持的时间间隔: {interval}")
+
     def _convert_account(self, account: Account) -> AccountData:
         """转换账户数据"""
         return AccountData(
@@ -499,7 +536,7 @@ class TqGateway(BaseGateway):
             datetime_obj = 0
 
         return TickData(
-            symbol=instrument_id,
+            symbol=instrument_id.split(".")[1],
             exchange=self._parse_exchange(exchange_id),
             datetime=datetime.fromtimestamp(datetime_obj / 1e9) if datetime_obj else datetime.now(),
             last_price=float(quote.get("last_price", 0)),
@@ -516,6 +553,20 @@ class TqGateway(BaseGateway):
             pre_close=float(quote.get("pre_open_interest", 0)),
             limit_up=float(quote.get("upper_limit", 0)),
             limit_down=float(quote.get("lower_limit", 0)),
+        )
+
+    def _convert_bar(self, symbol:str,interval:str,data) -> BarData:
+        """转换K线数据"""
+        return BarData(
+            symbol=symbol,
+            interval=interval,
+            datetime=datetime.fromtimestamp(data["datetime"] / 1e9),
+
+            open_price=float(data["open"]),
+            high_price=float(data["high"]),
+            low_price=float(data["low"]),
+            close_price=float(data["close"]),
+            volume=float(data["volume"]),
         )
 
     # ==================== 辅助方法 ====================

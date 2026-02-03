@@ -362,8 +362,22 @@ class TradingEngine:
             bool: 订阅是否成功
         """
         if self.gateway:
-            return self.gateway.subscribe(symbol) if symbol else False
-        return False
+            self.gateway.subscribe(symbol)
+        return True
+    
+    def subscribe_bars(self, symbol: str,interval:str) -> bool:
+        """
+        订阅合约行情（通过Gateway）
+
+        Args:
+            symbol: 合约代码
+
+        Returns:
+            bool: 订阅是否成功
+        """
+        if self.gateway:
+            self.gateway.subscribe_bars(symbol,interval)
+        return True
 
     def _emit_event(self, event_type: str, data: Any) -> None:
         """
@@ -384,17 +398,7 @@ class TradingEngine:
 
     def _on_bar(self, bar):
         """Gateway bar回调 → EventEngine"""
-        bar_dict = {
-            "symbol": f"{bar.symbol}.{bar.exchange.value}",
-            "interval": bar.interval.value,
-            "datetime": bar.datetime.isoformat(),
-            "open_price": bar.open_price,
-            "high_price": bar.high_price,
-            "low_price": bar.low_price,
-            "close_price": bar.close_price,
-            "volume": bar.volume or 0,
-        }
-        self.event_engine.put(EventTypes.KLINE_UPDATE, bar_dict)
+        self.event_engine.put(EventTypes.KLINE_UPDATE, bar)
 
     def _on_order(self, order):
         """Gateway order回调 → EventEngine"""

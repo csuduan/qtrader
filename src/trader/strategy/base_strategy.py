@@ -3,7 +3,7 @@
 定义策略的接口和基本功能
 """
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, List, Optional
 
 from src.models.object import (
     BarData,
@@ -24,12 +24,16 @@ logger = get_logger(__name__)
 class BaseStrategy:
     """策略基类"""
 
+    # 订阅bar列表（格式："symbol-interval"）
+
     def __init__(self, strategy_id: str,strategy_config:StrategyConfig):
         self.strategy_id = strategy_id
         self.config: StrategyConfig = strategy_config
         self.active: bool = False
         self.inited: bool = False
         self.enabled: bool = True
+        self.bar_subscriptions: List[str] = [] 
+
 
         # 策略管理器引用（代替直接的 trading_engine）
         self.strategy_manager: Optional["StrategyManager"] = None

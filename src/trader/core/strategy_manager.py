@@ -9,9 +9,10 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, Optional, List
 
 from src.app_context import get_app_context
-from src.models.object import Direction, Offset
+from src.models.object import BarData, Direction, Exchange, Offset,TickData
 from src.utils.event_engine import EventEngine, EventTypes
 from src.utils.logger import get_logger
+from src.utils.bar_generator import MultiSymbolBarGenerator, parse_interval
 
 from src.trader.strategy.base_strategy import BaseStrategy
 from src.utils.config_loader import StrategyConfig
@@ -101,6 +102,11 @@ class StrategyManager:
         self.order_strategy_map: Dict[str, str] = {}
         self.event_engine: Optional[EventEngine] = None
 
+        # Bar生成器管理器 (symbol -> BarGenerator)
+        self._bar_generators: Dict[str, MultiSymbolBarGenerator] = {}
+        # 策略bar订阅映射 (symbol -> {strategy_id -> [interval_str]})
+        self._strategy_bar_subscriptions: Dict[str, Dict[str, List[str]]] = {}
+
     async def start(self) -> bool:
         """
         启动策略管理器
@@ -151,7 +157,14 @@ class StrategyManager:
                 # 按需订阅合约行情
                 symbol = config.params.get("symbol", "")
                 if symbol:
-                    self.subscribe_symbol(symbol)
+                    self.subscribe_symbol(symbol,config.bar)
+                    strategy.bar_subscriptions.append(f"{symbol}-{config.bar}")
+                    # 如果策略需要bar，初始化BarGenerator订阅
+                    # if config.bar:
+                    #     try:
+                    #         self._setup_bar_generator(name, symbol, [config.bar])
+                    #     except ValueError:
+                    #         logger.warning(f"策略 {name} 配置的交易所无效: {exchange_str}")
             except Exception as e:
                 logger.exception(f"创建策略 {name} 失败: {e}", exc_info=True)
 
@@ -194,12 +207,53 @@ class StrategyManager:
             method: 策略方法名
             data: 事件数据
         """
-        for name, strategy in self.strategies.items():
-            if strategy.active:
-                try:
-                    getattr(strategy, method)(data)
-                except Exception as e:
-                    logger.exception(f"策略 {name} {method} 失败: {e}")
+        # 如果是tick事件，更新BarGenerator
+        #if method == "on_tick" and hasattr(data, "symbol"):
+        #    self._update_bar_generator(data)
+
+        if method == "on_bar" and hasattr(data, "symbol"):
+            bar:BarData = data
+            for name, strategy in self.strategies.items():
+                if strategy.active and bar.id in strategy.bar_subscriptions:
+                    try:
+                        strategy.on_bar(bar)
+                    except Exception as e:
+                        logger.exception(f"策略 {name} {method} 失败: {e}")
+        
+        if method == "on_tick" and hasattr(data, "symbol"):
+            tick:TickData = data
+            for name, strategy in self.strategies.items():
+                if strategy.active :
+                    try:
+                        strategy.on_tick(tick)
+                    except Exception as e:
+                        logger.exception(f"策略 {name} {method} 失败: {e}")
+
+
+    def _update_bar_generator(self, tick) -> None:
+        """
+        更新tick到BarGenerator
+
+        Args:
+            tick: TickData
+        """
+        symbol = tick.symbol
+
+        # 检查该symbol是否有BarGenerator
+        if symbol not in self._bar_generators:
+            return
+
+        multi_gen = self._bar_generators[symbol]
+
+        # 更新tick到BarGenerator
+        results = multi_gen.update_tick(tick)
+
+        # 完成的bar已通过回调分发给策略
+        # 这里可以记录日志
+        if results:
+            for std_symbol, bars in results.items():
+                for bar in bars:
+                    logger.debug(f"Bar完成: {std_symbol} {bar.interval.value} {bar.datetime}")
 
     def _dispatch_order_event(self, method: str, data: Any) -> None:
         """
@@ -266,18 +320,14 @@ class StrategyManager:
                 strategy.init()
         logger.info("所有策略已重置")
 
-    def subscribe_symbol(self, symbol: str) -> bool:
+    def subscribe_symbol(self, symbol: str,interval:str) -> bool:
         """订阅合约行情（按需订阅）"""
-        if symbol in self.subscribed_symbols:
-            return True
         if not self.trading_engine:
             return False
-
-        result = self.trading_engine.subscribe_symbol(symbol)
-        if result:
-            self.subscribed_symbols.add(symbol)
-            logger.info(f"订阅合约行情: {symbol}")
-        return result
+        self.trading_engine.subscribe_symbol(symbol)  
+        if interval:
+            self.trading_engine.subscribe_bars(symbol,interval)  
+        return True
 
     def get_status(self) -> list:
         """获取所有策略状态"""
@@ -415,3 +465,134 @@ class StrategyManager:
     def cleanup_order_mapping(self, order_id: str) -> None:
         """清理订单映射（订单完成或取消后调用）"""
         self.order_strategy_map.pop(order_id, None)
+
+    # ==================== Bar生成器管理 ====================
+
+    def _setup_bar_generator(self, strategy_id: str, symbol: str, bar_intervals: list) -> None:
+        """
+        为策略设置BarGenerator订阅
+
+        Args:
+            strategy_id: 策略ID
+            symbol: 合约代码
+            exchange: 交易所
+            bar_intervals: bar周期列表，如 ["M1", "M5", "M15"]
+        """
+        from src.utils.bar_generator import parse_interval
+
+        # 获取或创建该symbol的BarGenerator
+        if symbol not in self._bar_generators:
+            self._bar_generators[symbol] = MultiSymbolBarGenerator()
+
+        multi_gen = self._bar_generators[symbol]
+        bar_gen = multi_gen.get_or_create(symbol)
+
+        # 订阅需要的bar周期
+        for interval_str in bar_intervals:
+            if not parse_interval(interval_str):
+                logger.warning(f"策略 {strategy_id} 配置了不支持的bar周期: {interval_str}")
+                continue
+
+            # 注册bar回调
+            bar_gen.subscribe(interval_str, lambda bar, sid=strategy_id: self._on_bar_completed(sid, bar))
+
+            # 记录策略订阅
+            if symbol not in self._strategy_bar_subscriptions:
+                self._strategy_bar_subscriptions[symbol] = {}
+            if strategy_id not in self._strategy_bar_subscriptions[symbol]:
+                self._strategy_bar_subscriptions[symbol][strategy_id] = []
+            if interval_str not in self._strategy_bar_subscriptions[symbol][strategy_id]:
+                self._strategy_bar_subscriptions[symbol][strategy_id].append(interval_str)
+
+            logger.debug(f"策略 {strategy_id} 订阅 {symbol} 的 {interval_str} bar")
+
+    def _on_bar_completed(self, strategy_id: str, bar:BarData) -> None:
+        """
+        Bar生成完成时的回调
+
+        Args:
+            strategy_id: 策略ID
+            bar: 完成的BarData
+        """
+        strategy = self.strategies.get(strategy_id)
+        if not strategy or not strategy.active:
+            return
+
+        try:
+            strategy.on_bar(bar)
+        except Exception as e:
+            logger.exception(f"策略 {strategy_id} on_bar 失败: {e}")
+
+    def update_tick_for_bar(self, tick) -> None:
+        """
+        更新tick数据到BarGenerator
+        应在收到tick时调用
+
+        Args:
+            tick: TickData
+        """
+        symbol = tick.symbol
+
+        # 查找该symbol的BarGenerator
+        multi_gen = self._bar_generators.get(symbol)
+        if not multi_gen:
+            return
+
+        # 更新tick
+        results = multi_gen.update_tick(tick)
+
+        # 完成的bar已通过回调分发给策略
+        # 这里可以记录日志或做其他处理
+        if results:
+            for std_symbol, bars in results.items():
+                for bar in bars:
+                    logger.debug(f"Bar完成: {std_symbol} {bar.interval.value} {bar.datetime}")
+
+    def remove_bar_generator(self, symbol: str, exchange: Exchange) -> bool:
+        """
+        移除BarGenerator
+
+        Args:
+            symbol: 合约代码
+            exchange: 交易所
+
+        Returns:
+            是否成功移除
+        """
+        if symbol in self._bar_generators:
+            multi_gen = self._bar_generators[symbol]
+            result = multi_gen.remove(symbol, exchange)
+            if result:
+                # 清理订阅记录
+                self._strategy_bar_subscriptions.pop(symbol, None)
+                # 如果没有其他合约，清理整个multi_gen
+                if not multi_gen._generators:
+                    del self._bar_generators[symbol]
+                return True
+        return False
+
+    def get_strategy_bars(self, strategy_id: str, interval_str: str, count: int = 100):
+        """
+        获取策略的bar历史
+
+        Args:
+            strategy_id: 策略ID
+            interval_str: 周期字符串
+            count: 获取数量
+
+        Returns:
+            BarData列表
+        """
+        strategy = self.strategies.get(strategy_id)
+        if not strategy:
+            return []
+
+        # 找到策略订阅的symbol
+        for symbol, subscriptions in self._strategy_bar_subscriptions.items():
+            if strategy_id in subscriptions:
+                multi_gen = self._bar_generators.get(symbol)
+                if multi_gen:
+                    bar_gen = multi_gen.get(strategy.symbol, Exchange(strategy.exchange))
+                    if bar_gen:
+                        return bar_gen.get_bars(interval_str, count)
+        return []

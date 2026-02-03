@@ -191,7 +191,7 @@ class RsiStrategy(BaseStrategy):
             if short_bars:
                 short_bar = BarData(
                     symbol=bar.symbol,
-                    exchange=bar.exchange,
+                    interval = bar.interval,
                     datetime=short_bars[0]['datetime'],
                     open_price=short_bars[0]['open'],
                     high_price=max(b['high'] for b in short_bars),
@@ -207,7 +207,7 @@ class RsiStrategy(BaseStrategy):
             if long_bars:
                 long_bar = BarData(
                     symbol=bar.symbol,
-                    exchange=bar.exchange,
+                    interval = bar.interval,
                     datetime=long_bars[0]['datetime'],
                     open_price=long_bars[0]['open'],
                     high_price=max(b['high'] for b in long_bars),
@@ -227,6 +227,7 @@ class RsiStrategy(BaseStrategy):
 
     def on_bar(self, bar: BarData):
         """K线行情回调"""
+
         if not self.active or not self.rsi_param:
             return
 
@@ -234,6 +235,8 @@ class RsiStrategy(BaseStrategy):
             # 只处理指定合约的K线
             if bar.symbol != self.rsi_param.symbol:
                 return
+            
+            logger.info(f"策略 [{self.strategy_id}] 收到新bar: {bar.symbol} {bar.interval} {bar.datetime}")
 
             bar_time = bar.datetime.time()
             # K线重采样（09:30锚定）
@@ -272,7 +275,7 @@ class RsiStrategy(BaseStrategy):
 
             self._open_position(signal, short_bar.open_price, short_bar)
         except Exception as e:
-            logger.error(f"策略 [{self.strategy_id}] on_bar 异常: {e}", exc_info=True)
+            logger.exception(f"策略 [{self.strategy_id}] on_bar 异常: {e}")
 
     def _generate_signal(self, short_bar: BarData, long_bar: BarData) -> int:
         """
@@ -370,7 +373,7 @@ class RsiStrategy(BaseStrategy):
             if side == 1:
                 # 开多仓
                 order_id = self.buy(
-                    symbol=f"{self.rsi_param.symbol}.{self.rsi_param.exchange}",
+                    symbol=f"{self.rsi_param.exchange}.{self.rsi_param.symbol}",
                     volume=self.rsi_param.volume_per_trade,
                     price=price,
                     offset=Offset.OPEN,
@@ -384,7 +387,7 @@ class RsiStrategy(BaseStrategy):
             elif side == -1:
                 # 开空仓
                 order_id = self.sell(
-                    symbol=f"{self.rsi_param.symbol}.{self.rsi_param.exchange}",
+                    symbol=f"{self.rsi_param.exchange}.{self.rsi_param.symbol}",
                     volume=self.rsi_param.volume_per_trade,
                     price=price,
                     offset=Offset.OPEN,
@@ -411,7 +414,7 @@ class RsiStrategy(BaseStrategy):
 
         try:
             exit_price = bar.close_price
-            symbol = f"{self.rsi_param.symbol}.{self.rsi_param.exchange}"
+            symbol = f"{self.rsi_param.exchange}.{self.rsi_param.symbol}"
             volume = self.rsi_param.volume_per_trade
 
             if self.position_side == 1:

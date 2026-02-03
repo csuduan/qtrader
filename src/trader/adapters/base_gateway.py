@@ -137,6 +137,20 @@ class BaseGateway(ABC):
         """
         pass
 
+    @abstractmethod
+    def subscribe_bars(self, symbol: str, interval: str) -> bool:
+        """
+        订阅K线数据
+
+        Args:
+            symbol: 订阅合约
+            interval: K线时间间隔
+
+        Returns:
+            bool: 订阅是否成功
+        """
+        pass
+
     # ==================== 交易接口 ====================
 
     @abstractmethod
@@ -241,29 +255,28 @@ class BaseGateway(ABC):
         """推送bar数据"""
         if self.on_bar_callback:
             self.on_bar_callback(bar)
-        # 同时推送给策略
-        if self.on_bar_strategy:
-            self.on_bar_strategy(bar)
 
     def _emit_order(self, order: OrderData):
         """推送订单数据"""
-        logger.info(f"保单回报: {order}")
+        logger.info(f"报单变动: {order}")
         if self.on_order_callback:
             self.on_order_callback(order)
 
     def _emit_trade(self, trade: TradeData):
         """推送成交数据"""
-        logger.info(f"成交回报: {trade}")
+        logger.info(f"成交变动: {trade}")
         if self.on_trade_callback:
             self.on_trade_callback(trade)
 
     def _emit_position(self, position: PositionData):
         """推送持仓数据"""
+        logger.info(f"持仓变动: {position}")
         if self.on_position_callback:
             self.on_position_callback(position)
 
     def _emit_account(self, account: AccountData):
         """推送账户数据"""
+        logger.info(f"账户变动: {account}")   
         if self.on_account_callback:
             self.on_account_callback(account)
 
