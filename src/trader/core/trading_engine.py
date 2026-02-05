@@ -433,6 +433,14 @@ class TradingEngine:
         except Exception as e:
             logger.error(f"推送事件失败 [{event_type}]: {e}")
 
+    def _emit_cmd_update_event(self, cmd: OrderCmd) -> None:
+        """发送报单指令更新事件"""
+        try:
+            if self.event_engine:
+                self.event_engine.put(EventTypes.ORDER_CMD_UPDATE, cmd)
+        except Exception as e:
+            logger.error(f"发送报单指令更新事件失败: {e}")
+
     def _on_tick(self, tick):
         """Gateway tick回调 → EventEngine"""
         self.event_engine.put(EventTypes.TICK_UPDATE, tick)
@@ -459,18 +467,7 @@ class TradingEngine:
 
     def insert_order_cmd(
         self,
-        symbol: str,
-        direction: str,
-        offset: str,
-        volume: int,
-        price: Optional[float] = None,
-        split_strategy: str = SplitStrategyType.SIMPLE,
-        max_volume_per_order: int = 10,
-        order_interval: float = 0.5,
-        twap_duration: Optional[int] = None,
-        total_timeout: int = 300,
-        max_retries: int = 3,
-        order_timeout: float = 15.0,
+        cmd: OrderCmd
     ) -> Optional[str]:
         """
         创建报单指令
@@ -492,31 +489,14 @@ class TradingEngine:
         Returns:
             指令ID
         """
-        cmd_id = f"OC-{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}"
-        cmd = OrderCmd(
-            symbol=symbol,
-            direction=Direction(direction),
-            offset=Offset(offset),
-            volume=volume,
-            price=price,
-            split_strategy=split_strategy,
-            max_volume_per_order=max_volume_per_order,
-            order_interval=order_interval,
-            twap_duration=twap_duration,
-            total_timeout=total_timeout,
-            max_retries=max_retries,
-            order_timeout=order_timeout,
-        )
-
-        # 保存引用
-        self._order_cmds[cmd_id] = cmd
-
+        # 保存引用xs
+        self._order_cmds[cmd.cmd_id] = cmd
         # 注册到执行器（注册即启动）
         if self._order_cmd_executor:
             self._order_cmd_executor.register(cmd)
 
-        logger.info(f"创建报单指令: {cmd_id} {symbol} {direction} {volume}手")
-        return cmd_id
+        logger.info(f"创建报单指令: {cmd.cmd_id} {cmd.symbol} {cmd.direction} {cmd.volume}手")
+        return cmd.cmd_id
 
     def cancel_order_cmd(self, cmd_id: str) -> bool:
         """
@@ -547,6 +527,15 @@ class TradingEngine:
             return None
 
         return cmd.to_dict()
+
+    def get_all_order_cmds(self) -> List[dict]:
+        """
+        获取所有报单指令状态
+
+        Returns:
+            指令状态字典列表
+        """
+        return [cmd.to_dict() for cmd in self._order_cmds.values()]
 
     def cleanup_finished_order_cmds(self):
         """

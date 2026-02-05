@@ -172,6 +172,8 @@ class OrderCmd():
         self.status = OrderCmdStatus.PENDING
         self.finish_reason: Optional[Str] = None
         self.filled_volume = 0 #已成交
+        self.filled_price = 0.0  #已成交均价
+        self._filled_amount = 0.0  #已成交总金额（价格×数量）
 
         # 时间记录
         self.created_at = datetime.now()
@@ -182,6 +184,7 @@ class OrderCmd():
         self.all_order_ids: List[str] = []
         self._active_orders: Dict[str, OrderData] = {}
         self._active_order_info: Dict[str, ActiveOrderInfo] = {}
+        self._order_last_tracked: Dict[str, int] = {}  # 跟踪每个订单上一次已统计的成交数量
         self._pending_retry_volume: int = 0  # 待重试的手数
 
         # 拆单策略
@@ -203,7 +206,7 @@ class OrderCmd():
         # 执行拆单
         orders = self._strategy.split(self.volume)
         logger.info(
-            f"指令启动: {self.symbol} {self.direction.value} {self.volume}手, 拆分为{len(orders)}单"
+            f"指令启动: {self.symbol} {self.direction} {self.volume}手, 拆分为{len(orders)}单"
         )
 
     def _load_next_split_order(self) -> None:
@@ -377,6 +380,28 @@ class OrderCmd():
         if order.order_id not in self.all_order_ids:
             return
 
+        # 初始化跟踪
+        if order.order_id not in self._order_last_tracked:
+            self._order_last_tracked[order.order_id] = 0
+
+        # 计算成交增量（确保每笔成交只统计一次）
+        last_traded = self._order_last_tracked[order.order_id]
+        traded_delta = order.traded - last_traded
+
+        if traded_delta > 0 and order.traded_price:
+            # 更新成交数量和总金额
+            self.filled_volume += traded_delta
+            self._filled_amount += order.traded_price * traded_delta
+            # 计算加权平均价格
+            if self.filled_volume > 0:
+                self.filled_price = self._filled_amount / self.filled_volume
+            # 更新已跟踪的成交数量
+            self._order_last_tracked[order.order_id] = order.traded
+            logger.info(
+                f"订单成交: {order.symbol} {order.order_id} +{traded_delta}手@{order.traded_price}, "
+                f"均价={self.filled_price:.2f}, 累计成交: {self.filled_volume}"
+            )
+
         if order.is_active():
             self._active_orders[order.order_id] = order
         else:
@@ -391,14 +416,9 @@ class OrderCmd():
         self._check_completion()
 
     def _handle_trade_update(self, trade: TradeData) -> None:
-        """处理成交更新"""
-        if trade.order_id not in self.all_order_ids:
-            return
-
-        self.filled_volume += trade.volume
-        logger.info(
-            f"成交更新: {trade.symbol} {trade.direction.value} {trade.volume}手, 累计成交: {self.filled_volume}"
-        )
+        """处理成交更新（成交统计已由订单更新处理）"""
+        # 成交统计已在 _handle_order_update 中通过 traded 和 traded_price 完成
+        # 这里只做完成检查
         self._check_completion()
 
     def _check_completion(self) -> None:
@@ -425,7 +445,9 @@ class OrderCmd():
         self.finish_reason = reason
         self.finished_at = datetime.now()
         logger.info(
-            f"指令结束: 原因={reason} " f"目标={self.volume} 成交={self.filled_volume}"
+            f"指令结束: 原因={reason} "
+            f"目标={self.volume} 成交={self.filled_volume} "
+            f"均价={self.filled_price:.2f}"
         )
 
     @property
@@ -450,10 +472,11 @@ class OrderCmd():
             "status": self.status,
             "finish_reason": self.finish_reason if self.finish_reason else None,
             "symbol": self.symbol,
-            "direction": self.direction.value,
-            "offset": self.offset.value,
+            "direction": self.direction,
+            "offset": self.offset,
             "volume": self.volume,
             "filled_volume": self.filled_volume,
+            "filled_price": round(self.filled_price, 2),
             "remaining_volume": self.remaining_volume,
             "is_active": self.is_active,
             "created_at": self.created_at.isoformat(),

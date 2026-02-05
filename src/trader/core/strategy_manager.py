@@ -101,6 +101,8 @@ class StrategyManager:
         self.subscribed_symbols: set = set()
         # 订单ID -> 策略ID 的映射关系
         self.order_strategy_map: Dict[str, str] = {}
+        # cmd_id -> 策略ID 的映射关系
+        self.cmd_strategy_map: Dict[str, str] = {}
         self.event_engine: Optional[EventEngine] = None
 
         # Bar生成器管理器 (symbol -> BarGenerator)
@@ -188,6 +190,10 @@ class StrategyManager:
         )
         self.event_engine.register(
             EventTypes.TRADE_UPDATE, lambda data: self._dispatch_order_event("on_trade", data)
+        )
+        # 报单指令更新事件 - 分发给对应策略
+        self.event_engine.register(
+            EventTypes.ORDER_CMD_UPDATE, self._on_cmd_update
         )
 
         logger.info("策略事件已注册到EventEngine")
@@ -291,6 +297,28 @@ class StrategyManager:
         else:
             self._dispatch_market_event(method, data)
 
+    def _on_cmd_update(self, cmd: OrderCmd) -> None:
+        """处理报单指令更新事件"""
+        strategy_id = self.cmd_strategy_map.get(cmd.cmd_id)
+        if not strategy_id or strategy_id not in self.strategies:
+            logger.warning(f"未找到报单指令 {cmd.cmd_id} 对应的策略")
+            return
+
+        strategy = self.strategies[strategy_id]
+        if strategy.active:
+            try:
+                strategy.on_cmd_update(cmd)
+                logger.debug(
+                    f"策略 [{strategy_id}] 收到报单指令更新: "
+                    f"{cmd.cmd_id} status={cmd.status}"
+                )
+            except Exception as e:
+                logger.exception(f"策略 [{strategy_id}] on_cmd_update 失败: {e}")
+
+        # 指令完成后清理映射
+        if cmd.is_finished:
+            self.cmd_strategy_map.pop(cmd.cmd_id, None)
+
     def start_strategy(self, name: str) -> bool:
         """启动策略"""
         if name not in self.strategies:
@@ -332,8 +360,27 @@ class StrategyManager:
 
     def get_status(self) -> list:
         """获取所有策略状态"""
+        def _get_trading_status(signal: dict) -> str:
+            """根据信号获取交易状态"""
+            if not signal or signal.get("side") == 0:
+                return "无"
+            if signal.get("exit_order_id"):
+                return "平仓中"
+            if signal.get("entry_order_id"):
+                return "开仓中"
+            return "持仓"
+
         return [
-            {"strategy_id": s.strategy_id, "active": s.active, "config": s.config}
+            {
+                "strategy_id": s.strategy_id,
+                "active": s.active,
+                "enabled": s.enabled,
+                "inited": s.inited,
+                "config": s.config.model_dump(),
+                "params": s.get_params(),
+                "signal": s.get_signal() if hasattr(s, "get_signal") else {},
+                "trading_status": _get_trading_status(s.get_signal() if hasattr(s, "get_signal") else {}),
+            }
             for s in self.strategies.values()
         ]
 
@@ -393,17 +440,13 @@ class StrategyManager:
             strategy_id: 策略ID
             order_cmd: 订单指令对象
         """
-        if not self.trading_engine:
-            logger.warning(f"TradingEngine 未设置，无法执行下单")
-            return
-
         try:
+            self.cmd_strategy_map[order_cmd.cmd_id] = strategy_id
             self.trading_engine.insert_order_cmd(order_cmd)
-            logger.info(
-                f"策略 [{strategy_id}] 发送订单指令: {order_cmd}"
-            )
+            logger.info(f"策略 [{strategy_id}] 发送订单指令: {order_cmd}")
         except Exception as e:
-            logger.error(f"策略 [{strategy_id}] 发送订单指令失败: {e}")
+            self.cmd_strategy_map.pop(order_cmd.cmd_id, None)
+            logger.exception(f"策略 [{strategy_id}] 发送订单指令失败: {e}")
     
     def cancel_order_cmd(self, strategy_id: str, order_cmd: OrderCmd) -> None:
         """
@@ -419,9 +462,8 @@ class StrategyManager:
 
         try:
             self.trading_engine.cancel_order_cmd(order_cmd.cmd_id)
-            logger.info(
-                f"策略 [{strategy_id}] 取消订单指令: {order_cmd}"
-            )
+            self.cmd_strategy_map.pop(order_cmd.cmd_id, None)
+            logger.info(f"策略 [{strategy_id}] 取消订单指令: {order_cmd}")
         except Exception as e:
             logger.error(f"策略 [{strategy_id}] 取消订单指令失败: {e}")
 

@@ -34,6 +34,8 @@ class EventTypes:
     ALARM_UPDATE = "e:alarm.update"
     # 数据更新事件（通用）
     DATA_UPDATE = "e:data.update"
+    # 报单指令更新事件
+    ORDER_CMD_UPDATE = "e:order_cmd.update"
 
 
 HandlerType = Callable[[Any], None]

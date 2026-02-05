@@ -48,6 +48,7 @@ class OrderCmdExecutor:
 
         # OrderCmd 注册表
         self._order_cmds: Dict[str, "OrderCmd"] = {}
+        self._history_cmds: Dict[str, "OrderCmd"] = {}
 
         # 已订阅合约集合（避免重复订阅）
         self._subscribed_symbols: set = set()
@@ -131,7 +132,11 @@ class OrderCmdExecutor:
         cmd._load_next_split_order()
 
         self._order_cmds[cmd.cmd_id] = cmd
+        self._history_cmds[cmd.cmd_id] = cmd
         self.logger.debug(f"注册 OrderCmd: {cmd.cmd_id}")
+
+        # 触发状态变更事件 (PENDING -> RUNNING)
+        self._trading_engine._emit_cmd_update_event(cmd)
 
     def close(self, cmd_id: str) -> bool:
         """
@@ -152,7 +157,10 @@ class OrderCmdExecutor:
             self._trading_engine.cancel_order(order_id)
 
         # 设置为关闭状态
+        old_status = cmd.status
         cmd.close()
+        if old_status != cmd.status:
+            self._trading_engine._emit_cmd_update_event(cmd)
         self.logger.info(f"关闭 OrderCmd: {cmd_id}")
         return True
 
@@ -170,14 +178,21 @@ class OrderCmdExecutor:
         """处理订单更新 - 分发给对应的 OrderCmd"""
         for cmd in self._order_cmds.values():
             if order.order_id in cmd.all_order_ids:
+                old_status = cmd.status
                 cmd.update("ORDER_UPDATE", order)
+                if old_status != cmd.status:
+                    self._trading_engine._emit_cmd_update_event(cmd)
                 break
 
     def _on_trade_update(self, trade: TradeData) -> None:
         """处理成交更新 - 分发给对应的 OrderCmd"""
         for cmd in self._order_cmds.values():
             if trade.order_id in cmd.all_order_ids:
+                old_status = cmd.status
+                old_filled = cmd.filled_volume
                 cmd.update("TRADE_UPDATE", trade)
+                if old_status != cmd.status or old_filled != cmd.filled_volume:
+                    self._trading_engine._emit_cmd_update_event(cmd)
                 break
 
     def _run_loop(self) -> None:
@@ -190,12 +205,16 @@ class OrderCmdExecutor:
 
             try:
                 now = time.time()
-
+                if self._trading_engine.paused:
+                    # 暂停交易
+                    time.sleep(1)
+                    continue
                 # 遍历所有 cmd，检查并执行报单
                 for cmd_id, cmd in list(self._order_cmds.items()):
                     if cmd.is_finished:
                         # 已完成的命令从字典移除
                         self._order_cmds.pop(cmd_id, None)
+                        self._trading_engine._emit_cmd_update_event(cmd)
                         self.logger.debug(f"自动清理已完成 OrderCmd: {cmd_id}")
                     elif cmd.is_active:
                         try:
@@ -271,27 +290,15 @@ class OrderCmdExecutor:
     @property
     def total_count(self) -> int:
         """总命令数量"""
-        return len(self._order_cmds)
+        return len(self._history_cmds)
 
-    def get_status(self) -> dict:
-        """获取执行器状态"""
-        active_cmds = []
-        for cmd_id, cmd in self._order_cmds.items():
-            if cmd.is_active:
-                active_cmds.append(
-                    {
-                        "cmd_id": cmd_id,
-                        "status": cmd.status,
-                        "symbol": cmd.symbol,
-                        "filled_volume": cmd.filled_volume,
-                        "volume": cmd.volume,
-                    }
-                )
+    def get_hist_cmds(self) -> dict:
+        """
+        获取执行器状态
 
-        return {
-            "running": self._running,
-            "active_count": self.active_count,
-            "total_count": self.total_count,
-            "tick_count": self._tick_count,
-            "active_commands": active_cmds,
-        }
+        Args:
+
+        Returns:
+            执行器状态字典
+        """
+        return self._history_cmds
