@@ -6,14 +6,19 @@
 import asyncio
 import math
 import time
+import uuid
 from datetime import datetime
 from threading import Thread
 from typing import Any, Dict, List, Optional, Union
+import pandas as pd
+
 
 from src.app_context import get_app_context
 from src.utils.config_loader import AccountConfig, AppConfig
 from src.models.object import AccountData, CancelRequest, Direction, Offset, OrderRequest, TradeData
 from src.trader.core.risk_control import RiskControl
+from src.trader.order_cmd import OrderCmd, OrderCmdStatus, SplitStrategyType
+from src.trader.order_cmd_executor import OrderCmdExecutor
 from src.utils.event_engine import EventEngine, EventTypes
 from src.utils.logger import get_logger
 
@@ -52,6 +57,12 @@ class TradingEngine:
         # 事件引擎
         self.event_engine = ctx.get_event_engine()
 
+        # 报单指令管理
+        self._order_cmds: Dict[str, OrderCmd] = {}
+
+        # 报单指令执行器
+        self._order_cmd_executor: Optional[OrderCmdExecutor] = None
+
         logger.info(f"交易引擎初始化完成，账户类型: {config.account_type}")  # type: ignore[attr-defined]
 
         # Gateway初始化
@@ -66,6 +77,14 @@ class TradingEngine:
         if self.gateway is None:
             logger.error("Gateway未初始化，无法启动交易引擎")
             return
+
+        # 启动执行器
+        from src.trader.order_cmd_executor import OrderCmdExecutor
+
+        if self._order_cmd_executor is None:
+            self._order_cmd_executor = OrderCmdExecutor(self.event_engine, self)
+            self._order_cmd_executor.start()
+            logger.info("报单指令执行器已启动")
 
         # 连接Gateway
         if not self.gateway.connect():
@@ -102,6 +121,13 @@ class TradingEngine:
         if self.gateway is None:
             return {}
         return self.gateway.get_orders()
+
+    @property
+    def trading_day(self) -> datetime:
+        if self.gateway is None:
+            return datetime.now()
+        trading_day = self.gateway.get_trading_day()
+        return datetime.strptime(trading_day, "%Y%m%d").date()
 
     @property
     def positions(self):
@@ -350,6 +376,21 @@ class TradingEngine:
             "daily_orders": self.risk_control.daily_order_count,
             "daily_cancels": self.risk_control.daily_cancel_count,
         }
+    
+    def get_kline(self, symbol: str, interval: str) -> Optional[pd.DataFrame]:
+        """
+        获取合约K线数据（通过Gateway）
+
+        Args:
+            symbol: 合约代码
+            interval: K线周期（
+
+        Returns:
+            Optional[pd.DataFrame]: K线数据框（如果成功），否则None
+        """
+        if self.gateway:
+            return self.gateway.get_kline(symbol, interval)
+        return None
 
     def subscribe_symbol(self, symbol: Union[str, List[str]]) -> bool:
         """
@@ -415,3 +456,111 @@ class TradingEngine:
     def _on_account(self, account):
         """Gateway account回调 → EventEngine"""
         self.event_engine.put(EventTypes.ACCOUNT_UPDATE, account)
+
+    def insert_order_cmd(
+        self,
+        symbol: str,
+        direction: str,
+        offset: str,
+        volume: int,
+        price: Optional[float] = None,
+        split_strategy: str = SplitStrategyType.SIMPLE,
+        max_volume_per_order: int = 10,
+        order_interval: float = 0.5,
+        twap_duration: Optional[int] = None,
+        total_timeout: int = 300,
+        max_retries: int = 3,
+        order_timeout: float = 15.0,
+    ) -> Optional[str]:
+        """
+        创建报单指令
+
+        Args:
+            symbol: 合约代码
+            direction: 方向 BUY/SELL
+            offset: 开平 OPEN/CLOSE
+            volume: 总手数
+            price: 限价（None=市价）
+            split_strategy: 拆单策略 SIMPLE/TWAP
+            max_volume_per_order: 单次最大报单手数
+            order_interval: 报单间隔（秒）
+            twap_duration: TWAP执行时长（秒）
+            total_timeout: 总超时时间（秒）
+            max_retries: 最大重试次数
+            order_timeout: 单笔挂单超时时间（秒）
+
+        Returns:
+            指令ID
+        """
+        cmd_id = f"OC-{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}"
+        cmd = OrderCmd(
+            symbol=symbol,
+            direction=Direction(direction),
+            offset=Offset(offset),
+            volume=volume,
+            price=price,
+            split_strategy=split_strategy,
+            max_volume_per_order=max_volume_per_order,
+            order_interval=order_interval,
+            twap_duration=twap_duration,
+            total_timeout=total_timeout,
+            max_retries=max_retries,
+            order_timeout=order_timeout,
+        )
+
+        # 保存引用
+        self._order_cmds[cmd_id] = cmd
+
+        # 注册到执行器（注册即启动）
+        if self._order_cmd_executor:
+            self._order_cmd_executor.register(cmd)
+
+        logger.info(f"创建报单指令: {cmd_id} {symbol} {direction} {volume}手")
+        return cmd_id
+
+    def cancel_order_cmd(self, cmd_id: str) -> bool:
+        """
+        取消报单指令
+
+        Args:
+            cmd_id: 指令ID
+
+        Returns:
+            是否成功
+        """
+        if self._order_cmd_executor:
+            return self._order_cmd_executor.close(cmd_id)
+        return False
+
+    def get_order_cmd(self, cmd_id: str) -> Optional[dict]:
+        """
+        获取报单指令状态
+
+        Args:
+            cmd_id: 指令ID
+
+        Returns:
+            指令状态字典
+        """
+        cmd = self._order_cmds.get(cmd_id)
+        if not cmd:
+            return None
+
+        return cmd.to_dict()
+
+    def cleanup_finished_order_cmds(self):
+        """
+        清理已完成的报单指令
+        """
+        finished_cmds = [
+            cmd_id
+            for cmd_id, cmd in self._order_cmds.items()
+            if cmd.status == OrderCmdStatus.FINISHED
+        ]
+        for cmd_id in finished_cmds:
+            # 从执行器注销
+            if self._order_cmd_executor:
+                self._order_cmd_executor.unregister(cmd_id)
+            self._order_cmds.pop(cmd_id, None)
+        if finished_cmds:
+            logger.info(f"清理已完成指令: {len(finished_cmds)}个")

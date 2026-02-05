@@ -111,7 +111,7 @@ export interface ManualOrderRequest {
   offset: 'OPEN' | 'CLOSE' | 'CLOSETODAY'
   volume: number
   price: number | null
-  account_id?: string
+  account_id: string
 }
 
 /** 换仓指令 */

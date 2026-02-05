@@ -153,8 +153,8 @@ class RotationInstructionPo(Base):
     symbol = Column(String(50), nullable=False, index=True)
     offset = Column(String(20), nullable=False)
     direction = Column(String(10), nullable=False)
-    volume = Column(Integer, nullable=False)
-    filled_volume = Column(Integer, nullable=False, default=0)
+    volume = Column(Integer, nullable=False) #目标手数
+    filled_volume = Column(Integer, nullable=False, default=0) #已成交手数
     price = Column(Numeric(20, 4), nullable=False, default=0)
     order_time = Column(String(20), nullable=True)
     trading_date = Column(String(8), nullable=True, index=True)
@@ -164,7 +164,7 @@ class RotationInstructionPo(Base):
     )  # PENDING, RUNNING, COMPLETED, FAILED
     attempt_count = Column(Integer, nullable=False, default=0)
     remaining_attempts = Column(Integer, nullable=False, default=0)
-    remaining_volume = Column(Integer, nullable=False, default=0)
+    remaining_volume = Column(Integer, nullable=False, default=0) #剩余手数=目标-已成交
     current_order_id = Column(String(50), nullable=True)
     order_placed_time = Column(DateTime, nullable=True)
     last_attempt_time = Column(DateTime, nullable=True)

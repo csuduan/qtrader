@@ -51,7 +51,7 @@ class SocketClient:
         on_data_callback: Optional[HandlerType] = None,
         auto_reconnect: bool = True,
         reconnect_interval: float = 3.0,
-        max_reconnect_attempts: int = 0,  # 0表示无限重试
+        max_reconnect_attempts: int = 1000,  # 0表示无限重试
         heartbeat_interval: float = 15.0,  # 默认15秒心跳间隔
         request_timeout: float = 10.0
     ):

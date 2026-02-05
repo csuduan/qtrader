@@ -166,7 +166,7 @@
               >
                 <el-table-column prop="symbol" label="合约" width="80" >
                    <template #default="{ row }">
-                    {{ row.symbol.split('.')[1] }}
+                    {{ row.symbol}}
                   </template>
                 </el-table-column>
               
@@ -426,7 +426,11 @@
           </el-tag>
         </el-form-item>
         <el-form-item label="开平">
-          {{ closeForm.offset === 'OPEN' ? '开仓' : closeForm.offset === 'CLOSE' ? '平仓' : '平今' }}
+          <el-select v-if="isSHFESymbol" v-model="closeForm.offset" style="width: 100%">
+            <el-option label="平昨" value="CLOSE" />
+            <el-option label="平今" value="CLOSETODAY" />
+          </el-select>
+          <span v-else>{{ closeForm.offset === 'OPEN' ? '开仓' : closeForm.offset === 'CLOSE' ? '平仓' : '平今' }}</span>
         </el-form-item>
         <el-form-item label="平仓手数">
           <el-input-number
@@ -509,6 +513,10 @@ const statusMap: Record<string, string> = {
   'ERROR': 'REJECTED'
 }
 
+const isSHFESymbol = computed(() => {
+  return closeForm.exchange_id?.toUpperCase() === 'SHFE'
+})
+
 const orderForm = reactive<ManualOrderRequest>({
   symbol: '',
   direction: 'BUY',
@@ -529,6 +537,7 @@ const cancelForm = reactive({
 
 const closeForm = reactive({
   symbol: '',
+  exchange_id: '',
   direction: 'BUY',
   offset: 'CLOSE',
   volume: 0,
@@ -635,6 +644,7 @@ function handleClosePosition(position: Position, direction: 'BUY' | 'SELL') {
   if (volume <= 0) return
 
   closeForm.symbol = position.instrument_id
+  closeForm.exchange_id = position.exchange_id
   closeForm.direction = direction
   closeForm.offset = 'CLOSE'
   closeForm.volume = volume
@@ -650,13 +660,16 @@ async function handleCreateOrder() {
     ElMessage.warning('请填写完整的报单信息')
     return
   }
+  if (!store.selectedAccountId) {
+    ElMessage.error('请先选择账户')
+    return
+  }
 
   creating.value = true
   try {
-    // 动态设置当前选中的账户ID
     const orderData = {
       ...orderForm,
-      account_id: store.selectedAccountId || undefined
+      account_id: store.selectedAccountId
     }
     const result = await orderApi.createOrder(orderData)
     ElMessage.success(`报单成功，委托单ID: ${result.order_id}`)
@@ -702,6 +715,10 @@ async function handleCancelOrderConfirm() {
 }
 
 async function handleClosePositionConfirm() {
+  if (!store.selectedAccountId) {
+    ElMessage.error('请先选择账户')
+    return
+  }
   try {
     await positionApi.closePosition({
       symbol: closeForm.symbol,
@@ -709,7 +726,7 @@ async function handleClosePositionConfirm() {
       offset: closeForm.offset,
       volume: closeForm.volume,
       price: closeForm.price,
-      accountId: store.selectedAccountId || undefined
+      account_id: store.selectedAccountId
     })
     ElMessage.success('平仓成功')
     showCloseDialog.value = false

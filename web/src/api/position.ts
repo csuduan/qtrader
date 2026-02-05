@@ -30,7 +30,7 @@ export const positionApi = {
     offset: string
     volume: number
     price?: number
-    accountId?: string
+    account_id: string
   }): Promise<{ order_id: string }> => {
     return api.post<{ order_id: string }>('/position/close', data)
   },
@@ -38,16 +38,16 @@ export const positionApi = {
   /**
    * 批量平仓
    */
-  closeBatchPositions: async (positions: Array<{
-    symbol: string
-    direction: string
-    offset: string
-    volume: number
-    price?: number
-  }>, accountId?: string): Promise<{ success_count: number; total: number; failed_orders: any[] }> => {
-    return api.post<{ success_count: number; total: number; failed_orders: any[] }>('/position/close-batch', {
-      positions,
-      account_id: accountId
-    })
+  closeBatchPositions: async (data: {
+    positions: Array<{
+      symbol: string
+      direction: string
+      offset: string
+      volume: number
+      price?: number
+    }>
+    account_id: string
+  }): Promise<{ success_count: number; total: number; failed_orders: any[] }> => {
+    return api.post<{ success_count: number; total: number; failed_orders: any[] }>('/position/close-batch', data)
   }
 }

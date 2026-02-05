@@ -280,13 +280,17 @@ function handleSelectionChange(selection: RotationInstruction[]) {
 }
 
 async function handleStartRotation() {
+  if (!store.selectedAccountId) {
+    ElMessage.error('请先选择账户')
+    return
+  }
   try {
     await ElMessageBox.confirm('确定要开始换仓流程吗？将自动执行所有符合条件的指令。', '确认换仓', {
       type: 'warning'
     })
 
     rotating.value = true
-    await rotationApi.startRotation(store.selectedAccountId || undefined)
+    await rotationApi.startRotation(store.selectedAccountId)
     ElMessage.success('换仓流程已启动，正在执行...')
     await loadData()
   } catch (error: any) {
@@ -303,6 +307,10 @@ async function handleBatchDelete() {
     ElMessage.warning('请先选择要删除的指令')
     return
   }
+  if (!store.selectedAccountId) {
+    ElMessage.error('请先选择账户')
+    return
+  }
 
   try {
     await ElMessageBox.confirm(`确定要删除 ${selectedInstructions.value.length} 条指令吗？`, '确认删除', {
@@ -311,7 +319,7 @@ async function handleBatchDelete() {
 
     batchDeleting.value = true
     const ids = selectedInstructions.value.map(item => item.id)
-    const result = await rotationApi.batchDeleteInstructions(ids, store.selectedAccountId || undefined)
+    const result = await rotationApi.batchDeleteInstructions(ids, store.selectedAccountId)
     ElMessage.success(`删除成功，共 ${result.deleted} 条`)
     selectedInstructions.value = []
     await loadData()
@@ -396,9 +404,7 @@ const handleFileChange = (file: UploadUserFile) => {
 async function loadData() {
   loading.value = true
   try {
-    const result = await rotationApi.getRotationInstructions({
-      account_id: store.selectedAccountId || undefined
-    })
+    const result = await rotationApi.getRotationInstructions(store.selectedAccountId || '')
     instructions.value = result.instructions
     Object.assign(rotationStatus, result.rotation_status)
   } catch (error: any) {
@@ -417,10 +423,7 @@ async function handleCreate() {
 
   creating.value = true
   try {
-    await rotationApi.createRotationInstruction({
-      ...form,
-      account_id: store.selectedAccountId || form.account_id
-    })
+    await rotationApi.createRotationInstruction({ ...form })
     ElMessage.success('创建成功')
     showCreateDialog.value = false
     await loadData()
@@ -432,11 +435,15 @@ async function handleCreate() {
 }
 
 async function handleToggleEnable(row: RotationInstruction) {
+  if (!store.selectedAccountId) {
+    ElMessage.error('请先选择账户')
+    row.enabled = !row.enabled
+    return
+  }
   try {
     await rotationApi.updateRotationInstruction(row.id, {
-      enabled: row.enabled,
-      account_id: store.selectedAccountId || undefined
-    })
+      enabled: row.enabled
+    }, store.selectedAccountId)
     ElMessage.success('更新成功')
   } catch (error: any) {
     ElMessage.error(`操作失败: ${error.message}`)
@@ -445,12 +452,16 @@ async function handleToggleEnable(row: RotationInstruction) {
 }
 
 async function handleClear() {
+  if (!store.selectedAccountId) {
+    ElMessage.error('请先选择账户')
+    return
+  }
   try {
     await ElMessageBox.confirm('确定要清除所有已完成的指令吗？', '确认清除', {
       type: 'warning'
     })
 
-    await rotationApi.clearRotationInstructions('COMPLETED', store.selectedAccountId || undefined)
+    await rotationApi.clearRotationInstructions(store.selectedAccountId, 'COMPLETED')
     ElMessage.success('清除成功')
     await loadData()
   } catch (error: any) {
@@ -470,6 +481,10 @@ async function handleImport() {
     ElMessage.warning('请先选择CSV文件')
     return
   }
+  if (!store.selectedAccountId) {
+    ElMessage.error('请先选择账户')
+    return
+  }
 
   try {
     importing.value = true
@@ -480,22 +495,12 @@ async function handleImport() {
     formData.append('file', importForm.file.raw as File)
     formData.append('mode', importMode.value)
 
-    const response = await fetch('/api/rotation/import', {
-      method: 'POST',
-      body: formData
-    })
+    const result = await rotationApi.importRotation(formData, store.selectedAccountId)
 
-    if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.detail || '导入失败')
-    }
+    ElMessage.success(`导入完成：成功 ${result.imported} 条，失败 ${result.failed} 条`)
 
-    const result = await response.json()
-
-    ElMessage.success(`导入完成：成功 ${result.data.imported} 条，失败 ${result.data.failed} 条`)
-
-    if (result.data.errors && result.data.errors.length > 0) {
-      console.warn('导入错误详情:', result.data.errors)
+    if (result.errors && result.errors.length > 0) {
+      console.warn('导入错误详情:', result.errors)
     }
 
     uploadPercentage.value = 100

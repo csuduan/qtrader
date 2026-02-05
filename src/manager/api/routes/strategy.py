@@ -366,3 +366,57 @@ async def get_strategy_params(
     except Exception as e:
         logger.error(f"获取策略参数失败: {e}")
         return error_response(message=f"获取策略参数失败: {str(e)}")
+
+
+@router.post("/replay-all")
+async def replay_all_strategies(
+    account_id: str = Query(..., description="账户ID"),
+    trading_manager: TradingManager = Depends(get_trading_manager),
+):
+    """
+    回播所有有效策略行情
+
+    流程：
+    1. 暂停所有策略交易，暂停接收实时tick、bar推送
+    2. 执行每个策略初始化方法
+    3. 从网关获取kline
+    4. 从kline中选出当前交易日的bar(按时间排序)
+    5. 循环调用on_bar()
+    6. 恢复策略交易，接收实时tick、bar推送
+
+    Args:
+        account_id: 账户ID
+
+    Returns:
+        操作结果
+    """
+    try:
+        # 通过trading_manager获取trader
+        trader = trading_manager.get_trader(account_id)
+        if not trader:
+            _handle_trader_not_found(account_id)
+
+        # 通过socket发送回播请求到Trader进程
+        response = await trader.send_request(
+            "replay_all_strategies",
+            {},
+            timeout=120.0  # 回播可能需要较长时间
+        )
+
+        if response is None:
+            return error_response(message="回播请求失败：无响应")
+
+        if isinstance(response, dict) and response.get("success"):
+            return success_response(
+                message=f"回播完成",
+                data={"replayed_count": response.get("replayed_count", 0)}
+            )
+        else:
+            error_msg = response.get("message", "回播失败") if isinstance(response, dict) else "回播失败"
+            return error_response(message=error_msg)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"回播策略失败: {e}")
+        return error_response(message=f"回播策略失败: {str(e)}")

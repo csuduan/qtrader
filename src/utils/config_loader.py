@@ -172,6 +172,7 @@ class GatewayConfig(BaseModel):
     type: str = "TQSDK"
     tianqin: Optional[TianqinConfig] = None
     broker: Optional[BrokerConfig] = None
+    subscribe_symbols: Optional[List[str]] = None
 
 
 class AccountConfig(BaseModel):

@@ -622,36 +622,52 @@ class TestStrategyManagerGetStatus:
 class TestStrategyManagerTrading:
     """测试交易方法"""
 
-    def test_buy_success(self, strategy_manager, mock_trading_engine):
-        """测试成功买入"""
+    def test_open_long_success(self, strategy_manager, mock_trading_engine):
+        """测试成功开多仓"""
         strategy_manager.trading_engine = mock_trading_engine
 
-        result = strategy_manager.buy(
+        result = strategy_manager.open(
             strategy_id="test_strat",
             symbol="SHFE.rb2505",
+            direction="BUY",
             volume=1,
             price=3500.0,
-            offset=Offset.OPEN
         )
 
         assert result == "order_123"
         assert strategy_manager.order_strategy_map["order_123"] == "test_strat"
 
-    def test_buy_no_trading_engine(self, strategy_manager):
-        """测试无TradingEngine时买入"""
+    def test_open_short_success(self, strategy_manager, mock_trading_engine):
+        """测试成功开空仓"""
+        strategy_manager.trading_engine = mock_trading_engine
+
+        result = strategy_manager.open(
+            strategy_id="test_strat",
+            symbol="SHFE.rb2505",
+            direction="SELL",
+            volume=1,
+            price=3500.0,
+        )
+
+        assert result == "order_123"
+        assert strategy_manager.order_strategy_map["order_123"] == "test_strat"
+
+    def test_open_no_trading_engine(self, strategy_manager):
+        """测试无TradingEngine时开仓"""
         strategy_manager.trading_engine = None
 
-        result = strategy_manager.buy("test_strat", "SHFE.rb2505", 1)
+        result = strategy_manager.open("test_strat", "SHFE.rb2505", "BUY", 1)
 
         assert result is None
 
-    def test_buy_market_order(self, strategy_manager, mock_trading_engine):
-        """测试市价买入"""
+    def test_open_market_order(self, strategy_manager, mock_trading_engine):
+        """测试市价开仓"""
         strategy_manager.trading_engine = mock_trading_engine
 
-        result = strategy_manager.buy(
+        result = strategy_manager.open(
             strategy_id="test_strat",
             symbol="SHFE.rb2505",
+            direction="BUY",
             volume=1,
             price=None
         )
@@ -661,26 +677,41 @@ class TestStrategyManagerTrading:
         call_args = mock_trading_engine.insert_order.call_args
         assert call_args[1]["price"] == 0
 
-    def test_sell_success(self, strategy_manager, mock_trading_engine):
-        """测试成功卖出"""
+    def test_close_long_success(self, strategy_manager, mock_trading_engine):
+        """测试成功平多仓"""
         strategy_manager.trading_engine = mock_trading_engine
 
-        result = strategy_manager.sell(
+        result = strategy_manager.close(
             strategy_id="test_strat",
             symbol="SHFE.rb2505",
+            direction="SELL",
             volume=1,
             price=3500.0,
-            offset=Offset.CLOSE
         )
 
         assert result == "order_123"
         assert strategy_manager.order_strategy_map["order_123"] == "test_strat"
 
-    def test_sell_no_trading_engine(self, strategy_manager):
-        """测试无TradingEngine时卖出"""
+    def test_close_short_success(self, strategy_manager, mock_trading_engine):
+        """测试成功平空仓"""
+        strategy_manager.trading_engine = mock_trading_engine
+
+        result = strategy_manager.close(
+            strategy_id="test_strat",
+            symbol="SHFE.rb2505",
+            direction="BUY",
+            volume=1,
+            price=3500.0,
+        )
+
+        assert result == "order_123"
+        assert strategy_manager.order_strategy_map["order_123"] == "test_strat"
+
+    def test_close_no_trading_engine(self, strategy_manager):
+        """测试无TradingEngine时平仓"""
         strategy_manager.trading_engine = None
 
-        result = strategy_manager.sell("test_strat", "SHFE.rb2505", 1)
+        result = strategy_manager.close("test_strat", "SHFE.rb2505", "SELL", 1)
 
         assert result is None
 
@@ -712,21 +743,21 @@ class TestStrategyManagerTrading:
         assert result is False
         mock_trading_engine.cancel_order.assert_not_called()
 
-    def test_buy_exception(self, strategy_manager, mock_trading_engine):
-        """测试买入异常"""
+    def test_open_exception(self, strategy_manager, mock_trading_engine):
+        """测试开仓异常"""
         strategy_manager.trading_engine = mock_trading_engine
-        mock_trading_engine.insert_order.side_effect = Exception("Buy error")
+        mock_trading_engine.insert_order.side_effect = Exception("Open error")
 
-        result = strategy_manager.buy("test_strat", "SHFE.rb2505", 1)
+        result = strategy_manager.open("test_strat", "SHFE.rb2505", "BUY", 1)
 
         assert result is None
 
-    def test_sell_exception(self, strategy_manager, mock_trading_engine):
-        """测试卖出异常"""
+    def test_close_exception(self, strategy_manager, mock_trading_engine):
+        """测试平仓异常"""
         strategy_manager.trading_engine = mock_trading_engine
-        mock_trading_engine.insert_order.side_effect = Exception("Sell error")
+        mock_trading_engine.insert_order.side_effect = Exception("Close error")
 
-        result = strategy_manager.sell("test_strat", "SHFE.rb2505", 1)
+        result = strategy_manager.close("test_strat", "SHFE.rb2505", "SELL", 1)
 
         assert result is None
 

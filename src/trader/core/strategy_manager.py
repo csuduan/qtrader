@@ -17,6 +17,7 @@ from src.utils.bar_generator import MultiSymbolBarGenerator, parse_interval
 from src.trader.strategy.base_strategy import BaseStrategy
 from src.utils.config_loader import StrategyConfig
 from src.trader.core.trading_engine import TradingEngine
+from src.trader.order_cmd import OrderCmd
 
 ctx = get_app_context()
 
@@ -384,51 +385,93 @@ class StrategyManager:
             logger.error(f"策略 [{strategy_id}] 下单失败: {e}")
             return None
 
-    def buy(
+    def send_order_cmd(self, strategy_id: str, order_cmd: OrderCmd) -> None:
+        """
+        发送订单指令 - 通过 TradingEngine
+
+        Args:
+            strategy_id: 策略ID
+            order_cmd: 订单指令对象
+        """
+        if not self.trading_engine:
+            logger.warning(f"TradingEngine 未设置，无法执行下单")
+            return
+
+        try:
+            self.trading_engine.insert_order_cmd(order_cmd)
+            logger.info(
+                f"策略 [{strategy_id}] 发送订单指令: {order_cmd}"
+            )
+        except Exception as e:
+            logger.error(f"策略 [{strategy_id}] 发送订单指令失败: {e}")
+    
+    def cancel_order_cmd(self, strategy_id: str, order_cmd: OrderCmd) -> None:
+        """
+        取消订单指令 - 通过 TradingEngine
+
+        Args:
+            strategy_id: 策略ID
+            order_cmd: 订单指令对象
+        """
+        if not self.trading_engine:
+            logger.warning(f"TradingEngine 未设置，无法执行撤单")
+            return
+
+        try:
+            self.trading_engine.cancel_order_cmd(order_cmd.cmd_id)
+            logger.info(
+                f"策略 [{strategy_id}] 取消订单指令: {order_cmd}"
+            )
+        except Exception as e:
+            logger.error(f"策略 [{strategy_id}] 取消订单指令失败: {e}")
+
+    def open(
         self,
         strategy_id: str,
         symbol: str,
+        direction: str,
         volume: int,
         price: Optional[float] = None,
-        offset: Offset = Offset.OPEN,
     ) -> Optional[str]:
         """
-        买入 - 通过 TradingEngine
+        开仓 - 通过 TradingEngine
 
         Args:
             strategy_id: 策略ID
             symbol: 合约代码
+            direction: 方向 ("BUY" 多开 / "SELL" 空开)
             volume: 手数
             price: 价格（None为市价）
-            offset: 开平标识
 
         Returns:
             委托单ID
         """
-        return self._insert_order(strategy_id, symbol, Direction.BUY, volume, price, offset)
+        dir_enum = Direction.BUY if direction.upper() == "BUY" else Direction.SELL
+        return self._insert_order(strategy_id, symbol, dir_enum, volume, price, Offset.OPEN)
 
-    def sell(
+    def close(
         self,
         strategy_id: str,
         symbol: str,
+        direction: str,
         volume: int,
         price: Optional[float] = None,
-        offset: Offset = Offset.CLOSE,
     ) -> Optional[str]:
         """
-        卖出 - 通过 TradingEngine
+        平仓 - 通过 TradingEngine
 
         Args:
             strategy_id: 策略ID
             symbol: 合约代码
+            direction: 方向 ("BUY" 多平 / "SELL" 空平)
             volume: 手数
             price: 价格（None为市价）
-            offset: 开平标识
 
         Returns:
             委托单ID
         """
-        return self._insert_order(strategy_id, symbol, Direction.SELL, volume, price, offset)
+        dir_enum = Direction.BUY if direction.upper() == "BUY" else Direction.SELL
+        return self._insert_order(strategy_id, symbol, dir_enum, volume, price, Offset.CLOSE)
 
     def cancel_order(self, strategy_id: str, order_id: str) -> bool:
         """
@@ -570,6 +613,143 @@ class StrategyManager:
                     del self._bar_generators[symbol]
                 return True
         return False
+
+    async def replay_strategy(self, strategy: BaseStrategy) -> bool:
+        """
+        回播策略行情
+        流程：
+        1. 暂停策略交易，暂停接收实时tick、bar推送
+        2. 执行策略初始化方法
+        3. 从网关获取kline
+        4. 从kline中选出当前交易日的bar(按时间排序)
+        5. 循环调用on_bar()
+        6. 恢复策略交易，接收实时tick、bar推送
+
+        Args:
+            strategy_id: 策略ID
+
+        Returns:
+            bool: 回播是否成功
+        """
+        from datetime import datetime, timedelta
+        strategy_id = strategy.strategy_id
+        logger.info(f"策略 [{strategy_id}] 开始回播流程")
+
+        # 获取当前交易日期
+        trading_date = self.trading_engine.trading_day
+        try:
+            # 1. 暂停策略
+            strategy.stop()
+            # 2. 执行策略初始化方法
+            strategy.init()
+            logger.info(f"策略 [{strategy_id}] 初始化完成")
+
+            # 3. 从网关获取kline
+            # 获取策略订阅的合约和周期
+            if len(strategy.bar_subscriptions)==0:
+                logger.error(f"策略 [{strategy_id}] 未配置bar订阅")
+                return False
+
+            (symbol, interval) = strategy.bar_subscriptions[0].split("-")
+            # 通过网关获取K线数据
+            kline_df = self.trading_engine.get_kline(symbol, interval)
+            if kline_df is None:
+                logger.error(f"策略 [{strategy_id}] 未找到 {symbol} {interval} 的K线数据")
+                return False
+
+            # 4. 从kline中选出当前交易日的bar
+            # 筛选当前交易日的bar (K线时间戳是纳秒级)
+            trading_bars = []
+            for _, row in kline_df.iterrows():
+                bar_datetime = row['datetime']
+                if bar_datetime.date() == trading_date:
+                    # 转换为BarData
+                    from src.models.object import BarData
+                    bar = BarData(
+                        symbol=symbol,
+                        interval=interval,
+                        datetime=bar_datetime,
+                        open_price=float(row['open']),
+                        high_price=float(row['high']),
+                        low_price=float(row['low']),
+                        close_price=float(row['close']),
+                        volume=float(row['volume']),
+                        type='history'
+                    )
+                    trading_bars.append(bar)
+
+            if not trading_bars:
+                logger.warning(f"策略 [{strategy_id}] 未找到 {trading_date} 的K线数据")
+                return False
+
+            # 按时间排序
+            trading_bars.sort(key=lambda x: x.datetime)
+
+            logger.info(f"策略 [{strategy_id}] 找到 {len(trading_bars)} 根 {trading_date} 的K线")
+
+            # 5. 循环调用on_bar()
+            for bar in trading_bars:
+                strategy.on_bar(bar)
+
+            logger.info(f"策略 [{strategy_id}] K线回播完成")
+
+            return True
+
+        except Exception as e:
+            logger.exception(f"策略 [{strategy_id}] 回播失败: {e}")
+            return False
+
+        finally:
+            # 6. 恢复策略交易
+            strategy.start()
+            logger.info(f"策略 [{strategy_id}] 已恢复交易")
+
+    async def replay_all_strategies(self) -> dict:
+        """
+        回播所有有效策略行情
+
+        对所有启用的策略执行回播操作，用于系统启动后或每日开盘后
+        将历史K线数据回播给策略，使其能够建立技术指标等状态
+
+        Returns:
+            dict: {"success": bool, "replayed_count": int, "message": str}
+        """
+        from datetime import datetime, timedelta
+
+        logger.info("开始回播所有有效策略")
+
+        if not self.trading_engine or not self.trading_engine.gateway:
+            logger.error("网关未连接，无法回播策略")
+            return {"success": False, "message": "网关未连接", "replayed_count": 0}
+
+        gateway = self.trading_engine.gateway
+        if not hasattr(gateway, '_klines'):
+            logger.error("网关不支持获取K线数据")
+            return {"success": False, "message": "网关不支持K线数据", "replayed_count": 0}
+
+        # 1. 暂停交易
+        self.trading_engine.pause()
+        try:
+            replayed_count = 0
+            # 2. 对每个策略执行回播
+            for _, strategy in self.strategies.items():
+                    ret = await self.replay_strategy(strategy)
+                    if ret:
+                        replayed_count += 1
+            logger.info(f"所有策略回播完成，成功回播 {replayed_count} 个策略")
+
+            return {
+                "success": True,
+                "replayed_count": replayed_count,
+                "message": f"成功回播 {replayed_count} 个策略"
+            }
+
+        except Exception as e:
+            logger.exception(f"回播所有策略失败: {e}")
+            return {"success": False, "message": f"回播失败: {str(e)}", "replayed_count": 0}
+        finally:
+            # 3. 恢复交易
+            self.trading_engine.resume()
 
     def get_strategy_bars(self, strategy_id: str, interval_str: str, count: int = 100):
         """

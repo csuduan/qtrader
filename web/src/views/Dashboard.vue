@@ -377,7 +377,7 @@ async function handleCardClick(acc: Account) {
 
 async function loadAlarmStats() {
   try {
-    const result = await alarmApi.getAlarmStats()
+    const result = await alarmApi.getAlarmStats(store.selectedAccountId || undefined)
     alarmStats.value = result || { today_total: 0, last_hour: 0, last_five_minutes: 0 }
   } catch (error: any) {
     console.error(`加载告警统计失败: ${error.message}`)

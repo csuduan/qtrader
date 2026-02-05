@@ -170,9 +170,12 @@ class BarData(BaseModel):
     volume: Optional[float] = Field(None, description="成交量")
     turnover: Optional[float] = Field(None, description="成交额")
     open_interest: Optional[float] = Field(None, description="持仓量")
+    type: str = Field(default="real", description="K线类型")
+    update_time: Optional[DateTime] = Field(None, description="最后更新时间")
 
     # 扩展字段
     extras: Dict[str, Any] = Field(default_factory=dict)
+
 
     @property
     def std_symbol(self) -> str:
@@ -181,6 +184,9 @@ class BarData(BaseModel):
     @property
     def id(self) -> str:
         return f"{self.symbol}-{self.interval}"
+    
+    def __str__(self) -> str:
+        return f"{self.symbol}-{self.interval} {self.datetime} open:{self.open_price} high:{self.high_price} low:{self.low_price} close:{self.close_price} volume:{self.volume} update:{self.update_time}"
 
 
 class OrderData(BaseModel):
@@ -413,3 +419,12 @@ class CancelRequest(BaseModel):
 # ==================== 常量定义 ====================
 
 ACTIVE_STATUSES = {OrderStatus.SUBMITTING, OrderStatus.NOTTRADED, OrderStatus.PARTTRADED}
+
+
+class OrderCmdFinishReason(str, Enum):
+    """报单指令结束原因"""
+
+    ALL_COMPLETED = "ALL_COMPLETED"  # 全部完成
+    CANCELLED = "CANCELLED"  # 已取消
+    TIMEOUT = "TIMEOUT"  # 超时
+    ORDER_ERROR = "ORDER_ERROR"  # 报单异常

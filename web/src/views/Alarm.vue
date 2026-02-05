@@ -82,8 +82,11 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import { useStore } from '@/stores'
 import { alarmApi } from '@/api'
 import type { Alarm, AlarmStats, AlarmStatus } from '@/types'
+
+const store = useStore()
 
 const alarms = ref<Alarm[]>([])
 const stats = ref<AlarmStats>({
@@ -100,7 +103,7 @@ const statsTimer = ref<number | null>(null)
 async function loadAlarms() {
   loading.value = true
   try {
-    alarms.value = await alarmApi.getTodayAlarms(statusFilter.value || undefined)
+    alarms.value = await alarmApi.getTodayAlarms(store.selectedAccountId || undefined, statusFilter.value || undefined)
   } catch (error: any) {
     ElMessage.error(`加载告警列表失败: ${error.message}`)
   } finally {
@@ -110,7 +113,7 @@ async function loadAlarms() {
 
 async function loadStats() {
   try {
-    stats.value = await alarmApi.getAlarmStats()
+    stats.value = await alarmApi.getAlarmStats(store.selectedAccountId || undefined)
   } catch (error: any) {
     console.error(`加载告警统计失败: ${error.message}`)
   }
@@ -123,7 +126,7 @@ function handleFilterChange() {
 async function handleConfirm(alarmId: number) {
   confirmingId.value = alarmId
   try {
-    await alarmApi.confirmAlarm(alarmId)
+    await alarmApi.confirmAlarm(alarmId, store.selectedAccountId || undefined)
     ElMessage.success('标记成功')
     await loadAlarms()
     await loadStats()

@@ -621,6 +621,22 @@ class Trader:
         self.strategy_manager.stop_all()
         return True
 
+    @request("replay_all_strategies")
+    async def _req_replay_all_strategies(self, data: dict) -> dict:
+        """处理回播所有策略请求"""
+        if self.strategy_manager is None:
+            return {"success": False, "message": "策略管理器未初始化"}
+
+        try:
+            result = await self.strategy_manager.replay_all_strategies()
+            if result.get("success"):
+                return {"success": True, "message": "回播完成", "replayed_count": result.get("replayed_count", 0)}
+            else:
+                return {"success": False, "message": result.get("message", "回播失败")}
+        except Exception as e:
+            logger.exception(f"回播策略失败: {e}")
+            return {"success": False, "message": f"回播策略失败: {str(e)}"}
+
     def _build_strategy_config(self, strategy:BaseStrategy) -> dict:
         """构建策略配置对象"""
         from src.manager.api.schemas import StrategyConfig
@@ -699,7 +715,6 @@ class Trader:
                         "account_id": ins.account_id,
                         "strategy_id": ins.strategy_id,
                         "symbol": ins.symbol,
-                        "exchange_id": ins.exchange_id,
                         "offset": ins.offset,
                         "direction": ins.direction,
                         "volume": ins.volume,

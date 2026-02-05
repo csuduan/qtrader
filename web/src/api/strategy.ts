@@ -49,5 +49,13 @@ export const strategyApi = {
   stopAllStrategies: async (accountId?: string): Promise<void> => {
     const config = accountId ? { params: { account_id: accountId } } : undefined
     await api.post('/strategies/stop-all', null, config)
+  },
+
+  /**
+   * 回播所有有效策略行情
+   */
+  replayAllStrategies: async (accountId?: string): Promise<{ replayed_count: number }> => {
+    const config = accountId ? { params: { account_id: accountId } } : undefined
+    return api.post<{ replayed_count: number }>('/strategies/replay-all', null, config)
   }
 }

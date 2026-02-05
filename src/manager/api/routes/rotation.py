@@ -189,7 +189,7 @@ async def delete_rotation_instruction(
         success = await trading_manager.delete_rotation_instruction(account_id, instruction_id)
         if not success:
             return error_response(code=404, message="换仓指令不存在")
-        return error_response(code=204, message="删除成功")
+        return success_response(message="删除成功")
     except Exception as e:
         logger.error(f"删除换仓指令失败: {e}")
         return error_response(message=f"删除换仓指令失败: {str(e)}")
@@ -197,7 +197,7 @@ async def delete_rotation_instruction(
 
 @router.post("/clear")
 async def clear_rotation_instructions(
-    account_id: str = Query(..., description="账户ID"),
+    account_id: Optional[str] = Query(None, description="账户ID（多账号模式）"),
     trading_manager: TradingManager = Depends(get_trading_manager),
 ):
     """
@@ -209,7 +209,7 @@ async def clear_rotation_instructions(
         success = await trading_manager.clear_rotation_instructions(account_id)
         if not success:
             return error_response(message="清除失败")
-        return error_response(code=204, message="清除成功")
+        return success_response(message="清除成功")
     except Exception as e:
         logger.error(f"清除换仓指令失败: {e}")
         return error_response(message=f"清除换仓指令失败: {str(e)}")

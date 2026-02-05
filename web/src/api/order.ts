@@ -25,7 +25,7 @@ export const orderApi = {
   /**
    * 手动报单
    */
-  createOrder: async (order: ManualOrderRequest & { accountId?: string }): Promise<{ order_id: string }> => {
+  createOrder: async (order: ManualOrderRequest): Promise<{ order_id: string }> => {
     return api.post<{ order_id: string }>('/order', order)
   },
 

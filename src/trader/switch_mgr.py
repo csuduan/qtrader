@@ -11,16 +11,18 @@ import time
 from datetime import datetime
 from gc import enable
 from pathlib import Path
-from typing import Any, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 from sqlalchemy import True_
 from sqlalchemy.orm import Session as SQLASession
 
-from src.utils.config_loader import AppConfig
+from src.utils.config_loader import AppConfig, TraderConfig
 from src.utils.database import get_session
 from src.models.po import RotationInstructionPo
 from src.models.po import SwitchPosImportPo as OrderFile
 from src.trader.core.trading_engine import TradingEngine
+from src.trader.order_cmd import OrderCmdStatus, SplitStrategyType
+from src.models.object import OrderCmdFinishReason
 from src.utils.helpers import parse_symbol
 from src.utils.logger import get_logger
 
@@ -69,7 +71,7 @@ class SwitchPosManager:
             config: 应用配置（AppConfig 或 AccountConfig）
             trading_engine: 交易引擎实例
         """
-        self.config = config
+        self.config:TraderConfig = config
         self.trading_engine = trading_engine
         self.switchPos_files_dir = config.paths.switchPos_files
         self.working = False
@@ -288,7 +290,7 @@ class SwitchPosManager:
 
     def execute_position_rotation(self, trading_type: str = "", is_manual: bool = False) -> None:
         """
-        执行换仓逻辑
+        执行换仓逻辑（使用OrderCmd）
 
         Args:
             is_manual: 是否手动换仓
@@ -299,88 +301,161 @@ class SwitchPosManager:
         self.working = True
         self.is_manual = is_manual
         logger.info(f"开始换仓, 手动: {is_manual}")
+
         all_instructions = self._get_all_instructions()
         self.running_instructions = all_instructions
         if not all_instructions:
             logger.info("今日无换仓指令")
+            self.working = False
             return
         logger.info(f"获取到 {len(all_instructions)} 条可执行换仓指令")
 
         try:
+            # 重置所有指令状态
             for instruction in all_instructions:
-                instruction.status = "PENDING"
-                instruction.error_message = None
-                instruction.remaining_attempts = (
-                    instruction.volume // self.config.risk_control.max_split_volume + 1
-                ) * 2
-            turn = 0
-            while True:
-                # 每轮循环重新从数据库查询（确保获取到最新换仓指令）
-                # db_instructions = self._get_all_instructions()
-                # 获取所有可换仓的指令
-                instructions = [
-                    inst for inst in all_instructions if self._check_instruction(inst, is_manual)
-                ]
-                if len(instructions) <= 0:
-                    logger.info("结束换仓, [全部换仓指令已完成]")
-                    break
-                all_retry_times = sum([inst.remaining_attempts for inst in instructions])
-                if all_retry_times <= 0:
-                    logger.info("结束换仓, [所有换仓指令尝试次数用完！]")
-                    break
+                if(instruction.filled_volume==instruction.volume):
+                    instruction.status = "COMPLETED"
+                    
+                if instruction.status not in ("COMPLETED"):
+                    instruction.status = "PENDING"
+                    instruction.error_message = None
+                    instruction.current_order_id = None
+                    # 使用 current_order_id 存储 order_cmd_id
+                    # if not instruction.current_order_id:
+                    #     instruction.remaining_volume = instruction.volume
 
-                turn += 1
-                logger.info(f"第 {turn} 轮换仓开始。。。")
-                for instruction in instructions:
-                    try:
-                        current_order = self.trading_engine.orders.get(instruction.current_order_id)
-                        if current_order:
-                            # 有报单则等待下一次循环
-                            if current_order.status == "FINISHED":
-                                instruction.current_order_id = None
-                                instruction.remaining_volume = instruction.remaining_volume - (
-                                    current_order.volume - current_order.volume_left
-                                )
-                                if instruction.remaining_volume <= 0:
-                                    instruction.status = "COMPLETED"
-                                if current_order.status == "REJECTED":
-                                    # 报单错误
-                                    instruction.status = "FAILED"
-                                    instruction.error_message = current_order.status_msg
+            # 为每个指令创建OrderCmd
+            for instruction in all_instructions:
+                if instruction.status != "PENDING":
+                    continue
 
-                            else:
-                                # 检测报单是否超时，且剩余可报单次数大于0，才可以撤单
-                                order_age_seconds = (
-                                    (datetime.now() - current_order.insert_time).total_seconds()
-                                    if current_order.insert_time
-                                    else 0
-                                )
-                                if (
-                                    order_age_seconds >= self.config.risk_control.order_timeout
-                                    and int(instruction.remaining_attempts) > 0
-                                ):
-                                    self._cancel_order(str(current_order.order_id))
-                                else:
-                                    logger.info(
-                                        f"指令 {instruction.symbol} 报单未超时或者剩余次数不足"
-                                    )
-                        else:
-                            # 不存在报单，则进行报单处理
-                            order_volume = min(
-                                instruction.remaining_volume,
-                                self.config.risk_control.max_split_volume,
-                            )
-                            self._insert_order(instruction, order_volume)
-                    except Exception as e:
-                        logger.exception(f"处理指令 {instruction.symbol} 时出错: {e}")
-                        instruction.status = "FAILED"
-                        instruction.error_message = str(e)
-                time.sleep(1)
+                # 检查是否满足换仓时间
+                if not self._check_instruction(instruction, is_manual):
+                    continue
+
+                # 创建报单指令
+                cmd_id = self._create_order_cmd(instruction)
+                if cmd_id:
+                    instruction.current_order_id = cmd_id
+                    instruction.status = "RUNNING"
+                    instruction.order_placed_time = datetime.now()
+                    logger.info(f"为指令 {instruction.symbol} 创建报单指令: {cmd_id}")
+
+            # 监控OrderCmd执行状态
+            self._monitor_order_commands(all_instructions)
+
         except Exception as e:
             logger.error(f"换仓执行时出错: {e}")
+        finally:
+            self._update_instructions(all_instructions)
+            self.working = False
+            logger.info("换仓任务结束")
 
-        self._update_instructions(all_instructions)
-        self.working = False
+    def _create_order_cmd(self, instruction: RotationInstructionPo) -> Optional[str]:
+        """
+        为换仓指令创建OrderCmd
+
+        Args:
+            instruction: 换仓指令
+
+        Returns:
+            OrderCmd ID
+        """
+        try:
+            price = instruction.price if instruction.price and instruction.price > 0 else None
+
+            cmd_id = self.trading_engine.insert_order_cmd(
+                symbol=instruction.symbol,
+                direction=instruction.direction,
+                offset=instruction.offset,
+                volume=instruction.remaining_volume,
+                price=price,
+                split_strategy=SplitStrategyType.SIMPLE,
+                max_volume_per_order=self.config.trading.risk_control.max_split_volume,
+                order_interval=0.5,
+                total_timeout=self.config.trading.risk_control.order_timeout * 10,  # 总超时为单笔超时的10倍
+                max_retries=3,
+                order_timeout=self.config.trading.risk_control.order_timeout,
+            )
+
+            return cmd_id
+        except Exception as e:
+            logger.exception(f"创建OrderCmd失败: {e}")
+            return None
+
+    def _monitor_order_commands(
+        self,
+        instructions: List[RotationInstructionPo],
+    ) -> None:
+        """
+        监控OrderCmd执行状态
+
+        Args:
+            instructions: 所有换仓指令
+            cmd_map: 指令symbol到cmd_id的映射
+            is_manual: 是否手动换仓
+        """
+        active_instructions = [inst for inst in instructions if inst.status == "RUNNING"]
+        if not active_instructions:
+            logger.info("没有活动的报单指令")
+            return
+
+        logger.info(f"开始监控 {len(active_instructions)} 个报单指令...")
+        check_interval = 2.0  # 每2秒检查一次
+        max_wait_time = 600  # 最大等待时间10分钟
+        start_time = time.time()
+
+        while True:
+            # 检查总超时
+            if time.time() - start_time > max_wait_time:
+                logger.warning("换仓监控超时，强制退出")
+                break
+
+            # 检查所有指令状态
+            all_finished = True
+            for instruction in active_instructions:
+                cmd_id = instruction.current_order_id
+                if not cmd_id:
+                    continue
+
+                # 获取OrderCmd状态
+                cmd = self.trading_engine.get_order_cmd(cmd_id)
+                if cmd is None:
+                    logger.warning(f"未找到OrderCmd: {cmd_id}")
+                    continue
+
+                if cmd["is_active"]:
+                    # 指令仍在运行
+                    all_finished = False
+                    # 更新已成交手数
+                    # instruction.filled_volume = cmd["filled_volume"]
+                    # instruction.remaining_volume = cmd["remaining_volume"]
+
+                else:
+                    # 指令已结束
+                    finish_reason = cmd.get("finish_reason")
+                    filled = cmd["filled_volume"]
+                    instruction.filled_volume += filled
+                    instruction.remaining_volume -= filled
+                    if finish_reason == OrderCmdFinishReason.ALL_COMPLETED:
+                        instruction.status = "COMPLETED"
+                    else:
+                        instruction.status = "FAILED"
+                        instruction.error_message = finish_reason
+                    instruction.current_order_id = None
+
+            # 更新数据库
+            self._update_instructions(active_instructions)
+
+            # 检查是否全部完成
+            if all_finished:
+                logger.info("所有报单指令已完成")
+                break
+
+            time.sleep(check_interval)
+
+        # 清理已完成的OrderCmd
+        self.trading_engine.cleanup_finished_order_cmds()
 
     def _update_instructions(self, instructions: List[RotationInstructionPo]) -> None:
         """
@@ -403,21 +478,25 @@ class SwitchPosManager:
 
     def _check_instruction(
         self, instruction: RotationInstructionPo, is_manual: bool = False
-    ) -> None:
+    ) -> bool:
         """
-        检查指令状态并更新
+        检查指令是否可以执行
 
         Args:
             instruction: 待检查的指令
+            is_manual: 是否手动换仓
+
+        Returns:
+            是否可以执行
         """
         try:
             if not instruction.enabled:
                 return False
 
-            if instruction.status == "COMPLETED" or instruction.status == "FAILED":
+            if instruction.status in ("COMPLETED", "FAILED"):
                 return False
 
-            if instruction.remaining_attempts <= 0:
+            if instruction.remaining_volume <= 0:
                 return False
 
             if not is_manual:
@@ -500,31 +579,6 @@ class SwitchPosManager:
         except Exception as e:
             logger.error(f"撤单时出错: {e}")
             return False
-
-    def _insert_order(self, instruction: RotationInstructionPo, volume: int) -> None:
-        """
-        拆单并报单
-
-        Args:
-            instruction: 换仓指令
-            volume: 需要报单的手数
-
-        Returns:
-            str: 委托单ID
-        """
-        order_id = self.trading_engine.insert_order(
-            symbol=instruction.symbol,
-            direction=instruction.direction,
-            offset=instruction.offset,
-            volume=volume,
-            price=instruction.price,
-        )
-        instruction.current_order_id = order_id
-        instruction.remaining_attempts -= 1
-        instruction.status = "RUNNING"
-        logger.info(
-            f"换仓报单成功: {instruction.symbol} {instruction.direction} {volume}手, 委托单ID: {order_id}"
-        )
 
     def _load_all_instructions(self) -> List[OrderInstruction]:
         """

@@ -5,6 +5,7 @@ Gateway适配器基类
 
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional, Union
+import pandas as pd
 
 from src.models.object import (
     AccountData,
@@ -119,6 +120,16 @@ class BaseGateway(ABC):
 
         Returns:
             bool: 断开是否成功
+        """
+        pass
+
+    @abstractmethod
+    def get_trading_day(self) -> Optional[str]:
+        """
+        获取当前交易日
+
+        Returns:
+            Optional[str]: 交易日日期（YYYYMMDD）
         """
         pass
 
@@ -239,8 +250,21 @@ class BaseGateway(ABC):
             dict[str, QuoteData]: 行情字典 {symbol: QuoteData}
         """
         pass
-    
 
+    @abstractmethod 
+    def get_kline(self, symbol: str, interval: str) -> Optional[pd.DataFrame]:
+        """
+        获取K线数据
+
+        Args:
+            symbol: 合约代码
+            interval: 周期（如"M1"）
+
+        Returns:
+            Optional[pd.DataFrame]: K线数据框，失败返回None
+        """
+        pass
+    
     # ==================== 数据推送（由子类调用）====================
 
     def _emit_tick(self, tick: TickData):
@@ -276,7 +300,7 @@ class BaseGateway(ABC):
 
     def _emit_account(self, account: AccountData):
         """推送账户数据"""
-        logger.info(f"账户变动: {account}")   
+        #logger.info(f"账户变动: {account}")   
         if self.on_account_callback:
             self.on_account_callback(account)
 
