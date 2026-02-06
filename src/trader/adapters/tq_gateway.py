@@ -154,7 +154,7 @@ class TqGateway(BaseGateway):
             elif broker_type == "real":
                 account = TqAccount(
                     broker_id=self.config.broker.broker_name,
-                    user_id=self.config.broker.user_id,
+                    account_id=self.config.broker.user_id,
                     password=self.config.broker.password,
                 )
             else:  # sim
