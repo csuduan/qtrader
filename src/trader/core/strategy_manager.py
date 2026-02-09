@@ -158,7 +158,7 @@ class StrategyManager:
                 logger.info(f"添加策略: {name}")
 
                 # 按需订阅合约行情
-                symbol = config.params.get("symbol", "")
+                symbol = strategy.symbol
                 if symbol:
                     await self.subscribe_symbol(symbol, config.bar)
                     strategy.bar_subscriptions.append(f"{symbol}-{config.bar}")
@@ -178,19 +178,20 @@ class StrategyManager:
             return
 
         # 行情事件 - 分发给所有活跃策略
-        self.event_engine.register(
-            EventTypes.TICK_UPDATE, lambda data: self._dispatch_market_event("on_tick", data)
-        )
-        self.event_engine.register(
-            EventTypes.KLINE_UPDATE, lambda data: self._dispatch_market_event("on_bar", data)
-        )
+        async def _on_tick(data):
+            await self._dispatch_market_event("on_tick", data)
+        async def _on_bar(data):
+            await self._dispatch_market_event("on_bar", data)
+        async def _on_order(data):
+            await self._dispatch_order_event("on_order", data)
+        async def _on_trade(data):
+            await self._dispatch_order_event("on_trade", data)
+
+        self.event_engine.register(EventTypes.TICK_UPDATE, _on_tick)
+        self.event_engine.register(EventTypes.KLINE_UPDATE, _on_bar)
         # 订单/成交事件 - 分发给对应策略
-        self.event_engine.register(
-            EventTypes.ORDER_UPDATE, lambda data: self._dispatch_order_event("on_order", data)
-        )
-        self.event_engine.register(
-            EventTypes.TRADE_UPDATE, lambda data: self._dispatch_order_event("on_trade", data)
-        )
+        self.event_engine.register( EventTypes.ORDER_UPDATE, _on_order)
+        self.event_engine.register(EventTypes.TRADE_UPDATE, _on_trade)
 
         logger.info("策略事件已注册到EventEngine")
 
@@ -202,7 +203,7 @@ class StrategyManager:
             return data.order_id
         return None
 
-    def _dispatch_market_event(self, method: str, data: Any) -> None:
+    async def _dispatch_market_event(self, method: str, data: Any) -> None:
         """
         分发行情事件到所有活跃策略
 
@@ -219,7 +220,7 @@ class StrategyManager:
             for name, strategy in self.strategies.items():
                 if strategy.enabled and bar.id in strategy.bar_subscriptions:
                     try:
-                        strategy.on_bar(bar)
+                        await strategy.on_bar(bar)
                     except Exception as e:
                         logger.exception(f"策略 {name} {method} 失败: {e}")
 
@@ -228,7 +229,7 @@ class StrategyManager:
             for name, strategy in self.strategies.items():
                 if strategy.enabled:
                     try:
-                        strategy.on_tick(tick)
+                        await strategy.on_tick(tick)
                     except Exception as e:
                         logger.exception(f"策略 {name} {method} 失败: {e}")
 
@@ -280,17 +281,6 @@ class StrategyManager:
             except Exception as e:
                 logger.exception(f"策略 {strategy_id} {method} 失败: {e}")
 
-    def _dispatch_event(self, method: str, data: Any) -> None:
-        """
-        分发事件到策略（保留用于向后兼容）
-
-        - 行情事件（on_tick, on_bar）：分发给所有活跃策略
-        - 订单/成交事件（on_order, on_trade）：根据订单ID分发给对应策略
-        """
-        if method in ("on_order", "on_trade"):
-            self._dispatch_order_event(method, data)
-        else:
-            self._dispatch_market_event(method, data)
 
     def start_strategy(self, name: str) -> bool:
         """启动策略"""

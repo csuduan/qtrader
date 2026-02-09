@@ -93,8 +93,8 @@ class BaseStrategy:
     # 订阅bar列表（格式："symbol-interval"）
     def __init__(self, strategy_id: str, strategy_config: StrategyConfig):
         self.strategy_id = strategy_id
-        self.symbol: str =None
         self.config: StrategyConfig = strategy_config
+        self.symbol: str =strategy_config.symbol
         self.inited: bool = False
         self.enabled: bool = True
         self.bar_subscriptions: List[str] = []
@@ -128,8 +128,9 @@ class BaseStrategy:
         self.pos_price = None
 
         # 解析参数
-        self.param = BaseParam.model_validate(self.config.params)
-        self.symbol = self.param.symbol
+        if self.config.params:
+            self.param = BaseParam.model_validate(self.config.params)
+            self.symbol = self.param.symbol
 
         return True
 

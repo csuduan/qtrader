@@ -109,7 +109,7 @@ class RsiStrategy(BaseStrategy):
     
     async def on_tick(self, tick):
         """Tick行情回调（暂不使用）"""
-        self.execute_signal()
+        await self.execute_signal()
         pass
 
     async def on_bar(self, bar: BarData):
