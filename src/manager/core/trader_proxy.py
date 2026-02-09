@@ -67,6 +67,7 @@ class TraderProxy:
         self.global_config = global_config
         self.socket_path = socket_path
         self.heartbeat_timeout = heartbeat_timeout
+        self._running = False
 
         # ==================== 状态管理 ====================
         self._state: TraderState = TraderState.STOPPED
@@ -102,7 +103,8 @@ class TraderProxy:
         async with self._state_lock:
             old_state = self._state
             self._state = new_state
-            logger.info(f"TraderProxy [{self.account_id}] 状态变更: {old_state} -> {new_state}")
+            if old_state != new_state:
+                logger.info(f"TraderProxy [{self.account_id}] 状态变更: {old_state} -> {new_state}")
 
         # 状态变化时触发账户更新事件，通知前端刷新
         try:
@@ -136,51 +138,16 @@ class TraderProxy:
         Returns:
             是否启动成功
         """
-        # 检查状态，只有STOPPED状态允许启动
-        if not self._is_state(TraderState.STOPPED):
-            logger.warning(f"TraderProxy [{self.account_id}] 拒绝启动，当前状态: {self._state}")
+        if self._running:
+            logger.warning(f"TraderProxy [{self.account_id}] 已经在运行中，当前状态: {self._state}")
             return False
-
+        
+        self._running = True
         logger.info(f"TraderProxy [{self.account_id}] 开始启动...")
 
-        try:
-            # 检查是否已有进程存在
-            process_exists = await self._check_process_exists()
-
-            # if not process_exists:
-            #     # 创建新进程
-            #     await self._create_subprocess()
-            #     pass
-            # else:
-            #     logger.info(f"TraderProxy [{self.account_id}] 检测到已存在进程")
-            #     self._created_process = False
-
-            # 设置启动时间
-            self.start_time = datetime.now()
-            self.last_heartbeat = datetime.now()
-
-            # 创建Socket客户端
-            if self.account_id is None:
-                raise ValueError("account_id is required for SocketClient")
-            self.socket_client = SocketClient(
-                self.socket_path, self.account_id, self._on_msg_callback
-            )
-
-            # 状态变为连接中
-            await self._set_state(TraderState.CONNECTING)
-
-            # 在后台异步连接
-            self._connect_task = asyncio.create_task(self._connect_async())
-
-            logger.info(f"TraderProxy [{self.account_id}] 启动成功，开始异步连接")
-            return True
-
-        except Exception as e:
-            logger.exception(f"TraderProxy [{self.account_id}] 启动失败: {e}")
-            #if self._created_process:
-            #    await self._cleanup_subprocess()
-            await self._set_state(TraderState.STOPPED)
-            return False
+        # 在后台启动
+        self._connect_task = asyncio.create_task(self._connect_async())
+        return True
 
     async def stop(self) -> bool:
         """
@@ -191,6 +158,7 @@ class TraderProxy:
         Returns:
             是否停止成功
         """
+        self._running = False
         current_state = self._state
         logger.info(f"TraderProxy [{self.account_id}] 开始停止，当前状态: {current_state}")
 
@@ -210,11 +178,9 @@ class TraderProxy:
             self.socket_client = None
 
         # 强制停止trader进程
-        await self._force_kill_trader()
-
+        # await self._force_kill_trader()
         # 状态变为已停止
         await self._set_state(TraderState.STOPPED)
-
         logger.info(f"TraderProxy [{self.account_id}] 已停止")
         return True
 
@@ -232,69 +198,59 @@ class TraderProxy:
         连接成功 → 状态变为 CONNECTED
         连接失败 → 状态变为 STOPPED
         """
-        for attempt in range(self.MAX_RETRIES):
-            # 检查状态，如果不是CONNECTING则停止
-            if not self._is_state(TraderState.CONNECTING):
-                logger.info(f"TraderProxy [{self.account_id}] 状态变更，取消连接")
-                return
-
-            # 计算当前重试间隔（退避算法：指数增长）
-            current_interval = min(self.INITIAL_INTERVAL * (2**attempt), self.MAX_INTERVAL)
-
+        # 创建Socket客户端
+        self.start_time = datetime.now()
+        if self.account_id is None:
+            raise ValueError("account_id is required for SocketClient")
+        self.socket_client = SocketClient(
+            self.socket_path, self.account_id, self._on_msg_callback
+        )
+        attempt = 0
+        check_interval = 5
+        while self._running:      
             try:
+                # 计算当前重试间隔（退避算法：指数增长）
+                attempt += 1
+                process_exists = await self._check_process_exists()
+                if not process_exists:
+                    await self._set_state(TraderState.STOPPED)
+                    await asyncio.sleep(check_interval)
+                    continue
+                
+                if self.socket_client.is_connected():
+                    await asyncio.sleep(check_interval)
+                    continue
+                
+                 # 进程存在，且为未连接
+                self.last_heartbeat = datetime.now()
+                if self.socket_client.is_connected():
+                    attempt = 0
+                    continue
+                
+                # 状态变为连接中
+                await self._set_state(TraderState.CONNECTING)
                 logger.info(
-                    f"TraderProxy [{self.account_id}] 尝试连接 ({attempt + 1}/{self.MAX_RETRIES}), "
-                    f"下次重试间隔: {current_interval:.1f}s"
+                    f"TraderProxy [{self.account_id}] 尝试连接 ({attempt + 1})..."
                 )
-                if self.socket_client is None:
-                    logger.error(f"TraderProxy [{self.account_id}] socket_client 未初始化")
-                    break
                 success = await self.socket_client.connect()
-
                 if success:
                     logger.info(f"TraderProxy [{self.account_id}] 连接成功")
                     await self._set_state(TraderState.CONNECTED)
-                    return
+                    attempt = 0
+                    continue
                 else:
                     logger.warning(
-                        f"TraderProxy [{self.account_id}] 连接失败 ({attempt + 1}/{self.MAX_RETRIES})"
+                        f"TraderProxy [{self.account_id}] 连接失败 ({attempt + 1})"
                     )
 
             except Exception as e:
-                logger.warning(
-                    f"TraderProxy [{self.account_id}] 连接异常 ({attempt + 1}/{self.MAX_RETRIES}): {e}"
+                logger.exception(
+                    f"TraderProxy [{self.account_id}] 连接异常 ({attempt + 1}): {e}"
                 )
-
-            # 如果不是最后一次重试，等待后重试
-            if attempt < self.MAX_RETRIES - 1:
-                logger.info(f"TraderProxy [{self.account_id}] {current_interval:.1f}s 后重试...")
-                await asyncio.sleep(current_interval)
-
-        # 连接失败，状态变为已停止
-        logger.error(
-            f"TraderProxy [{self.account_id}] 连接失败，已达到最大重试次数({self.MAX_RETRIES}次)"
-        )
-        await self._set_state(TraderState.STOPPED)
-
-    async def _check_connection_and_reconnect(self) -> None:
-        """
-        检查连接状态，如果断开则重连
-
-        此方法由外部定期调用，用于检测连接断开并自动重连
-        """
-        if not self.socket_client or not self.socket_client.is_connected():
-            # 如果当前不是CONNECTING或CONNECTED状态，不需要处理
-            if self._is_state(TraderState.STOPPED):
-                return
-
-            # 如果是CONNECTED状态变为断开，重新进入CONNECTING状态并重连
-            if self._is_state(TraderState.CONNECTED):
-                logger.warning(f"TraderProxy [{self.account_id}] 检测到连接断开，开始重连")
-                await self._set_state(TraderState.CONNECTING)
-                self._connect_task = asyncio.create_task(self._connect_async())
+            # 等待重试
+            await asyncio.sleep(check_interval)
 
     # ==================== 进程管理 ====================
-
     async def _check_process_exists(self) -> bool:
         """
         检查进程是否已存在
