@@ -714,6 +714,7 @@ class StrategyManager:
                         close_price=float(row["close"]),
                         volume=float(row["volume"]),
                         type="history",
+                        update_time=bar_datetime+timedelta(minutes=1),
                     )
                     trading_bars.append(bar)
 

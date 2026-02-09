@@ -147,8 +147,8 @@ class RsiStrategy(BaseStrategy):
 
             # K线重采样（09:30锚定）
             short_bar, long_bar = self._resample_kline(bar)
-            # 每次产生新的long_bar，进行后续信号计算
-            if long_bar is None:
+            # 每次产生新的short_bar，进行后续信号计算
+            if short_bar is None:
                 return
 
             # 检查交易窗口（使用重采样后的短K线时间）
@@ -164,8 +164,8 @@ class RsiStrategy(BaseStrategy):
             # 记录信号
             self.signal = Signal(
                 side=side,
-                entry_price=short_bar.close_price,
-                entry_time=short_bar.datetime,
+                entry_price=bar.close_price,
+                entry_time=bar.datetime,
             )
             logger.info(f"策略 [{self.strategy_id}] 信号开始: {self.signal}")
         except Exception as e:
@@ -304,7 +304,7 @@ class RsiStrategy(BaseStrategy):
         # 使用K线收盘价计算RSI
         # 需要足够的历史数据
         min_bars_needed = self.param.rsi_n + 1
-        if len(self.long_k_bars) < min_bars_needed:
+        if len(self.short_k_bars) < min_bars_needed:
             return 0
 
         # 短周期RSI计算
