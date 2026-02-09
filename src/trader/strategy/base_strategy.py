@@ -101,11 +101,11 @@ class BaseStrategy:
         self.inited: bool = False
         self.enabled: bool = True
         self.bar_subscriptions: List[str] = []
-        self.trading_day: datetime = None
+        self.trading_day: Optional[datetime] = None
         # 策略管理器引用
         self.strategy_manager: Optional["StrategyManager"] = None
         # 参数模型（子类覆盖）
-        self.param: BaseParam = None
+        self.param: Optional[BaseParam] = None
 
         # 信号及持仓
         self.signal: Optional[Signal] = None
@@ -149,9 +149,12 @@ class BaseStrategy:
     
     def load_hist_bars(self, symbol: str, start: datetime, end: datetime) -> List[BarData]:
         """加载历史K线数据"""
+        if self.strategy_manager is None:
+            logger.error(f"策略 [{self.strategy_id}] 的 strategy_manager 未初始化")
+            return []
         return self.strategy_manager.load_hist_bars(symbol, self.bar_type, start, end)
 
-    def get_signal(self) -> dict:
+    def get_signal(self) -> Optional[Dict[str, Any]]:
         """获取当前信号"""
         return self.signal.model_dump() if self.signal else None
 
@@ -194,18 +197,18 @@ class BaseStrategy:
 
     async def execute_signal(self) -> None:
         """执行信号"""
-        if not self.signal:
+        if not self.signal or self.param is None:
             return
         signal = self.signal
         if signal.exit_time:
-            # 平仓处理          
+            # 平仓处理
             if self._pending_cmd and not self._pending_cmd.is_finished:
                 # 有进行中的指令
-                if self._pending_cmd.offset == Offset.CLOSE:
+                if self._pending_cmd.offset == Offset.OPEN:
                     # 有未完成的开仓操作，等待下一次执行
                     logger.info(f"策略 [{self.strategy_id}] 有未完成的开仓指令，先取消指令，等待下一次执行")
                     # 当前开仓报单未完成，先撤单，等待下一次执行平仓
-                    self.cancel_order_cmd(entry_cmd)
+                    await self.cancel_order_cmd(self._pending_cmd)
                     return
             else:
                 # 无进行中的指令
@@ -258,19 +261,10 @@ class BaseStrategy:
             return "开仓中" if self._pending_cmd.offset == Offset.OPEN else "平仓中"
         return ""
 
-    def start(self) -> bool:
-        """启动策略"""
-        if not self.inited:
-            # 同步兼容：如果不是在异步上下文中调用，跳过异步初始化
-            self.inited = True
-        self.enabled = True
-        logger.info(f"策略 [{self.strategy_id}] 启动")
-        return True
-
-    def stop(self) -> bool:
-        """停止策略"""
-        self.enabled = False
-        logger.info(f"策略 [{self.strategy_id}] 停止")
+    def enable(self,status:bool=True) -> bool:
+        """启用策略"""
+        self.enabled = status
+        logger.info(f"策略 [{self.strategy_id}] 启用" if status else "禁用")
         return True
 
     # ==================== 事件回调（异步版本）====================
@@ -280,10 +274,6 @@ class BaseStrategy:
 
     async def on_bar(self, bar: BarData):
         """Bar行情回调（异步版本）"""
-        pass
-
-    async def on_cmd_update(self, order_cmd: OrderCmd):
-        """订单状态回调（异步版本）"""
         pass
 
     async def on_order(self, order: OrderData):
@@ -297,6 +287,9 @@ class BaseStrategy:
     # ==================== 交易接口 ====================
     async def send_order_cmd(self, order_cmd: OrderCmd):
         """发送报单指令"""
+        if self.param is None:
+            logger.error(f"策略 [{self.strategy_id}] 的参数未初始化")
+            return
         if order_cmd.offset == Offset.CLOSE and self.closing_paused:
             logger.warning(f"策略 [{self.strategy_id}] 暂停平仓")
             return
@@ -347,15 +340,6 @@ class BaseStrategy:
         status = "暂停" if paused else "恢复"
         logger.info(f"策略 [{self.strategy_id}] 平仓已{status}")
 
-    def enable(self) -> None:
-        """启用策略"""
-        self.enabled = True
-        logger.info(f"策略 [{self.strategy_id}] 已启用")
-
-    def disable(self) -> None:
-        """禁用策略"""
-        self.enabled = False
-        logger.info(f"策略 [{self.strategy_id}] 已禁用")
 
     def get_position(self, symbol: str) -> Optional["PositionData"]:
         """

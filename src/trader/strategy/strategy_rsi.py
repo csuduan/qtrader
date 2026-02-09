@@ -12,20 +12,15 @@ RSI 可执行策略
 
 from collections import deque
 from datetime import datetime, time,timedelta
-from typing import Optional, List
+from typing import Any, Optional, List
 
 import numpy as np
 from pydantic import BaseModel, Field
 
-from src.models.object import BarData, Direction, Offset, OrderData, PositionData
-from src.trader.order_cmd import OrderCmd
+from src.models.object import BarData
 from src.trader.strategy.base_strategy import BaseStrategy, BaseParam, Signal
 from src.utils.config_loader import StrategyConfig
 from src.utils.helpers import (
-    _get_bool_param,
-    _get_float_param,
-    _get_int_param,
-    _get_str_param,
     _parse_time,
 )
 from src.utils.logger import get_logger
@@ -75,11 +70,8 @@ class RsiStrategy(BaseStrategy):
         self.trading_day = trading_day
 
         # 本策略临时变量
-        self.minute_bars: deque = deque(maxlen=1000)  # 1分钟K线缓存（用于K线重采样）
-        self.short_k_bars: deque = deque(maxlen=200)  # 短周期K线（short_k分钟）
-        self.long_k_bars: deque = deque(maxlen=100)  # 长周期K线（long_k分钟）
-        self._last_short_bar_time: Optional[datetime] = None
-        self._last_long_bar_time: Optional[datetime] = None
+        self.short_k_bars: deque[BarData] = deque()  # 短周期K线（short_k分钟）
+        self.long_k_bars: deque[BarData] = deque()  # 长周期K线（long_k分钟）
         self._long_bar_buf: List[BarData] = []  # 长周期K线缓存
         self._short_bar_buf: List[BarData] = []  # 短周期K线缓存
 
@@ -173,7 +165,7 @@ class RsiStrategy(BaseStrategy):
                 return
 
             # 计算RSI并生成信号
-            side = self._generate_signal(short_bar)
+            side = self._generate_signal()
             # 检查信号有效性
             if side == 0 or not self._check_external_signal_filter(side):
                 return
@@ -192,7 +184,6 @@ class RsiStrategy(BaseStrategy):
     def _resample_kline(self, bar: BarData) -> tuple[BarData, BarData]:
         """
         K线重采样（09:30锚定）
-
         只有在收集齐该时间段内所有M1 bar后才产生新的重采样bar。
         例如M5需要收集齐9:30-9:34的5根M1 bar后，才产生9:30的M5 bar。
 
@@ -210,20 +201,6 @@ class RsiStrategy(BaseStrategy):
         # 跳过09:30之前的数据
         if min_idx < 0:
             return None, None
-
-        # 存储1分钟K线
-        self.minute_bars.append(
-            {
-                "datetime": bar.datetime,
-                "open": bar.open_price,
-                "high": bar.high_price,
-                "low": bar.low_price,
-                "close": bar.close_price,
-                "volume": bar.volume,
-                "min_idx": min_idx,
-            }
-        )
-
 
         short_bar = None
         long_bar = None
@@ -264,86 +241,9 @@ class RsiStrategy(BaseStrategy):
             logger.info(f"策略 [{self.strategy_id}] 产生新的long_bar: {long_bar}")
         
         return short_bar, long_bar
-            
-
-
-        # # 判断是否是短周期时间段的最后一根M1 bar
-        # # 例如M5: min_idx=4(9:34)时, (4+1)%5==0, 说明收集齐了9:30-9:34的5根bar
-        # if (min_idx + 1) % self.param.short_k == 0:
-        #     # 找出当前short_k_idx的所有分钟K线
-        #     short_bars = [
-        #         b for b in self.minute_bars if b["min_idx"] // self.param.short_k == short_k_idx
-        #     ]
-        #     if len(short_bars) == self.param.short_k:
-        #         short_bar = BarData(
-        #             symbol=bar.symbol,
-        #             interval=bar.interval,
-        #             datetime=short_bars[0]["datetime"],
-        #             open_price=short_bars[0]["open"],
-        #             high_price=max(b["high"] for b in short_bars),
-        #             low_price=min(b["low"] for b in short_bars),
-        #             close_price=short_bars[-1]["close"],
-        #             volume=sum(b["volume"] for b in short_bars),
-        #             update_time=bar.update_time,
-        #         )
-
-        # # 判断是否是长周期时间段的最后一根M1 bar
-        # if (min_idx + 1) % self.param.long_k == 0:
-        #     # 找出当前long_k_idx的所有分钟K线
-        #     long_bars = [
-        #         b for b in self.minute_bars if b["min_idx"] // self.param.long_k == long_k_idx
-        #     ]
-        #     if len(long_bars) == self.param.long_k:
-        #         long_bar = BarData(
-        #             symbol=bar.symbol,
-        #             interval=bar.interval,
-        #             datetime=long_bars[0]["datetime"],
-        #             open_price=long_bars[0]["open"],
-        #             high_price=max(b["high"] for b in long_bars),
-        #             low_price=min(b["low"] for b in long_bars),
-        #             close_price=long_bars[-1]["close"],
-        #             volume=sum(b["volume"] for b in long_bars),
-        #             update_time=bar.update_time,
-        #         )
-
-        # return self._cache_resampled_bars(short_bar, long_bar)
-
-    def _cache_resampled_bars(
-        self, short_bar: Optional[BarData], long_bar: Optional[BarData]
-    ) -> tuple[Optional[BarData], Optional[BarData]]:
-        """
-        缓存重采样后的K线（只在新K线完成时添加）
-
-        Args:
-            short_bar: 短周期K线（可能为None）
-            long_bar: 长周期K线（可能为None）
-
-        Returns:
-            (new_short_bar, new_long_bar) 新缓存的K线，如果没有则为None
-        """
-        new_short_bar = None
-        new_long_bar = None
-
-        # 缓存短周期K线
-        if short_bar is not None:
-            if self._last_short_bar_time is None or short_bar.datetime != self._last_short_bar_time:
-                self.short_k_bars.append(short_bar)
-                self._last_short_bar_time = short_bar.datetime
-                new_short_bar = short_bar
-                logger.info(f"缓存新短周期K线: {short_bar}")
-
-        # 缓存长周期K线
-        if long_bar is not None:
-            if self._last_long_bar_time is None or long_bar.datetime != self._last_long_bar_time:
-                self.long_k_bars.append(long_bar)
-                self._last_long_bar_time = long_bar.datetime
-                new_long_bar = long_bar
-                logger.info(f"缓存新长周期K线: {long_bar}")
-
-        return new_short_bar, new_long_bar
 
     
-    def _generate_signal(self, short_bar: BarData) -> int:
+    def _generate_signal(self) -> int:
         """
         生成交易信号
 

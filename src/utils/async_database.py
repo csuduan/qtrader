@@ -119,18 +119,19 @@ def get_async_database() -> Optional[AsyncDatabase]:
     return _async_db
 
 
-async def get_async_session() -> Optional[AsyncSession]:
+@asynccontextmanager
+async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
     """
-    获取异步数据库会话
+    获取异步数据库会话的上下文管理器
 
-    Returns:
-        AsyncSession: 异步数据库会话，如果数据库未初始化则返回None
+    Yields:
+        AsyncSession: 异步数据库会话，如果数据库未初始化则抛出异常
     """
     db = get_async_database()
-    if db:
-        async with db.get_session() as session:
-            yield session
-    return None
+    if db is None:
+        raise RuntimeError("数据库未初始化，请先调用 init_async_database()")
+    async with db.get_session() as session:
+        yield session
 
 
 async def close_async_database() -> None:

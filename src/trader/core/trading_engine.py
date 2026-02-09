@@ -570,8 +570,7 @@ class TradingEngine:
         """
         if self._order_cmd_executor:
             # 使用 asyncio.create_task 在后台执行
-            #asyncio.create_task()
-            self._order_cmd_executor.close(cmd_id)
+            asyncio.create_task(self._order_cmd_executor.close(cmd_id))
             return True
         return False
 

@@ -358,7 +358,7 @@ class TqGateway(BaseGateway):
             return False
 
         seconds = self._interval_to_seconds(interval)
-        data_length = 3600 * 24 // seconds
+        data_length = 240 * 3
         if self.api is None:
             return False
         kline =  self.api.get_kline_serial(  # type: ignore[union-attr]
@@ -533,8 +533,8 @@ class TqGateway(BaseGateway):
             update_time=datetime.now(),
             frozen=0,
             float_profit=account.position_profit or 0,
-            broker_name=self.config.broker.broker_name or "--",
-            broker_type=self.config.broker.type or "",
+            broker_name=getattr(self.config.broker, "broker_name", "--") if self.config.broker else "--",
+            broker_type=getattr(self.config.broker, "type", "") if self.config.broker else "",
             currency="CNY",
             user_id="",
             status=None,

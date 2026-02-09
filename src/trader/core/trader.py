@@ -637,42 +637,6 @@ class Trader:
             return result.model_dump()
         return None
 
-    @request("start_strategy")
-    async def _req_start_strategy(self, data: dict) -> bool:
-        """处理启动策略请求"""
-        if self.strategy_manager is None:
-            return False
-        strategy_id = data.get("strategy_id")
-        if strategy_id:
-            return self.strategy_manager.start_strategy(strategy_id)
-        return False
-
-    @request("stop_strategy")
-    async def _req_stop_strategy(self, data: dict) -> bool:
-        """处理停止策略请求"""
-        if self.strategy_manager is None:
-            return False
-        strategy_id = data.get("strategy_id")
-        if strategy_id:
-            return self.strategy_manager.stop_strategy(strategy_id)
-        return False
-
-    @request("start_all_strategies")
-    async def _req_start_all_strategies(self, data: dict) -> bool:
-        """处理启动所有策略请求"""
-        if self.strategy_manager is None:
-            return False
-        self.strategy_manager.start_all()
-        return True
-
-    @request("stop_all_strategies")
-    async def _req_stop_all_strategies(self, data: dict) -> bool:
-        """处理停止所有策略请求"""
-        if self.strategy_manager is None:
-            return False
-        self.strategy_manager.stop_all()
-        return True
-
     @request("replay_all_strategies")
     async def _req_replay_all_strategies(self, data: dict) -> dict:
         """处理回播所有策略请求"""
