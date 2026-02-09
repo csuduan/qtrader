@@ -697,6 +697,7 @@ class TqGateway(BaseGateway):
 
             # 获取合约列表
             ls = self.api.query_quotes(ins_class=["FUTURE"], expired=False)
+            ls = [x for x in ls if len(x)>=10]
             symbol_infos = self.api.query_symbol_info(ls)
             for index, item in symbol_infos.iterrows():
                 instrument_id = item.instrument_id

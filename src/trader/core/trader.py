@@ -324,9 +324,6 @@ class Trader:
         self._running = False
         logger.info(f"Trader [{self.account_id}] 停止中...")
 
-        # 停止所有策略
-        if self.strategy_manager:
-            self.strategy_manager.stop_all()
 
         # 停止任务调度器
         if self.task_scheduler:
