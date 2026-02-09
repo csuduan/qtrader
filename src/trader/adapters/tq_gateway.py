@@ -201,17 +201,12 @@ class TqGateway(BaseGateway):
             self.connected = False
 
             # 取消更新任务
-            if self._update_task:
-                self._update_task.cancel()
-                try:
-                    await self._update_task
-                except asyncio.CancelledError:
-                    pass
-
-            # 关闭API
-            if self.api:
-                self.api.close()
-                self.api = None
+            # if self._update_task:
+            #     self._update_task.cancel()
+            #     try:
+            #         await self._update_task
+            #     except asyncio.CancelledError:
+            #         pass
 
             logger.info("TqSdk已断开连接")
             return True
@@ -265,8 +260,10 @@ class TqGateway(BaseGateway):
                 has_data = await asyncio.to_thread(wait_update)
                 if has_data:
                     await self._handle_updates()
-
             logger.info("TqSdk wait_update 驱动循环已退出")
+            if self.api:
+                self.api.close()
+                self.api = None
         except asyncio.CancelledError:
             logger.info("TqSdk数据处理任务已取消")
         except Exception as e:
