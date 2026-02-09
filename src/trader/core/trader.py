@@ -864,7 +864,7 @@ class Trader:
             return {"success": False, "message": f"策略 {strategy_id} 不存在"}
 
         try:
-            result = await strategy.init()
+            result = strategy.init(self.trading_engine.trading_day)
             if result:
                 logger.info(f"策略 [{strategy_id}] 初始化成功")
                 return {"success": True, "message": "策略初始化成功"}

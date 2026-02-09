@@ -32,6 +32,7 @@ class WebSocketManager:
         event_engine.register(EventTypes.TICK_UPDATE, self.broadcast_quote)
         event_engine.register(EventTypes.ACCOUNT_UPDATE, self.broadcast_account)
         event_engine.register(EventTypes.ACCOUNT_STATUS, self.broadcast_account_status)
+        event_engine.register(EventTypes.ALARM_UPDATE, self.broadcast_alarm)
         logger.info("WEBSOCKET已注册事件引擎订阅")
 
     async def connect(self, websocket: WebSocket):
@@ -120,6 +121,16 @@ class WebSocketManager:
             {
                 "type": "account_update",
                 "data": status_data,
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
+
+    async def broadcast_alarm(self, alarm_data: dict) -> None:
+        """广播告警更新"""
+        await self.broadcast(
+            {
+                "type": "alarm_update",
+                "data": alarm_data,
                 "timestamp": datetime.now().isoformat(),
             }
         )

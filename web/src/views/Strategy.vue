@@ -237,8 +237,8 @@ async function handleToggleClosingPaused(strategyId: string, paused: boolean) {
 async function handleReplayAll() {
   try {
     await ElMessageBox.confirm(
-      '当前只支持bar回播，回播会重置策略，并从当前交易日的初始bar开始推送。是否继续？',
-      '确认回播全部策略',
+      '当前只支持回播当日bar，流程：暂停策略 -> 重置策略 -> 回播当日bar -> 恢复策略。\n是否继续？',
+      '确认回播当日bar',
       {
         confirmButtonText: '确认回播',
         cancelButtonText: '取消',

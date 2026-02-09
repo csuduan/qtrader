@@ -31,6 +31,7 @@ from src.manager.api.responses import (
 from src.manager.api.websocket_manager import websocket_manager
 from src.manager.core.trading_manager import TradingManager
 from src.utils.config_loader import AccountConfig, DatabaseConfig, get_config_loader
+from src.utils.database import Database, get_database, init_database
 from src.utils.event_engine import Event, EventEngine, EventTypes
 from src.utils.logger import get_logger, setup_logger
 
@@ -65,6 +66,17 @@ async def lifespan(app: FastAPI):
         log_dir=_app_config.paths.logs,
         log_level="INFO",
     )
+
+    # 初始化 Manager 本地数据库
+    manager_db_path = Path(_app_config.paths.database).expanduser().resolve()
+    logger.info(f"Manager 数据库路径: {manager_db_path}")
+    _manager_db: Database = init_database(str(manager_db_path), account_id="manager", echo=False)
+    logger.info(f"Manager 数据库已初始化: {_manager_db}")
+
+    # 验证全局数据库是否正确设置
+    from src.utils.database import get_database
+    global_db = get_database()
+    logger.info(f"全局数据库实例: {global_db}")
 
     # 启用告警日志处理器
     try:
@@ -104,6 +116,7 @@ async def lifespan(app: FastAPI):
     # 存储到app.state
     app.state.config = _app_config
     app.state.context = ctx
+    app.state.db = _manager_db
 
     logger.info("FastAPI应用启动完成")
     logger.info(f"API文档: http://{_app_config.api.host}:{_app_config.api.port}/docs")
@@ -116,6 +129,10 @@ async def lifespan(app: FastAPI):
     # 停止交易管理器
     if _trading_manager:
         await _trading_manager.stop()
+
+    # 关闭数据库
+    from src.utils.database import close_database
+    close_database()
 
     # 清理 AppContext
     ctx.clear()
@@ -291,3 +308,7 @@ def main():
 
 # 导出
 __all__ = ["create_app", "main", "websocket_manager"]
+
+
+if __name__ == "__main__":
+    main()

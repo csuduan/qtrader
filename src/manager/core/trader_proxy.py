@@ -147,12 +147,13 @@ class TraderProxy:
             # 检查是否已有进程存在
             process_exists = await self._check_process_exists()
 
-            if not process_exists:
-                # 创建新进程
-                await self._create_subprocess()
-            else:
-                logger.info(f"TraderProxy [{self.account_id}] 检测到已存在进程")
-                self._created_process = False
+            # if not process_exists:
+            #     # 创建新进程
+            #     await self._create_subprocess()
+            #     pass
+            # else:
+            #     logger.info(f"TraderProxy [{self.account_id}] 检测到已存在进程")
+            #     self._created_process = False
 
             # 设置启动时间
             self.start_time = datetime.now()
@@ -176,8 +177,8 @@ class TraderProxy:
 
         except Exception as e:
             logger.exception(f"TraderProxy [{self.account_id}] 启动失败: {e}")
-            if self._created_process:
-                await self._cleanup_subprocess()
+            #if self._created_process:
+            #    await self._cleanup_subprocess()
             await self._set_state(TraderState.STOPPED)
             return False
 

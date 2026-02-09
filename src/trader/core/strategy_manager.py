@@ -6,7 +6,7 @@
 import asyncio
 import csv
 import os
-from datetime import datetime
+from datetime import datetime,timedelta
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from src.app_context import get_app_context
@@ -151,10 +151,10 @@ class StrategyManager:
 
             # 创建策略实例
             try:
-                strategy = strategy_class(name, config)
+                strategy:BaseStrategy = strategy_class(name, config)
                 strategy.strategy_manager = self
                 self.strategies[name] = strategy
-                strategy.init()
+                strategy.init(self.trading_engine.trading_day)
                 logger.info(f"添加策略: {name}")
 
                 # 按需订阅合约行情
@@ -233,30 +233,6 @@ class StrategyManager:
                     except Exception as e:
                         logger.exception(f"策略 {name} {method} 失败: {e}")
 
-    def _update_bar_generator(self, tick) -> None:
-        """
-        更新tick到BarGenerator
-
-        Args:
-            tick: TickData
-        """
-        symbol = tick.symbol
-
-        # 检查该symbol是否有BarGenerator
-        if symbol not in self._bar_generators:
-            return
-
-        multi_gen = self._bar_generators[symbol]
-
-        # 更新tick到BarGenerator
-        results = multi_gen.update_tick(tick)
-
-        # 完成的bar已通过回调分发给策略
-        # 这里可以记录日志
-        if results:
-            for std_symbol, bars in results.items():
-                for bar in bars:
-                    logger.debug(f"Bar完成: {std_symbol} {bar.interval.value} {bar.datetime}")
 
     def _dispatch_order_event(self, method: str, data: Any) -> None:
         """
@@ -307,9 +283,10 @@ class StrategyManager:
 
     def reset_all_for_new_day(self) -> None:
         """重置所有策略（开盘前调用）"""
+        trading_day = self.trading_engine.trading_day
         for strategy in self.strategies.values():
             if hasattr(strategy, "reset_for_new_day"):
-                strategy.init()
+                strategy.init(trading_day)
         logger.info("所有策略已重置")
 
     async def subscribe_symbol(self, symbol: str, interval: str) -> bool:
@@ -643,7 +620,7 @@ class StrategyManager:
 
     async def replay_strategy(self, strategy: BaseStrategy) -> bool:
         """
-        回播策略行情
+        回播当日策略行情
         流程：
         1. 暂停策略交易，暂停接收实时tick、bar推送
         2. 执行策略初始化方法
@@ -669,7 +646,7 @@ class StrategyManager:
             # 1. 暂停策略
             strategy.stop()
             # 2. 执行策略初始化方法
-            strategy.init()
+            strategy.init(trading_date)
             logger.info(f"策略 [{strategy_id}] 初始化完成")
 
             # 3. 从网关获取kline
@@ -679,45 +656,12 @@ class StrategyManager:
                 return False
 
             symbol, interval = strategy.bar_subscriptions[0].split("-")
-            # 通过网关获取K线数据
-            kline_df = self.trading_engine.get_kline(symbol, interval)
-            if kline_df is None:
-                logger.error(f"策略 [{strategy_id}] 未找到 {symbol} {interval} 的K线数据")
-                return False
-
-            # 4. 从kline中选出当前交易日的bar
-            # 筛选当前交易日的bar (K线时间戳是纳秒级)
-            trading_bars = []
-            for _, row in kline_df.iterrows():
-                bar_datetime = row["datetime"]
-                if bar_datetime.date() >= trading_date.date():
-                    # 转换为BarData
-                    from src.models.object import BarData
-
-                    bar = BarData(
-                        symbol=symbol,
-                        interval=interval,
-                        datetime=bar_datetime,
-                        open_price=float(row["open"]),
-                        high_price=float(row["high"]),
-                        low_price=float(row["low"]),
-                        close_price=float(row["close"]),
-                        volume=float(row["volume"]),
-                        type="history",
-                        update_time=bar_datetime+timedelta(minutes=1),
-                    )
-                    trading_bars.append(bar)
-
+            trading_bars = self.load_hist_bars(symbol, interval, trading_date,trading_date+timedelta(days=1))
             if not trading_bars:
-                logger.warning(f"策略 [{strategy_id}] 未找到 {trading_date} 的K线数据")
+                logger.error(f"策略 [{strategy_id}] 未获取到 {symbol} {interval} 的历史K线数据")
                 return False
-
-            # 按时间排序
-            trading_bars.sort(key=lambda x: x.datetime)
-
-            logger.info(f"策略 [{strategy_id}] 找到 {len(trading_bars)} 根 {trading_date} 的K线")
-
-            # 5. 循环调用on_bar()
+            
+            # 4. 循环调用on_bar()
             for bar in trading_bars:
                 await strategy.on_bar(bar)
 
@@ -733,6 +677,7 @@ class StrategyManager:
             # 6. 恢复策略交易
             strategy.start()
             logger.info(f"策略 [{strategy_id}] 已恢复交易")
+    
 
     async def replay_all_strategies(self) -> dict:
         """
@@ -780,6 +725,39 @@ class StrategyManager:
         finally:
             # 3. 恢复交易
             self.trading_engine.resume()
+    
+    def load_hist_bars(self,symbol, interval, start: datetime,end: datetime) ->List[BarData]:
+        # 通过网关获取K线数据
+        kline_df = self.trading_engine.get_kline(symbol, interval)
+        if kline_df is None:
+            logger.warning(f"未找到 {symbol} {interval} 的历史K线数据")
+            return []
+
+        # 筛选当前交易日的bar (K线时间戳是纳秒级)
+        trading_bars = []
+        for _, row in kline_df.iterrows():
+            bar_datetime = row["datetime"]
+            if bar_datetime >= start and bar_datetime <= end:
+                bar = BarData(
+                    symbol=symbol,
+                    interval=interval,
+                    datetime=bar_datetime,
+                    open_price=float(row["open"]),
+                    high_price=float(row["high"]),
+                    low_price=float(row["low"]),
+                    close_price=float(row["close"]),
+                    volume=float(row["volume"]),
+                    type="history",
+                    update_time=bar_datetime+timedelta(minutes=1),
+                )
+                trading_bars.append(bar)
+        if not trading_bars:
+            logger.warning(f"未找到 {symbol} {interval} 从 {start} 开始的K线数据")
+            return []
+
+        # 按时间排序
+        trading_bars.sort(key=lambda x: x.datetime)
+        return trading_bars
 
     def get_strategy_bars(self, strategy_id: str, interval_str: str, count: int = 100):
         """

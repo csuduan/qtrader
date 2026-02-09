@@ -15,6 +15,8 @@ from src.models.object import (
     OrderData,
     TickData,
     TradeData,
+    Direction,
+    Offset,
 )
 from src.trader.order_cmd import OrderCmd
 from src.utils.config_loader import StrategyConfig
@@ -30,7 +32,7 @@ logger = get_logger(__name__)
 class BaseParam(BaseModel):
     """策略公共参数"""
     symbol: str = Field(default="IM2603", title="合约代码")
-    bar: str = Field(default="M1", title="时间周期")
+    bar_type: str = Field(default="M1", title="bar类型")
     volume: int = Field(default=1, title="目标手数")
     slip: float = Field(default=0, title="滑点")
     max_position: int = Field(default=50, title="最大持仓")
@@ -95,9 +97,11 @@ class BaseStrategy:
         self.strategy_id = strategy_id
         self.config: StrategyConfig = strategy_config
         self.symbol: str =strategy_config.symbol
+        self.bar_type: str =strategy_config.bar
         self.inited: bool = False
         self.enabled: bool = True
         self.bar_subscriptions: List[str] = []
+        self.trading_day: datetime = None
         # 策略管理器引用
         self.strategy_manager: Optional["StrategyManager"] = None
         # 参数模型（子类覆盖）
@@ -117,7 +121,7 @@ class BaseStrategy:
         self._hist_cmds: Dict[str, OrderCmd] = {}
 
 
-    def init(self) -> bool:
+    def init(self,trading_day: datetime) -> bool:
         """策略初始化（异步版本）"""
         logger.info(f"策略 [{self.strategy_id}] 初始化...")
         self.inited = True
@@ -126,6 +130,7 @@ class BaseStrategy:
         self.signal = None
         self.pos_volume = 0
         self.pos_price = None
+        self.trading_day = trading_day
 
         # 解析参数
         if self.config.params:
@@ -141,6 +146,10 @@ class BaseStrategy:
             return []
         definitions = self.param.get_param_definitions()
         return definitions
+    
+    def load_hist_bars(self, symbol: str, start: datetime, end: datetime) -> List[BarData]:
+        """加载历史K线数据"""
+        return self.strategy_manager.load_hist_bars(symbol, self.bar_type, start, end)
 
     def get_signal(self) -> dict:
         """获取当前信号"""

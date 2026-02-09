@@ -69,7 +69,7 @@ class PathsConfig(BaseModel):
 
     switchPos_files: str = "./data/orders"
     logs: str = "./data/logs"
-    database: str = "./storage/trading.db"
+    database: str = "./data/trading.db"
     export: str = "./data/export"
     params: str = "./data/params"
 
