@@ -383,7 +383,7 @@ class Trader:
         if self.trading_engine is None:
             logger.error(f"Trader [{self.account_id}] 交易引擎未初始化")
             return None
-        await self.trading_engine.subscribe_symbol(data["symbol"])
+        self.trading_engine.subscribe_symbol(data["symbol"])
         logger.info(f"Trader [{self.account_id}] 订阅{data['symbol']}成功")
         return True
 
@@ -417,7 +417,7 @@ class Trader:
             volume = data["volume"]
             price = data.get("price", 0)
 
-            order_id = await self.trading_engine.insert_order(
+            order_id = self.trading_engine.insert_order(
                 symbol=symbol,
                 direction=direction.value,
                 offset=offset.value,
@@ -449,7 +449,7 @@ class Trader:
 
         try:
             order_id = data["order_id"]
-            success = await self.trading_engine.cancel_order(order_id)
+            success = self.trading_engine.cancel_order(order_id)
 
             if success:
                 logger.info(f"Trader [{self.account_id}] 撤单成功: {order_id}")
@@ -1281,25 +1281,6 @@ class Trader:
         await asyncio.create_task(execute())
         return True
 
-    @request("close_all_positions")
-    async def _req_close_all_positions(self, data: dict) -> bool:
-        """处理一键平仓请求"""
-        import threading
-
-        if self.switchPos_manager is None:
-            return False
-
-        def execute():
-            try:
-                self.switchPos_manager.close_all_positions()
-                logger.info(f"Trader [{self.account_id}] 一键平仓执行完成")
-            except Exception as e:
-                logger.error(f"Trader [{self.account_id}] 一键平仓执行失败: {e}")
-
-        thread = threading.Thread(target=execute, daemon=True)
-        thread.start()
-
-        return True
 
     @request("batch_execute_instructions")
     async def _req_batch_execute_instructions(self, data: dict) -> dict:

@@ -28,6 +28,8 @@ class EventTypes:
     # 行情事件
     TICK_UPDATE = "e:tick.update"
     KLINE_UPDATE = "e:kline.update"
+    # 合约更新事件
+    CONTRACT_UPDATE = "e:contract.update"
     # 系统告警
     SYSTEM_ERROR = "e:system.error"
     # 告警事件

@@ -119,7 +119,7 @@ class StrategyManager:
         try:
             self.event_engine = ctx.get_event_engine()
             # 加载并实例化策略
-            await self._load_strategies()
+            self._load_strategies()
             # 注册事件到 EventEngine
             self._register_events()
             # 启动所有策略
@@ -132,7 +132,7 @@ class StrategyManager:
             logger.exception(f"策略管理器初始化失败: {e}")
             return False
 
-    async def _load_strategies(self) -> None:
+    def _load_strategies(self) -> None:
         """从配置加载并实例化策略"""
         from src.trader.strategy import get_strategy_class
 
@@ -161,7 +161,7 @@ class StrategyManager:
                 # 按需订阅合约行情
                 symbol = strategy.symbol
                 if symbol:
-                    await self.subscribe_symbol(symbol, config.bar)
+                    self.subscribe_symbol(symbol, config.bar)
                     strategy.bar_subscriptions.append(f"{symbol}-{config.bar}")
             except Exception as e:
                 logger.exception(f"创建策略 {name} 失败: {e}", exc_info=True)
@@ -235,13 +235,13 @@ class StrategyManager:
         return self.strategies[name].enable(False)
 
 
-    async def subscribe_symbol(self, symbol: str, interval: str) -> bool:
+    def subscribe_symbol(self, symbol: str, interval: str) -> bool:
         """订阅合约行情（按需订阅）"""
         if not self.trading_engine:
             return False
-        await self.trading_engine.subscribe_symbol(symbol)
+        self.trading_engine.subscribe_symbol(symbol)
         if interval:
-            await self.trading_engine.subscribe_bars(symbol, interval)
+            self.trading_engine.subscribe_bars(symbol, interval)
         return True
 
 
@@ -274,7 +274,7 @@ class StrategyManager:
             return None
 
         try:
-            order_id = await self.trading_engine.insert_order(
+            order_id = self.trading_engine.insert_order(
                 symbol=symbol,
                 direction=direction.value,
                 offset=offset.value,
@@ -301,7 +301,7 @@ class StrategyManager:
             order_cmd: 订单指令对象
         """
         try:
-            await self.trading_engine.insert_order_cmd(order_cmd)
+            self.trading_engine.insert_order_cmd(order_cmd)
             logger.info(f"策略 [{strategy_id}] 发送订单指令: {order_cmd}")
         except Exception as e:
             logger.exception(f"策略 [{strategy_id}] 发送订单指令失败: {e}")

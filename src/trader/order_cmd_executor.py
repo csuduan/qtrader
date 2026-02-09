@@ -102,7 +102,7 @@ class OrderCmdExecutor:
 
         self.logger.info("执行器已停止")
 
-    async def register(self, cmd: "OrderCmd") -> None:
+    def register(self, cmd: "OrderCmd") -> None:
         """
         注册 OrderCmd - 注册即启动
 
@@ -111,7 +111,7 @@ class OrderCmdExecutor:
         """
         # 订阅合约行情（异步）
         #asyncio.create_task()
-        await self._trading_engine.subscribe_symbol(cmd.symbol)
+        self._trading_engine.subscribe_symbol(cmd.symbol)
 
         # 设置为运行状态
         cmd.status = OrderCmdStatus.RUNNING
@@ -154,7 +154,7 @@ class OrderCmdExecutor:
         # 触发状态变更事件 (PENDING -> RUNNING)
         self._emit_cmd_update(cmd)
 
-    async def close(self, cmd_id: str) -> bool:
+    def close(self, cmd_id: str) -> bool:
         """
         关闭 OrderCmd（取消）
 
@@ -172,7 +172,7 @@ class OrderCmdExecutor:
         # 撤销所有活动订单（异步）
         pending_order = cmd.get_pending_order()
         if pending_order:
-            await self._trading_engine.cancel_order(pending_order.order_id)
+            self._trading_engine.cancel_order(pending_order.order_id)
 
         # 设置为关闭状态
         old_status = cmd.status
@@ -227,7 +227,7 @@ class OrderCmdExecutor:
             try:
                 # 遍历所有 cmd，检查并执行报单
                 if len(self._pending_cmds) == 0:
-                    await asyncio.sleep(0.1)
+                    await asyncio.sleep(0)
                     continue
                 remove_list = []
                 for cmd_id, cmd in self._pending_cmds.items():
@@ -236,7 +236,7 @@ class OrderCmdExecutor:
                         remove_list.append(cmd_id)
                     else:
                         try:
-                            await self._process_cmd(cmd)
+                            self._process_cmd(cmd)
                         except Exception as e:
                             self.logger.exception(f"cmd 处理失败 {cmd_id}: {e}")
 
@@ -251,7 +251,7 @@ class OrderCmdExecutor:
             await asyncio.sleep(0)
         self.logger.info("执行器主循环退出")
 
-    async def _process_cmd(self, cmd: "OrderCmd") -> None:
+    def _process_cmd(self, cmd: "OrderCmd") -> None:
         """
         处理单个 OrderCmd 的 tick
 
@@ -265,7 +265,7 @@ class OrderCmdExecutor:
         if isinstance(req, OrderRequest):
             # 报单（异步）
             try:
-                order = await self._trading_engine.insert_order(
+                order = self._trading_engine.insert_order(
                     symbol=req.symbol,
                     direction=req.direction,
                     offset=req.offset,
@@ -279,7 +279,7 @@ class OrderCmdExecutor:
         elif isinstance(req, OrderData):
             # 撤单（异步）
             try:
-                await self._trading_engine.cancel_order(req.order_id)
+                self._trading_engine.cancel_order(req.order_id)
                 req.canceled = True
             except Exception as e:
                 self.logger.error(f"撤单失败 {req.order_id}: {e}")

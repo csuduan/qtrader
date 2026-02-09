@@ -345,7 +345,7 @@ class SwitchPosManager:
                     source=f"换仓:{instruction.symbol}",
                     on_change=self._on_cmd_changed,
                 )
-                await self.trading_engine.insert_order_cmd(order_cmd)
+                self.trading_engine.insert_order_cmd(order_cmd)
                 if order_cmd:
                     instruction.current_order_id = order_cmd.cmd_id
                     instruction.status = "RUNNING"
@@ -546,31 +546,6 @@ class SwitchPosManager:
         finally:
             session.close()
 
-    def _cancel_order(self, order_id: str) -> bool:
-        """
-        撤单（异步版本）
-
-        Args:
-            order_id: 委托单ID
-
-        Returns:
-            bool: 是否成功
-        """
-        try:
-            import asyncio
-            loop = asyncio.get_running_loop()
-            if order_id:
-                asyncio.run_coroutine_threadsafe(
-                    self.trading_engine.cancel_order(str(order_id)), loop
-                )
-                logger.info(f"撤单请求已提交: {order_id}")
-                return True
-            else:
-                logger.warning(f"撤单失败: {order_id}")
-                return False
-        except Exception as e:
-            logger.error(f"撤单时出错: {e}")
-            return False
 
     def _load_all_instructions(self) -> List[OrderInstruction]:
         """
@@ -668,61 +643,3 @@ class SwitchPosManager:
         except Exception as e:
             logger.error(f"读取CSV文件失败: {e}")
             return []
-
-    def close_all_positions(self) -> None:
-        """
-        一键平仓所有持仓
-        """
-        logger.info("开始一键平仓...")
-        positions = list(self.trading_engine.positions.values())
-        if not positions:
-            logger.info("当前无持仓，无需平仓")
-            return
-
-        closed_count = 0
-        failed_count = 0
-
-        for position in positions:
-            try:
-                # 平多头
-                if position.pos_long > 0:
-                    self._close_position(position.instrument_id, "SELL", position.pos_long)
-                    closed_count += 1
-
-                # 平空头
-                if position.pos_short > 0:
-                    self._close_position(position.instrument_id, "BUY", position.pos_short)
-                    closed_count += 1
-
-            except Exception as e:
-                logger.error(f"平仓失败 {position.instrument_id}: {e}")
-                failed_count += 1
-
-        logger.info(f"一键平仓完成，成功: {closed_count}, 失败: {failed_count}")
-
-    def _close_position(self, symbol: str, direction: str, volume: int) -> None:
-        """
-        平仓（异步版本）
-
-        Args:
-            symbol: 合约代码
-            direction: 平仓方向（BUY平空，SELL平多）
-            volume: 平仓手数
-        """
-        try:
-            import asyncio
-            loop = asyncio.get_running_loop()
-            asyncio.run_coroutine_threadsafe(
-                self.trading_engine.insert_order(
-                    symbol=symbol,
-                    direction=direction,
-                    offset="CLOSE",
-                    volume=volume,
-                    price=0,  # 市价
-                ),
-                loop,
-            )
-            logger.info(f"平仓报单已提交: {symbol} {direction} {volume}手")
-        except Exception as e:
-            logger.error(f"平仓报单失败 {symbol}: {e}")
-            raise

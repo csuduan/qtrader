@@ -244,7 +244,7 @@ class TradingEngine:
             logger.info("连接到交易系统...")
             if self.gateway is None:
                 return False
-            asyncio.create_task(self.gateway.connect())
+            await self.gateway.connect()
             return True
 
         except Exception as e:
@@ -268,7 +268,7 @@ class TradingEngine:
             logger.exception(f"断开连接失败: {e}")
             return False
 
-    async def insert_order(
+    def insert_order(
         self,
         symbol: str,
         direction: Union[str, Direction],
@@ -277,7 +277,7 @@ class TradingEngine:
         price: float = 0,
     ) -> Optional[OrderData]:
         """
-        下单（异步版本）
+        下单
 
         Args:
             symbol: 合约代码，支持格式：合约编号(如a2605)、合约编号.交易所(如a2605.DCE)、交易所.合约编号(如DCE.a2605)
@@ -320,7 +320,7 @@ class TradingEngine:
                 price=price if price > 0 else None,
             )
 
-            order_data = await self.gateway.send_order(req)
+            order_data =  self.gateway.send_order(req)
 
             if order_data is not None:
                 logger.bind(tags=["trade"]).info(
@@ -335,9 +335,9 @@ class TradingEngine:
         except Exception as e:
             raise Exception(f"下单失败: {e}")
 
-    async def cancel_order(self, order_id: str) -> bool:
+    def cancel_order(self, order_id: str) -> bool:
         """
-        撤单（通过Gateway，异步版本）
+        撤单（通过Gateway）
 
         Args:
             order_id: 订单ID
@@ -347,7 +347,7 @@ class TradingEngine:
         """
         if self.gateway and self.gateway.connected:
             req = CancelRequest(order_id=order_id)
-            return await self.gateway.cancel_order(req)
+            return  self.gateway.cancel_order(req)
 
         logger.warning("Gateway未初始化或未连接")
         return False
@@ -442,9 +442,9 @@ class TradingEngine:
             return self.gateway.get_kline(symbol, interval)
         return None
 
-    async def subscribe_symbol(self, symbol: Union[str, List[str]]) -> bool:
+    def subscribe_symbol(self, symbol: Union[str, List[str]]) -> bool:
         """
-        订阅合约行情（通过Gateway，异步版本）
+        订阅合约行情（通过Gateway）
 
         Args:
             symbol: 合约代码
@@ -453,12 +453,12 @@ class TradingEngine:
             bool: 订阅是否成功
         """
         if self.gateway:
-            await self.gateway.subscribe(symbol)
+            self.gateway.subscribe(symbol)
         return True
 
-    async def subscribe_bars(self, symbol: str, interval: str) -> bool:
+    def subscribe_bars(self, symbol: str, interval: str) -> bool:
         """
-        订阅合约行情（通过Gateway，异步版本）
+        订阅合约行情（通过Gateway）
 
         Args:
             symbol: 合约代码
@@ -467,7 +467,7 @@ class TradingEngine:
             bool: 订阅是否成功
         """
         if self.gateway:
-            await self.gateway.subscribe_bars(symbol, interval)
+            self.gateway.subscribe_bars(symbol, interval)
         return True
 
     def _emit_event(self, event_type: str, data: Any) -> None:
@@ -523,7 +523,7 @@ class TradingEngine:
         if self.event_engine:
             await self.event_engine.put_async(EventTypes.ACCOUNT_UPDATE, account)
 
-    async def insert_order_cmd(self, cmd: OrderCmd) -> Optional[str]:
+    def insert_order_cmd(self, cmd: OrderCmd) -> Optional[str]:
         """
         创建报单指令
 
@@ -548,7 +548,7 @@ class TradingEngine:
         self._order_cmds[cmd.cmd_id] = cmd
         # 注册到执行器（注册即启动）
         if self._order_cmd_executor:
-            await self._order_cmd_executor.register(cmd)
+            self._order_cmd_executor.register(cmd)
 
         if "策略-" in cmd.source and self.config.alert_wechat:
             send_wechat(
@@ -569,9 +569,8 @@ class TradingEngine:
             是否成功（立即返回，实际执行在后台）
         """
         if self._order_cmd_executor:
-            # 使用 asyncio.create_task 在后台执行
-            asyncio.create_task(self._order_cmd_executor.close(cmd_id))
-            return True
+            # close 是同步方法，直接调用
+            return self._order_cmd_executor.close(cmd_id)
         return False
 
     def get_order_cmd(self, cmd_id: str) -> Optional[dict]:

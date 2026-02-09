@@ -147,9 +147,9 @@ class BaseGateway(ABC):
     # ==================== 行情订阅 ====================
 
     @abstractmethod
-    async def subscribe(self, symbol: Union[str, List[str]]) -> bool:
+    def subscribe(self, symbol: Union[str, List[str]]) -> bool:
         """
-        订阅行情
+        订阅行情（异步）
 
         Args:
             symbol: 订阅合约
@@ -160,7 +160,7 @@ class BaseGateway(ABC):
         pass
 
     @abstractmethod
-    async def subscribe_bars(self, symbol: str, interval: str) -> bool:
+    def subscribe_bars(self, symbol: str, interval: str) -> bool:
         """
         订阅K线数据
 
@@ -176,9 +176,9 @@ class BaseGateway(ABC):
     # ==================== 交易接口 ====================
 
     @abstractmethod
-    async def send_order(self, req: OrderRequest) -> Optional[OrderData]:
+    def send_order(self, req: OrderRequest) -> Optional[OrderData]:
         """
-        下单
+        下单（异步）
 
         Args:
             req: 下单请求
@@ -189,7 +189,7 @@ class BaseGateway(ABC):
         pass
 
     @abstractmethod
-    async def cancel_order(self, req: CancelRequest) -> bool:
+    def cancel_order(self, req: CancelRequest) -> bool:
         """
         撤单
 
@@ -275,88 +275,3 @@ class BaseGateway(ABC):
             Optional[pd.DataFrame]: K线数据框，失败返回None
         """
         pass
-
-    # ==================== 数据推送（由子类调用）====================
-
-    async def _emit_tick(self, tick: TickData):
-        """推送tick数据（支持异步回调）"""
-        if self.on_tick_callback:
-            if callable(self.on_tick_callback):
-                import asyncio
-                import inspect
-                if inspect.iscoroutinefunction(self.on_tick_callback):
-                    await self.on_tick_callback(tick)
-                else:
-                    self.on_tick_callback(tick)
-        # 同时推送给策略
-        if self.on_tick_strategy:
-            import asyncio
-            import inspect
-            if inspect.iscoroutinefunction(self.on_tick_strategy):
-                await self.on_tick_strategy(tick)
-            else:
-                self.on_tick_strategy(tick)
-
-    async def _emit_bar(self, bar: BarData):
-        """推送bar数据（支持异步回调）"""
-        if self.on_bar_callback:
-            import asyncio
-            import inspect
-            if inspect.iscoroutinefunction(self.on_bar_callback):
-                await self.on_bar_callback(bar)
-            else:
-                self.on_bar_callback(bar)
-
-    async def _emit_order(self, order: OrderData):
-        """推送订单数据（支持异步回调）"""
-        logger.info(f"报单变动: {order}")
-        if self.on_order_callback:
-            import asyncio
-            import inspect
-            if inspect.iscoroutinefunction(self.on_order_callback):
-                await self.on_order_callback(order)
-            else:
-                self.on_order_callback(order)
-
-    async def _emit_trade(self, trade: TradeData):
-        """推送成交数据（支持异步回调）"""
-        logger.info(f"成交变动: {trade}")
-        if self.on_trade_callback:
-            import asyncio
-            import inspect
-            if inspect.iscoroutinefunction(self.on_trade_callback):
-                await self.on_trade_callback(trade)
-            else:
-                self.on_trade_callback(trade)
-
-    async def _emit_position(self, position: PositionData):
-        """推送持仓数据（支持异步回调）"""
-        logger.info(f"持仓变动: {position}")
-        if self.on_position_callback:
-            import asyncio
-            import inspect
-            if inspect.iscoroutinefunction(self.on_position_callback):
-                await self.on_position_callback(position)
-            else:
-                self.on_position_callback(position)
-
-    async def _emit_account(self, account: AccountData):
-        """推送账户数据（支持异步回调）"""
-        # logger.info(f"账户变动: {account}")
-        if self.on_account_callback:
-            import asyncio
-            import inspect
-            if inspect.iscoroutinefunction(self.on_account_callback):
-                await self.on_account_callback(account)
-            else:
-                self.on_account_callback(account)
-
-    async def _emit_contract(self, contract: ContractData):
-        """推送合约数据（支持异步回调）"""
-        if self.on_contract_callback:
-            import asyncio
-            import inspect
-            if inspect.iscoroutinefunction(self.on_contract_callback):
-                await self.on_contract_callback(contract)
-            else:
-                self.on_contract_callback(contract)
