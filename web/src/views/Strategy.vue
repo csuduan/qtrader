@@ -106,37 +106,17 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useStore } from '@/stores'
 import { strategyApi } from '@/api'
+import type { StrategyRes } from '@/types'
 
-interface StrategyRes {
-  strategy_id: string
-  active: boolean
-  enabled: boolean
-  inited: boolean
-  config: Record<string, any>
-  params: Record<string, any>
-  signal: SignalData
-  trading_status: string
-  opening_paused: boolean
-  closing_paused: boolean
+// 扩展 StrategyRes 类型，添加 toggleLoading 属性
+interface StrategyWithLoading extends StrategyRes {
   toggleLoading?: boolean
-}
-
-interface SignalData {
-  side: number
-  entry_price: number
-  entry_time: string
-  entry_volume: number
-  exit_price: number
-  exit_time: string | null
-  exit_reason: string
-  pos_volume: number
-  pos_price: number | null
 }
 
 const router = useRouter()
 const store = useStore()
 const loading = ref(false)
-const strategies = ref<StrategyRes[]>([])
+const strategies = ref<StrategyWithLoading[]>([])
 const replayAllLoading = ref(false)
 
 function navigateToDetails(strategyId: string) {

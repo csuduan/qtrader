@@ -217,8 +217,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
-import { ElMessage, ElMessageBox, ElSpace } from 'element-plus'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
+import { ElMessage, ElSpace } from 'element-plus'
 import { useStore } from '@/stores'
 import { systemApi, accountApi } from '@/api'
 import { jobsApi } from '@/api'
@@ -255,9 +255,6 @@ function getAccountStatusText(account: Account | null): string {
 
 const store = useStore()
 const connecting = ref(false)
-const disconnecting = ref(false)
-const pausing = ref(false)
-const resuming = ref(false)
 const showConnectDialog = ref(false)
 const updatingRisk = ref(false)
 const updatingAlertWechat = ref(false)
@@ -354,67 +351,10 @@ async function handleConnect() {
   }
 }
 
-async function handleDisconnect() {
-  try {
-    await ElMessageBox.confirm('确定要断开连接吗？', '确认断开', {
-      type: 'warning'
-    })
-
-    disconnecting.value = true
-    await accountApi.disconnectGateway(store.selectedAccountId || '')
-    ElMessage.success('已断开连接')
-    await store.loadAllAccounts()
-  } catch (error: any) {
-    if (error !== 'cancel') {
-      ElMessage.error(`断开失败: ${error.message}`)
-    }
-  } finally {
-    disconnecting.value = false
-  }
-}
-
-async function handlePause() {
-  try {
-    await ElMessageBox.confirm('确定要暂停交易吗？', '确认暂停', {
-      type: 'warning'
-    })
-
-    pausing.value = true
-    await accountApi.pauseTrading(store.selectedAccountId || '')
-    ElMessage.success('交易已暂停')
-    await store.loadAllAccounts()
-  } catch (error: any) {
-    if (error !== 'cancel') {
-      ElMessage.error(`暂停失败: ${error.message}`)
-    }
-  } finally {
-    pausing.value = false
-  }
-}
-
-async function handleResume() {
-  try {
-    await ElMessageBox.confirm('确定要恢复交易吗？', '确认恢复', {
-      type: 'success'
-    })
-
-    resuming.value = true
-    await systemApi.resume(store.selectedAccountId || undefined)
-    ElMessage.success('交易已恢复')
-    await store.loadAllAccounts()
-  } catch (error: any) {
-    if (error !== 'cancel') {
-      ElMessage.error(`恢复失败: ${error.message}`)
-    }
-  } finally {
-    resuming.value = false
-  }
-}
-
 async function updateRiskControl() {
   updatingRisk.value = true
   try {
-    const result = await systemApi.updateRiskControl(
+    await systemApi.updateRiskControl(
       riskForm.max_daily_orders,
       riskForm.max_daily_cancels,
       riskForm.max_order_volume,
@@ -436,7 +376,7 @@ async function loadTasks() {
   loadingTasks.value = true
   try {
     // 多账号模式：传递当前选中的账户ID
-    const accountId = store.isMultiAccountMode ? store.selectedAccountId : undefined
+    const accountId = store.isMultiAccountMode ? (store.selectedAccountId || undefined) : undefined
     const result = await systemApi.getScheduledTasks(accountId)
     tasks.value = result.tasks
   } catch (error: any) {
@@ -448,10 +388,15 @@ async function loadTasks() {
 
 
 async function handleOperateJob(row: Job, action: 'pause' | 'resume' | 'trigger') {
+  const accountId = store.selectedAccountId
+  if (!accountId) {
+    ElMessage.error('请先选择账户')
+    return
+  }
   const actionKey = `${row.job_id}_${action}`
   operatingJob.value = actionKey
   try {
-    await jobsApi.operateJob(row.job_id, action, store.selectedAccountId || undefined)
+    await jobsApi.operateJob(row.job_id, action, accountId)
     const actionText = action === 'pause' ? '暂停' : action === 'resume' ? '恢复' : '触发'
     ElMessage.success(`任务 ${row.job_name} 已${actionText}`)
     if (action === 'pause') {

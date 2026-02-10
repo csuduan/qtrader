@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { Account, Position, Trade, Order, SystemStatus, Quote } from '@/types'
-import { accountApi, positionApi, tradeApi, orderApi, systemApi } from '@/api'
+import { accountApi, positionApi, tradeApi, orderApi } from '@/api'
 import wsManager from '@/ws'
 
 export const useStore = defineStore('main', () => {
@@ -131,7 +131,8 @@ export const useStore = defineStore('main', () => {
       // 如果有账户但还没选中，默认选中第一个已连接的账户
       if (!selectedAccountId.value && accounts.value.length > 0) {
         const firstConnected = accounts.value.find(acc => acc.status === 'connected')
-        selectedAccountId.value = (firstConnected || accounts.value[0]).account_id
+        const firstAccount = accounts.value[0]
+        selectedAccountId.value = (firstConnected || firstAccount)?.account_id || null
       }
     } catch (error) {
       console.error('加载账户列表失败:', error)
@@ -152,7 +153,7 @@ export const useStore = defineStore('main', () => {
   async function loadPositions(accountId?: string) {
     try {
       // 如果没有指定 accountId，使用当前选中的账户
-      const targetAccountId = accountId || selectedAccountId.value
+      const targetAccountId = accountId || selectedAccountId.value || undefined
       positions.value = await positionApi.getPositions(targetAccountId)
     } catch (error) {
       console.error('加载持仓信息失败:', error)
@@ -165,7 +166,7 @@ export const useStore = defineStore('main', () => {
   async function loadTrades(date?: string, accountId?: string) {
     try {
       // 如果没有指定 accountId，使用当前选中的账户
-      const targetAccountId = accountId || selectedAccountId.value
+      const targetAccountId = accountId || selectedAccountId.value || undefined
       trades.value = await tradeApi.getTrades({ date, account_id: targetAccountId })
     } catch (error) {
       console.error('加载成交记录失败:', error)
@@ -178,7 +179,7 @@ export const useStore = defineStore('main', () => {
   async function loadOrders(status?: string, accountId?: string) {
     try {
       // 如果没有指定 accountId，使用当前选中的账户
-      const targetAccountId = accountId || selectedAccountId.value
+      const targetAccountId = accountId || selectedAccountId.value || undefined
       orders.value = await orderApi.getOrders(status, targetAccountId)
     } catch (error) {
       console.error('加载委托单失败:', error)
@@ -189,7 +190,7 @@ export const useStore = defineStore('main', () => {
    * 加载系统状态（已废弃，状态信息现在直接从account接口获取）
    * @deprecated 请直接从账户数据中获取状态
    */
-  async function loadSystemStatus(accountId?: string) {
+  async function loadSystemStatus(_accountId?: string) {
     // 此函数已废弃，状态信息直接从account接口获取
     console.log('loadSystemStatus已废弃，状态信息直接从account接口获取')
   }
@@ -235,7 +236,10 @@ export const useStore = defineStore('main', () => {
     if (selectedAccountId.value) {
       const exists = data.some(acc => acc.account_id === selectedAccountId.value)
       if (!exists && data.length > 0) {
-        selectedAccountId.value = data[0].account_id
+        const firstAccount = data[0]
+        if (firstAccount) {
+          selectedAccountId.value = firstAccount.account_id
+        }
       }
     }
   }

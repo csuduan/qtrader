@@ -26,6 +26,7 @@ export interface Account {
   updated_at: string
   user_id?: string | null
   status?: 'stopped' | 'connecting' | 'connected'
+  connected?: boolean
   gateway_connected?: boolean
   trade_paused?: boolean
   risk_status?: RiskControlStatus
@@ -514,7 +515,6 @@ export interface StrategySignalData {
   exit_order_id: string | null
   pos_volume: number
   pos_price: number | null
-}
   started_at?: string | null
   created_at: string
   updated_at: string

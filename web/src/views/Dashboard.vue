@@ -30,7 +30,7 @@
                     </template>
                   </div>
                 </div>
-                <el-dropdown trigger="click" @command="(cmd) => handleAccountAction(cmd, acc.account_id)" @click.stop>
+                <el-dropdown trigger="click" @command="(cmd: string) => handleAccountAction(cmd, acc.account_id)" @click.stop>
                   <el-button circle size="small" class="action-btn" :disabled="!canOperate(acc)">
                     <el-icon><MoreFilled /></el-icon>
                   </el-button>
@@ -447,11 +447,6 @@ onMounted(async () => {
 // 格式化数字
 function formatNumber(num: number): string {
   return num.toFixed(2)
-}
-
-// 格式化日期时间
-function formatDateTime(datetime: string): string {
-  return new Date(datetime).toLocaleString('zh-CN')
 }
 
 // 计算报单百分比

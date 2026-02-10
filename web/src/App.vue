@@ -77,7 +77,7 @@
               </template>
             </el-dropdown>
             <!-- 账户操作按钮 -->
-            <el-dropdown trigger="click" @command="(cmd) => handleAccountAction(cmd, store.currentAccount?.account_id)" @click.stop>
+            <el-dropdown trigger="click" @command="(cmd: string) => handleAccountAction(cmd, store.currentAccount?.account_id)" @click.stop>
               <el-button circle size="small" class="header-action-btn">
                 <el-icon><MoreFilled /></el-icon>
               </el-button>

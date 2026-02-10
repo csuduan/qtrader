@@ -280,7 +280,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useStore } from '@/stores'
@@ -479,7 +479,7 @@ async function handleTradingStatusChange() {
 async function handleReloadParams() {
   actionLoading.value = true
   try {
-    const result = await strategyApi.reloadStrategyParams(strategyId, store.selectedAccountId || undefined)
+    await strategyApi.reloadStrategyParams(strategyId, store.selectedAccountId || undefined)
     ElMessage.success('参数重载成功')
     await loadStrategy()
   } catch (error: any) {

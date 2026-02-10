@@ -242,65 +242,6 @@ function handleClosePosition(position: Position, direction: 'BUY' | 'SELL') {
   showCloseDialog.value = true
 }
 
-async function handleCreateOrder() {
-  if (!orderForm.symbol || !orderForm.direction || !orderForm.offset || orderForm.volume <= 0) {
-    ElMessage.warning('请填写完整的报单信息')
-    return
-  }
-  if (!store.selectedAccountId) {
-    ElMessage.error('请先选择账户')
-    return
-  }
-
-  creating.value = true
-  try {
-    const orderData = {
-      ...orderForm,
-      account_id: store.selectedAccountId
-    }
-    const result = await orderApi.createOrder(orderData)
-    ElMessage.success(`报单成功，委托单ID: ${result.order_id}`)
-    showOrderConfirmDialog.value = false
-    showOrderInputDialog.value = false
-    orderForm.symbol = ''
-    orderForm.direction = 'BUY'
-    orderForm.offset = 'OPEN'
-    orderForm.volume = 1
-    orderForm.price = null
-    await loadOrderData()
-  } catch (error: any) {
-    ElMessage.error(`报单失败: ${error.message}`)
-  } finally {
-    creating.value = false
-  }
-}
-
-async function handleCancel(orderId: string) {
-  const order = store.currentOrders.find(o => o.order_id === orderId)
-  if (!order) return
-
-  cancelForm.orderId = orderId
-  cancelForm.instrumentId = order.symbol
-  cancelForm.direction = order.direction
-  cancelForm.offset = order.offset
-  cancelForm.volume = order.volume_orign
-  cancelForm.price = order.limit_price || 0
-
-  showCancelDialog.value = true
-}
-
-async function handleCancelOrderConfirm() {
-  try {
-    await orderApi.cancelOrder(cancelForm.orderId, store.selectedAccountId || undefined)
-    ElMessage.success('撤单成功')
-    showCancelDialog.value = false
-    await loadOrderData()
-  } catch (error: any) {
-    ElMessage.error(`撤单失败: ${error.message}`)
-    showCancelDialog.value = false
-  }
-}
-
 async function handleClosePositionConfirm() {
   if (!store.selectedAccountId) {
     ElMessage.error('请先选择账户')
