@@ -11,7 +11,7 @@ from src.manager.api.dependencies import get_trading_manager
 from src.manager.api.responses import error_response, success_response
 from src.manager.api.schemas import AccountRes, TraderStatusRes
 from src.manager.manager import TradingManager
-from src.models.object import AccountData
+from src.models.object import AccountData,TraderState
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -105,7 +105,7 @@ async def get_all_accounts(
                     gateway_connected=account_info.gateway_connected,
                     trade_paused=account_info.trade_paused,
                     risk_status=account_info.risk_status or {},
-                    status=account_info.status.value if account_info.status else None,
+                    status=account_info.status.value if account_info.status else TraderState.STOPPED.value,
                 )
             )
         sorted_list = sorted(accounts_list, key=lambda x: x.account_id)

@@ -430,19 +430,18 @@ class TraderProxy:
     # ==================== 数据查询接口 ====================
 
     async def get_account(self) -> Optional[AccountData]:
-        """实时获取账户数据"""
-        if not self.socket_client:
-            if self.account_id is None:
-                return None
-            return AccountData.model_construct(account_id=self.account_id)
-        data = await self.socket_client.request("get_account", {}, timeout=5.0)
-        if not data:
-            if self.account_id is None:
-                return None
-            return AccountData.model_construct(account_id=self.account_id)
-
-        account = AccountData(**data)
-        account.status = self._state
+        """实时获取账户数据"""        
+        if self.socket_client and self.socket_client.is_connected:
+            data = await self.socket_client.request("get_account", {}, timeout=5.0)
+            if not data:
+                if self.account_id is None:
+                    return None
+                return AccountData.model_construct(account_id=self.account_id)
+            account = AccountData(**data)
+            account.status = TraderState.CONNECTED
+        else:
+            account = AccountData.model_construct(account_id=self.account_id)
+            account.status = self._state
         return account
 
     async def get_order(self, order_id: str) -> Optional[OrderData]:
