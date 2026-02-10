@@ -12,7 +12,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from src.utils.config_loader import TraderConfig, SocketConfig, PathsConfig
-from src.trader.core.trader import Trader
+from src.trader.trader import Trader
 from src.models.object import (
     AccountData,
     OrderData,
@@ -113,7 +113,7 @@ def mock_event_engine():
 @pytest.fixture
 def trader_instance(mock_trader_config):
     """创建Trader实例（不启动）"""
-    with patch("src.trader.core.trader.ctx"), patch("src.trader.core.trader.get_app_context"):
+    with patch("src.trader.trader.ctx"), patch("src.trader.trader.get_app_context"):
         trader = Trader(mock_trader_config)
         return trader
 
@@ -168,15 +168,15 @@ class TestTraderStart:
     ):
         """测试启动时初始化所有组件"""
         with patch(
-            "src.trader.core.trader.TradingEngine", return_value=mock_trading_engine
+            "src.trader.trader.TradingEngine", return_value=mock_trading_engine
         ), patch(
-            "src.trader.core.trader.SwitchPosManager", return_value=MagicMock()
+            "src.trader.trader.SwitchPosManager", return_value=MagicMock()
         ), patch(
-            "src.trader.core.trader.JobManager", return_value=MagicMock()
+            "src.trader.trader.JobManager", return_value=MagicMock()
         ), patch(
-            "src.trader.core.trader.SocketServer", return_value=mock_socket_server
+            "src.trader.trader.SocketServer", return_value=mock_socket_server
         ), patch(
-            "src.trader.core.trader.get_app_context",
+            "src.trader.trader.get_app_context",
             return_value=MagicMock(get_event_engine=MagicMock(return_value=mock_event_engine)),
         ), patch.object(
             trader_instance, "_init_database", new=AsyncMock()
@@ -200,15 +200,15 @@ class TestTraderStart:
         trader_instance.account_config.scheduler = None
 
         with patch(
-            "src.trader.core.trader.TradingEngine", return_value=mock_trading_engine
+            "src.trader.trader.TradingEngine", return_value=mock_trading_engine
         ), patch(
-            "src.trader.core.trader.SwitchPosManager", return_value=MagicMock()
+            "src.trader.trader.SwitchPosManager", return_value=MagicMock()
         ), patch(
-            "src.trader.core.trader.JobManager", return_value=MagicMock()
+            "src.trader.trader.JobManager", return_value=MagicMock()
         ), patch(
-            "src.trader.core.trader.SocketServer", return_value=mock_socket_server
+            "src.trader.trader.SocketServer", return_value=mock_socket_server
         ), patch(
-            "src.trader.core.trader.get_app_context",
+            "src.trader.trader.get_app_context",
             return_value=MagicMock(get_event_engine=MagicMock(return_value=mock_event_engine)),
         ), patch.object(
             trader_instance, "_init_database", new=AsyncMock()
@@ -234,17 +234,17 @@ class TestTraderStart:
         mock_task_scheduler.start = MagicMock()
 
         with patch(
-            "src.trader.core.trader.TradingEngine", return_value=mock_trading_engine
+            "src.trader.trader.TradingEngine", return_value=mock_trading_engine
         ), patch(
-            "src.trader.core.trader.SwitchPosManager", return_value=MagicMock()
+            "src.trader.trader.SwitchPosManager", return_value=MagicMock()
         ), patch(
-            "src.trader.core.trader.JobManager", return_value=MagicMock()
+            "src.trader.trader.JobManager", return_value=MagicMock()
         ), patch(
-            "src.trader.core.trader.TaskScheduler", return_value=mock_task_scheduler
+            "src.trader.trader.TaskScheduler", return_value=mock_task_scheduler
         ), patch(
-            "src.trader.core.trader.SocketServer", return_value=mock_socket_server
+            "src.trader.trader.SocketServer", return_value=mock_socket_server
         ), patch(
-            "src.trader.core.trader.get_app_context",
+            "src.trader.trader.get_app_context",
             return_value=MagicMock(get_event_engine=MagicMock(return_value=mock_event_engine)),
         ), patch.object(
             trader_instance, "_init_database", new=AsyncMock()
@@ -365,7 +365,7 @@ class TestEventHandlers:
             account_id="test", balance=Decimal("1000"), available=Decimal("1000")
         )
 
-        with patch("src.trader.core.trader.logger"):
+        with patch("src.trader.trader.logger"):
             await trader_instance._on_account_update(account_data)
 
     @pytest.mark.asyncio
@@ -449,7 +449,7 @@ class TestEventRegistration:
     def test_register_event_handlers(self, trader_instance, mock_event_engine):
         """测试注册事件处理器"""
         with patch(
-            "src.trader.core.trader.get_app_context",
+            "src.trader.trader.get_app_context",
             return_value=MagicMock(get_event_engine=MagicMock(return_value=mock_event_engine)),
         ):
             trader_instance._register_event_handlers()
@@ -1009,7 +1009,7 @@ class TestDatabaseInitialization:
         trader_instance.account_config.paths.database = str(db_file)
 
         with patch("src.utils.database.init_database", wraps=init_database) as mock_init_db, patch(
-            "src.trader.core.trader.get_database", return_value=MagicMock()
+            "src.trader.trader.get_database", return_value=MagicMock()
         ) as mock_get_db:
             mock_db = MagicMock()
             mock_session = MagicMock()
@@ -1029,7 +1029,7 @@ class TestDatabaseInitialization:
         db_file.touch()  # 创建文件
         trader_instance.account_config.paths.database = str(db_file)
 
-        with patch("src.trader.core.trader.init_database") as mock_init_db:
+        with patch("src.trader.trader.init_database") as mock_init_db:
             await trader_instance._init_database()
             mock_init_db.assert_called_once()
 
@@ -1133,7 +1133,7 @@ class TestStandaloneMode:
         """测试独立模式启动Socket服务器"""
         trader_instance._socket_path = "./test.sock"
 
-        with patch("src.trader.core.trader.SocketServer", return_value=mock_socket_server):
+        with patch("src.trader.trader.SocketServer", return_value=mock_socket_server):
             await trader_instance._run_standalone()
 
             mock_socket_server.start.assert_called_once()
@@ -1170,15 +1170,15 @@ class TestEdgeCases:
     async def test_multiple_start_stop_cycles(self, trader_instance, mock_trading_engine, mock_socket_server, mock_event_engine):
         """测试多次启动停止循环"""
         with patch(
-            "src.trader.core.trader.TradingEngine", return_value=mock_trading_engine
+            "src.trader.trader.TradingEngine", return_value=mock_trading_engine
         ), patch(
-            "src.trader.core.trader.SwitchPosManager", return_value=MagicMock()
+            "src.trader.trader.SwitchPosManager", return_value=MagicMock()
         ), patch(
-            "src.trader.core.trader.JobManager", return_value=MagicMock()
+            "src.trader.trader.JobManager", return_value=MagicMock()
         ), patch(
-            "src.trader.core.trader.SocketServer", return_value=mock_socket_server
+            "src.trader.trader.SocketServer", return_value=mock_socket_server
         ), patch(
-            "src.trader.core.trader.get_app_context",
+            "src.trader.trader.get_app_context",
             return_value=MagicMock(get_event_engine=MagicMock(return_value=mock_event_engine)),
         ), patch.object(
             trader_instance, "_init_database", new=AsyncMock()

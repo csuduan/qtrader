@@ -11,7 +11,7 @@ import threading
 from datetime import datetime
 from typing import Awaitable, Callable, Dict, Optional
 
-from src.trader.adapters.base_gateway import BaseGateway
+from src.trader.gateway.base_gateway import BaseGateway
 from src.utils.config_loader import GatewayConfig
 from src.utils.logger import get_logger
 

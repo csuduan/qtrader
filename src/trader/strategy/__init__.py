@@ -10,7 +10,7 @@ from src.trader.strategy.base_strategy import BaseStrategy,BaseParam
 from src.trader.strategy.strategy_rsi import RsiStrategy
 
 if TYPE_CHECKING:
-    from src.trader.core.strategy_manager import StrategyManager, load_strategy_params
+    from src.trader.strategy_manager import StrategyManager, load_strategy_params
 
 __all__ = [
     "BaseStrategy",

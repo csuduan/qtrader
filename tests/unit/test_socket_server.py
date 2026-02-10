@@ -11,7 +11,7 @@ from typing import Any, Dict
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 import pytest
 
-from src.trader.core.socket_server import SocketServer, request
+from src.trader.socket_server import SocketServer, request
 
 
 # ==================== Fixtures ====================

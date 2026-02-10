@@ -13,7 +13,7 @@ from datetime import datetime
 
 import pytest
 
-from src.trader.core.strategy_manager import (
+from src.trader.strategy_manager import (
     StrategyManager,
     load_csv_file,
     load_strategy_params,
@@ -182,7 +182,7 @@ class TestLoadStrategyParams:
         mock_config = MagicMock()
         mock_config.paths.params = "/data/params"
 
-        with patch("src.trader.core.strategy_manager.get_app_context", return_value=mock_config):
+        with patch("src.trader.strategy_manager.get_app_context", return_value=mock_config):
             result = load_strategy_params(yaml_config, "strat1")
 
             assert result == yaml_config
@@ -193,7 +193,7 @@ class TestLoadStrategyParams:
         mock_config = MagicMock()
         mock_config.paths.params = str(tmp_path)
 
-        with patch("src.trader.core.strategy_manager.get_app_context", return_value=mock_config):
+        with patch("src.trader.strategy_manager.get_app_context", return_value=mock_config):
             result = load_strategy_params(yaml_config, "strat1")
 
             assert result == yaml_config
@@ -218,7 +218,7 @@ class TestLoadStrategyParams:
         mock_context = MagicMock()
         mock_context.get_config.return_value = mock_config
 
-        with patch("src.trader.core.strategy_manager.get_app_context", return_value=mock_context):
+        with patch("src.trader.strategy_manager.get_app_context", return_value=mock_context):
             result = load_strategy_params(yaml_config, "strat1")
 
         # The CSV override should have worked
@@ -266,7 +266,7 @@ class TestStrategyManagerStartMethod:
     @pytest.mark.asyncio
     async def test_start_success(self, strategy_manager, mock_event_engine):
         """测试成功启动"""
-        with patch("src.trader.core.strategy_manager.ctx") as mock_ctx, \
+        with patch("src.trader.strategy_manager.ctx") as mock_ctx, \
              patch.object(strategy_manager, "_load_strategies"), \
              patch.object(strategy_manager, "_register_events"), \
              patch.object(strategy_manager, "start_all"):

@@ -24,21 +24,26 @@ from src.models.object import (
     PositionData,
     TradeData,
 )
-from src.trader.core.risk_control import RiskControl
+from src.trader.risk_control import RiskControl
 from src.trader.order_cmd import OrderCmd, OrderCmdStatus, SplitStrategyType
-from src.trader.order_cmd_executor import OrderCmdExecutor
+from src.trader.order_executor import OrderCmdExecutor
 from src.utils.async_event_engine import AsyncEventEngine
-from src.utils.config_loader import AccountConfig, AppConfig
+from src.utils.config_loader import AccountConfig, AppConfig,RiskControlConfig
 from src.utils.event_engine import EventTypes
 from src.utils.logger import get_logger
 from src.utils.wecomm import send_wechat
+from src.utils.helpers import _get_int_param
+from src.models.po import SystemParamPo
+from src.utils.database import get_session
+
+
 
 logger = get_logger(__name__)
 ctx = get_app_context()
 
 
 class TradingEngine:
-    """交易引擎类（异步版本）"""
+    """交易引擎类"""
 
     def __init__(
         self,
@@ -57,7 +62,7 @@ class TradingEngine:
             f"TradingEngine __init__, account_id: {self.account_id}, config_id: {id(config)}"
         )
 
-        from src.trader.adapters.base_gateway import BaseGateway
+        from src.trader.gateway.base_gateway import BaseGateway
 
         self.gateway: Optional[BaseGateway] = None
         self.paused = config.trading.paused if config.trading else False
@@ -95,7 +100,7 @@ class TradingEngine:
             return
 
         # 启动执行器
-        from src.trader.order_cmd_executor import OrderCmdExecutor
+        from src.trader.order_executor import OrderCmdExecutor
 
         if self._order_cmd_executor is None:
             self._order_cmd_executor = OrderCmdExecutor(self.event_engine, self)
@@ -166,9 +171,7 @@ class TradingEngine:
         从数据库重新加载风控配置
         """
         try:
-            from src.param_loader import load_risk_control_config
-
-            new_config = load_risk_control_config()
+            new_config = self._load_risk_control_config()
             self.risk_control.config = new_config
             logger.info("风控配置已从数据库重新加载")
         except Exception as e:
@@ -188,12 +191,12 @@ class TradingEngine:
         gateway_type = gateway_config.type
         logger.info(f"创建Gateway，类型: {gateway_type}")
         if gateway_type == "CTP":
-            from src.trader.adapters.ctp_gateway import CtpGateway
+            from src.trader.gateway.ctp_gateway import CtpGateway
 
             self.gateway = CtpGateway(gateway_config)
             logger.info("CTP Gateway创建成功(框架实现，需CTP SDK)")
         else:  # 默认TQSDK
-            from src.trader.adapters.tq_gateway import TqGateway
+            from src.trader.gateway.tq_gateway import TqGateway
 
             self.gateway = TqGateway(gateway_config)
             logger.info("TqSdk Gateway创建成功")
@@ -225,13 +228,33 @@ class TradingEngine:
         Returns:
             RiskControlConfig: 风控配置对象
         """
-        try:
-            from src.param_loader import load_risk_control_config
+        session = get_session()
+        if not session:
+            logger.warning("数据库未初始化，使用默认风控配置")
+            return RiskControlConfig()
 
-            return load_risk_control_config()
+        try:
+            params = {
+                param.param_key: param.param_value for param in session.query(SystemParamPo).all()
+            }
+
+            risk_control_params = {
+                "max_daily_orders": _get_int_param(params, "risk_control.max_daily_orders", 1000),
+                "max_daily_cancels": _get_int_param(params, "risk_control.max_daily_cancels", 500),
+                "max_order_volume": _get_int_param(params, "risk_control.max_order_volume", 50),
+                "max_split_volume": _get_int_param(params, "risk_control.max_split_volume", 5),
+                "order_timeout": _get_int_param(params, "risk_control.order_timeout", 5),
+            }
+
+            logger.info(f"从数据库加载风控配置: {risk_control_params}")
+
+            return RiskControlConfig(**risk_control_params)
+
         except Exception as e:
-            logger.warning(f"从数据库加载风控配置失败: {e}，使用配置文件默认值")
+            logger.error(f"加载风控配置失败: {e}", exc_info=True)
             return self.config.risk_control
+        finally:
+            session.close()
 
     async def connect(self) -> bool:
         """

@@ -9,9 +9,9 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 from src.app_context import AppContext, get_app_context
-from src.job_mgr import JobManager
-from src.trader.core.strategy_manager import StrategyManager
-from src.trader.core.trading_engine import TradingEngine
+from src.trader.job_mgr import JobManager
+from src.trader.strategy_manager import StrategyManager
+from src.trader.trading_engine import TradingEngine
 from src.trader.strategy import BaseStrategy,BaseParam
 from src.trader.switch_mgr import SwitchPosManager
 from src.utils.async_event_engine import AsyncEventEngine
@@ -862,7 +862,7 @@ class Trader:
             return {"success": False, "message": f"策略 {strategy_id} 不存在"}
 
         try:
-            from src.trader.core.strategy_manager import load_strategy_params
+            from src.trader.strategy_manager import load_strategy_params
             # 从配置文件重新加载参数
             new_params = load_strategy_params(strategy.config, strategy_id)
             if new_params:

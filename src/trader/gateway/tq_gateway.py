@@ -37,7 +37,7 @@ from src.models.object import (
     TickData,
     TradeData,
 )
-from src.trader.adapters.base_gateway import BaseGateway
+from src.trader.gateway.base_gateway import BaseGateway
 from src.utils.async_event_engine import AsyncEventEngine
 from src.utils.config_loader import GatewayConfig
 from src.utils.logger import get_logger

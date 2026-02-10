@@ -12,7 +12,7 @@ from decimal import Decimal
 
 import pytest
 
-from src.manager.core.trader_proxy import TraderProxy
+from src.manager.trader_proxy import TraderProxy
 from src.models.object import (
     AccountData,
     OrderData,
@@ -60,7 +60,7 @@ def socket_path(tmp_path):
 @pytest.fixture
 def trader_proxy(mock_account_config, mock_global_config, socket_path):
     """创建 TraderProxy 实例"""
-    with patch("src.manager.core.trader_proxy.ctx"), patch("src.manager.core.trader_proxy.get_app_context"):
+    with patch("src.manager.trader_proxy.ctx"), patch("src.manager.trader_proxy.get_app_context"):
         proxy = TraderProxy(
             mock_account_config,
             mock_global_config,
@@ -132,7 +132,7 @@ class TestTraderProxyState:
     @pytest.mark.asyncio
     async def test_set_state_stopped_to_connecting(self, trader_proxy, mock_event_engine):
         """测试状态变更 STOPPED -> CONNECTING"""
-        with patch("src.manager.core.trader_proxy.ctx", MagicMock(get_event_engine=MagicMock(return_value=mock_event_engine))):
+        with patch("src.manager.trader_proxy.ctx", MagicMock(get_event_engine=MagicMock(return_value=mock_event_engine))):
             await trader_proxy._set_state(TraderState.CONNECTING)
             assert trader_proxy.get_state() == TraderState.CONNECTING
             mock_event_engine.put.assert_called_once()
@@ -140,7 +140,7 @@ class TestTraderProxyState:
     @pytest.mark.asyncio
     async def test_set_state_to_connected_emits_event(self, trader_proxy, mock_event_engine):
         """测试状态变更为CONNECTED时触发事件"""
-        with patch("src.manager.core.trader_proxy.ctx", MagicMock(get_event_engine=MagicMock(return_value=mock_event_engine))):
+        with patch("src.manager.trader_proxy.ctx", MagicMock(get_event_engine=MagicMock(return_value=mock_event_engine))):
             await trader_proxy._set_state(TraderState.CONNECTED)
 
             call_args = mock_event_engine.put.call_args
@@ -151,7 +151,7 @@ class TestTraderProxyState:
     @pytest.mark.asyncio
     async def test_set_state_event_engine_error(self, trader_proxy):
         """测试事件引擎异常不影响状态设置"""
-        with patch("src.manager.core.trader_proxy.ctx", MagicMock(get_event_engine=MagicMock(side_effect=Exception("Event engine error")))):
+        with patch("src.manager.trader_proxy.ctx", MagicMock(get_event_engine=MagicMock(side_effect=Exception("Event engine error")))):
             # 不应该抛出异常
             await trader_proxy._set_state(TraderState.CONNECTING)
             assert trader_proxy.get_state() == TraderState.CONNECTING
@@ -174,7 +174,7 @@ class TestTraderProxyStart:
         """测试成功启动"""
         with patch.object(trader_proxy, "_check_process_exists", return_value=False), \
              patch.object(trader_proxy, "_create_subprocess", new=AsyncMock()), \
-             patch("src.manager.core.trader_proxy.SocketClient", return_value=mock_socket_client):
+             patch("src.manager.trader_proxy.SocketClient", return_value=mock_socket_client):
             result = await trader_proxy.start()
 
             assert result is True
@@ -188,7 +188,7 @@ class TestTraderProxyStart:
         """测试检测到已存在进程"""
         with patch.object(trader_proxy, "_check_process_exists", return_value=True), \
              patch.object(trader_proxy, "_create_subprocess", new=AsyncMock()) as mock_create, \
-             patch("src.manager.core.trader_proxy.SocketClient", return_value=mock_socket_client):
+             patch("src.manager.trader_proxy.SocketClient", return_value=mock_socket_client):
             result = await trader_proxy.start()
 
             assert result is True
@@ -221,7 +221,7 @@ class TestTraderProxyStart:
 
         with patch.object(trader_proxy, "_check_process_exists", return_value=False), \
              patch.object(trader_proxy, "_create_subprocess", new=AsyncMock()) as mock_create, \
-             patch("src.manager.core.trader_proxy.SocketClient", return_value=mock_socket_client):
+             patch("src.manager.trader_proxy.SocketClient", return_value=mock_socket_client):
             await trader_proxy.start()
 
             mock_create.assert_called_once()
@@ -623,55 +623,55 @@ class TestTraderProxyMessageHandling:
 
     def test_on_msg_callback_emit_data(self, trader_proxy, mock_event_engine):
         """测试数据消息回调"""
-        with patch("src.manager.core.trader_proxy.ctx", MagicMock(get_event_engine=MagicMock(return_value=mock_event_engine))):
+        with patch("src.manager.trader_proxy.ctx", MagicMock(get_event_engine=MagicMock(return_value=mock_event_engine))):
             trader_proxy._on_msg_callback("account", {"account_id": "test"})
 
             mock_event_engine.put.assert_called_once()
 
     def test_on_msg_callback_exception(self, trader_proxy):
         """测试消息回调异常处理"""
-        with patch("src.manager.core.trader_proxy.ctx", MagicMock(get_event_engine=MagicMock(side_effect=Exception("Event error")))):
+        with patch("src.manager.trader_proxy.ctx", MagicMock(get_event_engine=MagicMock(side_effect=Exception("Event error")))):
             # 不应该抛出异常
             trader_proxy._on_msg_callback("account", {"account_id": "test"})
 
     def test_emit_data_account(self, trader_proxy, mock_event_engine):
         """测试emit账户数据"""
-        with patch("src.manager.core.trader_proxy.ctx", MagicMock(get_event_engine=MagicMock(return_value=mock_event_engine))):
+        with patch("src.manager.trader_proxy.ctx", MagicMock(get_event_engine=MagicMock(return_value=mock_event_engine))):
             trader_proxy._emit_data("account", {"account_id": "test"})
 
             mock_event_engine.put.assert_called_once_with("e:account.update", {"account_id": "test"})
 
     def test_emit_data_order(self, trader_proxy, mock_event_engine):
         """测试emit订单数据"""
-        with patch("src.manager.core.trader_proxy.ctx", MagicMock(get_event_engine=MagicMock(return_value=mock_event_engine))):
+        with patch("src.manager.trader_proxy.ctx", MagicMock(get_event_engine=MagicMock(return_value=mock_event_engine))):
             trader_proxy._emit_data("order", {"order_id": "test"})
 
             mock_event_engine.put.assert_called_once_with("e:order.update", {"order_id": "test"})
 
     def test_emit_data_trade(self, trader_proxy, mock_event_engine):
         """测试emit成交数据"""
-        with patch("src.manager.core.trader_proxy.ctx", MagicMock(get_event_engine=MagicMock(return_value=mock_event_engine))):
+        with patch("src.manager.trader_proxy.ctx", MagicMock(get_event_engine=MagicMock(return_value=mock_event_engine))):
             trader_proxy._emit_data("trade", {"trade_id": "test"})
 
             mock_event_engine.put.assert_called_once_with("e:trade.created", {"trade_id": "test"})
 
     def test_emit_data_position(self, trader_proxy, mock_event_engine):
         """测试emit持仓数据"""
-        with patch("src.manager.core.trader_proxy.ctx", MagicMock(get_event_engine=MagicMock(return_value=mock_event_engine))):
+        with patch("src.manager.trader_proxy.ctx", MagicMock(get_event_engine=MagicMock(return_value=mock_event_engine))):
             trader_proxy._emit_data("position", {"symbol": "test"})
 
             mock_event_engine.put.assert_called_once_with("e:position.update", {"symbol": "test"})
 
     def test_emit_data_tick(self, trader_proxy, mock_event_engine):
         """测试emit行情数据"""
-        with patch("src.manager.core.trader_proxy.ctx", MagicMock(get_event_engine=MagicMock(return_value=mock_event_engine))):
+        with patch("src.manager.trader_proxy.ctx", MagicMock(get_event_engine=MagicMock(return_value=mock_event_engine))):
             trader_proxy._emit_data("tick", {"symbol": "test"})
 
             mock_event_engine.put.assert_called_once_with("e:tick.update", {"symbol": "test"})
 
     def test_emit_data_unknown_type(self, trader_proxy, mock_event_engine):
         """测试emit未知类型"""
-        with patch("src.manager.core.trader_proxy.ctx", MagicMock(get_event_engine=MagicMock(return_value=mock_event_engine))):
+        with patch("src.manager.trader_proxy.ctx", MagicMock(get_event_engine=MagicMock(return_value=mock_event_engine))):
             trader_proxy._emit_data("unknown", {"data": "test"})
 
             # 未知类型不应该触发事件
@@ -1273,7 +1273,7 @@ class TestTraderProxyEdgeCases:
         """测试多次启停"""
         with patch.object(trader_proxy, "_check_process_exists", return_value=False), \
              patch.object(trader_proxy, "_create_subprocess", new=AsyncMock()), \
-             patch("src.manager.core.trader_proxy.SocketClient", return_value=mock_socket_client), \
+             patch("src.manager.trader_proxy.SocketClient", return_value=mock_socket_client), \
              patch.object(mock_socket_client, "connect", return_value=True):
             # 第一次启动
             result1 = await trader_proxy.start()
@@ -1291,7 +1291,7 @@ class TestTraderProxyEdgeCases:
         """测试并发调用start"""
         with patch.object(trader_proxy, "_check_process_exists", return_value=False), \
              patch.object(trader_proxy, "_create_subprocess", new=AsyncMock()), \
-             patch("src.manager.core.trader_proxy.SocketClient", return_value=mock_socket_client):
+             patch("src.manager.trader_proxy.SocketClient", return_value=mock_socket_client):
             # 并发启动
             results = await asyncio.gather(
                 trader_proxy.start(),
@@ -1338,6 +1338,6 @@ class TestTraderProxyEdgeCases:
     @pytest.mark.asyncio
     async def test_emit_data_no_event_engine(self, trader_proxy):
         """测试无事件引擎时emit"""
-        with patch("src.manager.core.trader_proxy.ctx", MagicMock(get_event_engine=MagicMock(return_value=None))):
+        with patch("src.manager.trader_proxy.ctx", MagicMock(get_event_engine=MagicMock(return_value=None))):
             # 不应该抛出异常
             trader_proxy._emit_data("account", {"account_id": "test"})

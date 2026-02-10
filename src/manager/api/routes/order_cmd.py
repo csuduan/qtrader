@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Query
 from src.manager.api.dependencies import get_trading_manager
 from src.manager.api.responses import error_response, success_response
 from src.manager.api.schemas import OrderCmdRes
-from src.manager.core.trading_manager import TradingManager
+from src.manager.manager import TradingManager
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)

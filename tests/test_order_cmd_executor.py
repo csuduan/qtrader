@@ -14,7 +14,7 @@ from src.models.object import (
     TradeData,
 )
 from src.trader.order_cmd import OrderCmd, OrderCmdStatus, SplitStrategyType
-from src.trader.order_cmd_executor import OrderCmdExecutor
+from src.trader.order_executor import OrderCmdExecutor
 from src.utils.event_engine import EventEngine
 
 

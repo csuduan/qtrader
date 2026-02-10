@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from src.manager.core.trader_proxy import TraderProxy
+from src.manager.trader_proxy import TraderProxy
 from src.models.object import AccountData, Direction, Offset, OrderData, OrderRequest
 from src.utils.config_loader import AccountConfig, DatabaseConfig, SocketConfig
 from src.utils.logger import get_logger

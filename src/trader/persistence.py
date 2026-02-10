@@ -15,7 +15,7 @@ from src.utils.event_engine import EventEngine, EventTypes, HandlerType
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
-    from src.trader.core.trading_engine import TradingEngine
+    from src.trader.trading_engine import TradingEngine
 
 logger = get_logger(__name__)
 

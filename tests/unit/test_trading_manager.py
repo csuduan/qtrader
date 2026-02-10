@@ -1,7 +1,7 @@
 """
 交易管理器单元测试
 
-测试 src.manager.core.trading_manager.TradingManager 的所有功能
+测试 src.manager.manager.TradingManager 的所有功能
 """
 
 import asyncio
@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
-from src.manager.core.trading_manager import TradingManager, _GlobalConfigAdapter
+from src.manager.manager import TradingManager, _GlobalConfigAdapter
 from src.models.object import Direction, Offset, OrderData, AccountData
 from src.utils.scheduler import TaskScheduler
 from src.utils.config_loader import AccountConfig, GatewayConfig, SocketConfig, TianqinConfig
@@ -86,8 +86,8 @@ def mock_trader_proxy():
 @pytest.fixture
 def trading_manager(mock_account_configs):
     """创建TradingManager实例"""
-    with patch("src.manager.core.trading_manager.SocketConfig"):
-        with patch("src.manager.core.trading_manager.DatabaseConfig"):
+    with patch("src.manager.manager.SocketConfig"):
+        with patch("src.manager.manager.DatabaseConfig"):
             manager = TradingManager(mock_account_configs)
             yield manager
 
@@ -95,8 +95,8 @@ def trading_manager(mock_account_configs):
 @pytest.fixture
 def trading_manager_single(mock_account_config):
     """创建单个账户的TradingManager实例"""
-    with patch("src.manager.core.trading_manager.SocketConfig"):
-        with patch("src.manager.core.trading_manager.DatabaseConfig"):
+    with patch("src.manager.manager.SocketConfig"):
+        with patch("src.manager.manager.DatabaseConfig"):
             manager = TradingManager([mock_account_config])
             yield manager
 
@@ -152,8 +152,8 @@ class TestTradingManagerInit:
 
     def test_init_with_empty_configs(self):
         """测试空配置列表初始化"""
-        with patch("src.manager.core.trading_manager.SocketConfig"):
-            with patch("src.manager.core.trading_manager.DatabaseConfig"):
+        with patch("src.manager.manager.SocketConfig"):
+            with patch("src.manager.manager.DatabaseConfig"):
                 manager = TradingManager([])
                 assert manager.account_configs == []
                 assert manager.account_configs_map == {}
@@ -163,8 +163,8 @@ class TestTradingManagerInit:
 
     def test_init_with_single_config(self, mock_account_config):
         """测试单个配置初始化"""
-        with patch("src.manager.core.trading_manager.SocketConfig"):
-            with patch("src.manager.core.trading_manager.DatabaseConfig"):
+        with patch("src.manager.manager.SocketConfig"):
+            with patch("src.manager.manager.DatabaseConfig"):
                 manager = TradingManager([mock_account_config])
                 assert len(manager.account_configs) == 1
                 assert "test_account" in manager.account_configs_map
@@ -173,8 +173,8 @@ class TestTradingManagerInit:
 
     def test_init_with_multiple_configs(self, mock_account_configs):
         """测试多个配置初始化"""
-        with patch("src.manager.core.trading_manager.SocketConfig"):
-            with patch("src.manager.core.trading_manager.DatabaseConfig"):
+        with patch("src.manager.manager.SocketConfig"):
+            with patch("src.manager.manager.DatabaseConfig"):
                 manager = TradingManager(mock_account_configs)
                 assert len(manager.account_configs) == 3
                 assert len(manager.account_configs_map) == 3
@@ -184,9 +184,9 @@ class TestTradingManagerInit:
 
     def test_socket_dir_creation(self, mock_account_configs, tmp_path):
         """测试socket目录创建"""
-        with patch("src.manager.core.trading_manager.SocketConfig") as mock_socket_cfg:
+        with patch("src.manager.manager.SocketConfig") as mock_socket_cfg:
             mock_socket_cfg.return_value = SocketConfig()
-            with patch("src.manager.core.trading_manager.DatabaseConfig"):
+            with patch("src.manager.manager.DatabaseConfig"):
                 manager = TradingManager(mock_account_configs)
                 assert manager.socket_config is not None
                 socket_dir = Path(manager.socket_config.socket_dir)
@@ -206,7 +206,7 @@ class TestCreateTrader:
     @pytest.mark.asyncio
     async def test_create_trader_success(self, trading_manager_single):
         """测试成功创建Trader"""
-        with patch("src.manager.core.trading_manager.TraderProxy") as mock_proxy_class:
+        with patch("src.manager.manager.TraderProxy") as mock_proxy_class:
             mock_proxy = AsyncMock()
             mock_proxy_class.return_value = mock_proxy
 
@@ -229,11 +229,11 @@ class TestCreateTrader:
         mock_account_config.enabled = False
         mock_account_config.auto_start = False
 
-        with patch("src.manager.core.trading_manager.SocketConfig"):
-            with patch("src.manager.core.trading_manager.DatabaseConfig"):
+        with patch("src.manager.manager.SocketConfig"):
+            with patch("src.manager.manager.DatabaseConfig"):
                 manager = TradingManager([mock_account_config])
 
-                with patch("src.manager.core.trading_manager.TraderProxy") as mock_proxy_class:
+                with patch("src.manager.manager.TraderProxy") as mock_proxy_class:
                     mock_proxy = AsyncMock()
                     mock_proxy_class.return_value = mock_proxy
 

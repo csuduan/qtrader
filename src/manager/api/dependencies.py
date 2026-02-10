@@ -8,7 +8,7 @@ from typing import Optional
 from fastapi import Depends, HTTPException, status
 
 from src.app_context import get_app_context
-from src.manager.core.trading_manager import TradingManager
+from src.manager.manager import TradingManager
 
 
 def get_trading_manager() -> TradingManager:

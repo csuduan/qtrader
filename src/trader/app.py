@@ -17,7 +17,7 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.app_context import AppContext, get_app_context
-from src.trader.core.trader import Trader
+from src.trader.trader import Trader
 from src.utils.async_event_engine import AsyncEventEngine
 from src.utils.config_loader import AppConfig, TraderConfig, get_config_loader
 from src.utils.logger import get_logger, setup_logger

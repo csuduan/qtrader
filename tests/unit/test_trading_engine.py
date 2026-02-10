@@ -9,7 +9,7 @@ from typing import Any, Dict
 from unittest.mock import MagicMock, Mock, PropertyMock, patch
 import pytest
 
-from src.trader.core.trading_engine import TradingEngine
+from src.trader.trading_engine import TradingEngine
 from src.models.object import (
     Direction,
     Offset,
@@ -88,8 +88,8 @@ def mock_risk_control():
 @pytest.fixture
 def trading_engine(mock_account_config, mock_risk_control):
     """创建TradingEngine实例"""
-    with patch("src.trader.core.trading_engine.ctx"), \
-         patch("src.trader.core.trading_engine.get_app_context"):
+    with patch("src.trader.trading_engine.ctx"), \
+         patch("src.trader.trading_engine.get_app_context"):
         # Create engine without patching RiskControl
         engine = TradingEngine(mock_account_config)
         # Set risk_control manually
@@ -665,10 +665,10 @@ class TestTradingEngineEdgeCases:
         """测试CTP类型Gateway初始化"""
         mock_account_config.gateway.type = "CTP"
 
-        with patch("src.trader.core.trading_engine.ctx"), \
-             patch("src.trader.core.trading_engine.get_app_context"), \
-             patch("src.trader.core.trading_engine.RiskControl", return_value=MagicMock()), \
-             patch("src.trader.adapters.ctp_gateway.CtpGateway") as mock_ctp:
+        with patch("src.trader.trading_engine.ctx"), \
+             patch("src.trader.trading_engine.get_app_context"), \
+             patch("src.trader.trading_engine.RiskControl", return_value=MagicMock()), \
+             patch("src.trader.gateway.ctp_gateway.CtpGateway") as mock_ctp:
             engine = TradingEngine(mock_account_config)
 
             # CTP Gateway should be created (even if mocked)

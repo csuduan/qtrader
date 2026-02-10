@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
-from src.manager.core.socket_client import SocketClient
+from src.manager.socket_client import SocketClient
 
 
 @pytest.fixture

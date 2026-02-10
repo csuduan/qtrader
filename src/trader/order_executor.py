@@ -31,7 +31,7 @@ from src.utils.event_engine import EventEngine, EventTypes
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
-    from src.trader.core.trading_engine import TradingEngine
+    from src.trader.trading_engine import TradingEngine
 
 
 class OrderCmdExecutor:
@@ -252,7 +252,7 @@ class OrderCmdExecutor:
             except Exception as e:
                 self.logger.exception(f"下单失败 {cmd.cmd_id}: {e}")
                 cmd.close(f"报单被拒: {e}")
-                
+
         elif isinstance(req, OrderData):
             # 撤单（异步）
             try:

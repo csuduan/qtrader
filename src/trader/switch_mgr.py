@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session as SQLASession
 from src.models.object import OrderCmdFinishReason
 from src.models.po import RotationInstructionPo
 from src.models.po import SwitchPosImportPo as OrderFile
-from src.trader.core.trading_engine import TradingEngine
+from src.trader.trading_engine import TradingEngine
 from src.trader.order_cmd import OrderCmd, SplitStrategyType
 from src.utils.config_loader import AppConfig, TraderConfig
 from src.utils.database import get_session

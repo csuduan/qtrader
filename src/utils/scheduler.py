@@ -12,7 +12,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from pydantic import BaseModel
 
-from src.job_mgr import JobManager
+from src.trader.job_mgr import JobManager
 from src.trader.switch_mgr import SwitchPosManager
 from src.utils.config_loader import SchedulerConfig
 from src.utils.logger import get_logger

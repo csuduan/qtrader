@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from unittest.mock import MagicMock, AsyncMock, patch
 
 from src.manager.app import create_app
-from src.manager.core.trading_manager import TradingManager
+from src.manager.manager import TradingManager
 
 
 @pytest.fixture

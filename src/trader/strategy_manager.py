@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from src.app_context import get_app_context
 from src.models.object import BarData, Direction, Exchange, Offset, TickData,OrderData,TradeData
-from src.trader.core.trading_engine import TradingEngine
+from src.trader.trading_engine import TradingEngine
 from src.trader.order_cmd import OrderCmd
 from src.trader.strategy.base_strategy import BaseStrategy
 from src.utils.bar_generator import MultiSymbolBarGenerator, parse_interval

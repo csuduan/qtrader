@@ -29,7 +29,7 @@ from src.manager.api.responses import (
     validation_exception_handler,
 )
 from src.manager.api.websocket_manager import websocket_manager
-from src.manager.core.trading_manager import TradingManager
+from src.manager.manager import TradingManager
 from src.utils.config_loader import AccountConfig, DatabaseConfig, get_config_loader
 from src.utils.database import Database, get_database, init_database
 from src.utils.event_engine import Event, EventEngine, EventTypes

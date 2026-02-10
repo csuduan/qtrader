@@ -18,7 +18,7 @@ from src.manager.api.schemas import (
     StrategyStatusRes,
     StrategyUpdateReq,
 )
-from src.manager.core.trading_manager import TradingManager
+from src.manager.manager import TradingManager
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)

@@ -24,7 +24,7 @@ from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
     from src.models.object import PositionData
-    from src.trader.core.strategy_manager import StrategyManager
+    from src.trader.strategy_manager import StrategyManager
 
 logger = get_logger(__name__)
 

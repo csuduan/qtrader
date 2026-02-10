@@ -10,7 +10,7 @@ from src.app_context import get_app_context
 from src.manager.api.dependencies import get_trading_manager
 from src.manager.api.responses import error_response, success_response
 from src.manager.api.schemas import AccountRes, TraderStatusRes
-from src.manager.core.trading_manager import TradingManager
+from src.manager.manager import TradingManager
 from src.models.object import AccountData
 from src.utils.logger import get_logger
 
