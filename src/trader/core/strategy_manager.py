@@ -449,10 +449,10 @@ class StrategyManager:
         from datetime import datetime, timedelta
 
         strategy_id = strategy.strategy_id
-        logger.info(f"策略 [{strategy_id}] 开始回播流程")
-
         # 获取当前交易日期
         trading_date = self.trading_engine.trading_day
+        logger.info(f"策略 [{strategy_id}] 开始回播{trading_date}日bar")
+
         try:
             # 1. 暂停策略
             strategy.enable(False)
@@ -467,15 +467,11 @@ class StrategyManager:
                 return False
 
             symbol, interval = strategy.bar_subscriptions[0].split("-")
-            trading_bars = self.load_hist_bars(symbol, interval, trading_date,trading_date+timedelta(days=1))
-            if not trading_bars:
-                logger.error(f"策略 [{strategy_id}] 未获取到 {symbol} {interval} 的历史K线数据")
-                return False
-            
+            trading_bars = self.load_hist_bars(symbol, interval, trading_date,trading_date+timedelta(days=1)) 
             # 4. 循环调用on_bar()
             for bar in trading_bars:
                 await strategy.on_bar(bar)
-            logger.info(f"策略 [{strategy_id}] K线回播完成")
+            logger.info(f"策略 [{strategy_id}] K线回播完成,bar个数：{len(trading_bars)}")
 
             return True
 
