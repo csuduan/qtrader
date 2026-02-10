@@ -122,7 +122,7 @@ class BaseStrategy:
 
 
     def init(self,trading_day: datetime) -> bool:
-        """策略初始化（异步版本）"""
+        """策略初始化"""
         logger.info(f"策略 [{self.strategy_id}] 初始化...")
         self.inited = True
         self._pending_cmd = None

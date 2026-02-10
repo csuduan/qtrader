@@ -243,6 +243,12 @@ class StrategyManager:
         if interval:
             self.trading_engine.subscribe_bars(symbol, interval)
         return True
+    
+    def reset_all_for_new_day(self) -> None:
+        """重置所有策略状态"""
+        trading_day = self.trading_engine.trading_day
+        for strategy in self.strategies.values():
+            strategy.init(trading_day)
 
 
     # ==================== 交易接口 ====================
