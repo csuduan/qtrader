@@ -95,7 +95,7 @@ class StrategyManager:
     """策略管理器"""
 
     def __init__(self, strategies_config: Dict[str, StrategyConfig], trading_engine: TradingEngine):
-        self.strategies_configs: Dict[str, StrategyConfig] = strategies_config
+        self.strategies_configs: Dict[str, StrategyConfig] = strategies_config or {}
         self.strategies: Dict[str, BaseStrategy] = {}
         self.trading_engine: TradingEngine = trading_engine
         self.subscribed_symbols: set = set()

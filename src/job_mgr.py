@@ -15,6 +15,7 @@ from src.trader.switch_mgr import SwitchPosManager
 from src.utils.config_loader import TraderConfig
 from src.utils.database import get_session
 from src.utils.logger import get_logger
+from src.trader.core.strategy_manager import StrategyManager
 
 logger = get_logger(__name__)
 
@@ -66,40 +67,42 @@ class JobManager:
         self.trading_engine = trading_engine
         self.position_manager = position_manager
 
-    def pre_market_connect(self) -> None:
-        """盘前自动连接（异步版本）"""
+    async def pre_market_connect(self) -> None:
+        """盘前自动连接"""
         logger.info("开始执行盘前自动连接任务")
         try:
             if not self.trading_engine.connected:
-                _run_async(self.trading_engine.connect())
+                await self.trading_engine.connect()
                 logger.info("盘前自动连接任务已提交")
             else:
                 logger.info("交易引擎已连接，跳过盘前连接任务")
         except Exception as e:
-            logger.error(f"盘前自动连接任务执行失败: {e}")
+            logger.exception(f"盘前自动连接任务执行失败: {e}")
 
-    def post_market_export(self) -> None:
-        """盘后导出持仓"""
-        logger.info("开始执行盘后导出持仓任务")
-        try:
-            self.export_positions_to_csv()
-            logger.info("盘后导出持仓任务完成")
-        except Exception as e:
-            logger.error(f"盘后导出持仓任务执行失败: {e}")
-
-    def post_market_disconnect(self) -> None:
+    async def post_market_disconnect(self) -> None:
         """盘后断开连接（异步版本）"""
         logger.info("开始执行盘后断开连接任务")
         try:
             if self.trading_engine.connected:
-                _run_async(self.trading_engine.disconnect())
+                await self.trading_engine.disconnect()
                 logger.info("盘后断开连接任务已提交")
             else:
                 logger.info("交易引擎已断开，跳过盘后断开连接任务")
         except Exception as e:
-            logger.error(f"盘后断开连接任务执行失败: {e}")
+            logger.exception(f"盘后断开连接任务执行失败: {e}")
 
-    def export_positions_to_csv(self) -> None:
+    async def post_market_export(self) -> None:
+        """盘后导出持仓"""
+        logger.info("开始执行盘后导出持仓任务")
+        try:       
+            #_run_async()
+            await asyncio.to_thread(self._export_positions_to_csv)
+            logger.info("盘后导出持仓任务完成")
+        except Exception as e:
+            logger.exception(f"盘后导出持仓任务执行失败: {e}")
+
+
+    def _export_positions_to_csv(self) -> None:
         """导出持仓到CSV文件"""
         try:
             # 从内存获取所有持仓
@@ -177,7 +180,7 @@ class JobManager:
             logger.info(f"持仓已导出到: {file_path}")
 
         except Exception as e:
-            logger.error(f"导出持仓到CSV失败: {e}")
+            logger.exception(f"导出持仓到CSV失败: {e}")
 
     def test_log(self) -> None:
         """测试日志任务（每5秒执行）"""
@@ -190,16 +193,16 @@ class JobManager:
             await self.position_manager.execute_position_rotation(instruction)
             logger.info("换仓任务完成")
         except Exception as e:
-            logger.error(f"换仓任务执行失败: {e}")
+            logger.exception(f"换仓任务执行失败: {e}")
 
-    def scan_orders(self) -> None:
+    async def scan_orders(self) -> None:
         """扫描并处理订单"""
         # logger.info("开始扫描订单任务")
         try:
-            self.position_manager.scan_and_process_orders()
+            await asyncio.to_thread(self.position_manager.scan_and_process_orders)
             # logger.info("扫描订单任务完成")
         except Exception as e:
-            logger.error(f"扫描订单任务执行失败: {e}")
+            logger.exception(f"扫描订单任务执行失败: {e}")
 
     def cleanup_old_alarms(self) -> None:
         """清理3天前的告警"""
@@ -225,7 +228,7 @@ class JobManager:
             else:
                 logger.info("没有需要清理的旧告警记录")
         except Exception as e:
-            logger.error(f"清理旧告警失败: {e}")
+            logger.exception(f"清理旧告警失败: {e}")
             session.rollback()
         finally:
             session.close()
@@ -235,10 +238,10 @@ class JobManager:
         from src.app_context import get_app_context
 
         ctx = get_app_context()
-        strategy_manager = ctx.get_strategy_manager()
+        strategy_manager: StrategyManager = ctx.get_strategy_manager()
         logger.info("开始重置所有策略")
         try:
             strategy_manager.reset_all_for_new_day()
             logger.info("所有策略已重置")
         except Exception as e:
-            logger.error(f"重置策略失败: {e}")
+            logger.exception(f"重置策略失败: {e}")

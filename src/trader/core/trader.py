@@ -105,6 +105,7 @@ class Trader:
 
         # 启动换仓管理器、作业管理器
         self.switchPos_manager = SwitchPosManager(self.account_config, self.trading_engine)
+        ctx.register(AppContext.KEY_SWITCH_POS_MANAGER, self.switchPos_manager)
         self.switchPos_manager.start()
         # 启动任务调度器及作业管理器
         self.job_manager = JobManager(
@@ -118,13 +119,11 @@ class Trader:
             logger.info(f"Trader [{self.account_id}] 未配置任务调度器")
 
         # 启动策略管理器
-        if self.account_config.strategies:
-            self.strategy_manager = StrategyManager(
+        self.strategy_manager = StrategyManager(
                 self.account_config.strategies, self.trading_engine
             )
-            await self.strategy_manager.start()
-        else:
-            logger.info(f"Trader [{self.account_id}] 未配置策略")
+        ctx.register(AppContext.KEY_STRATEGY_MANAGER, self.strategy_manager)
+        await self.strategy_manager.start()
 
         # 保持运行
         logger.info("=" * 60)
