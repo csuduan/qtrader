@@ -358,4 +358,8 @@ export const useStore = defineStore('main', () => {
     updateQuote,
     getQuote
   }
+}, {
+  persist: {
+    pick: ['selectedAccountId']
+  }
 })
