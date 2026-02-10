@@ -89,7 +89,7 @@ class BaseSplitStrategy(ABC):
 class SimpleSplitStrategy(BaseSplitStrategy):
     """简单拆单策略"""
 
-    def split(self, pos: PositionData) -> int:
+    def split(self, pos: PositionData | None) -> int:
         cmd = self.cmd
         total_volume = cmd.volume
         total_td_volume = 0
@@ -198,10 +198,10 @@ class OrderCmd:
         # 当前拆单
         self._cur_split_order: Optional[SplitOrder] = None
 
-    def split(self, pos: PositionData) -> None:
+    def split(self, pos: PositionData|None) -> None:
         """拆单"""
         self._strategy = SimpleSplitStrategy(self)
-        count = self._strategy.split(pos)
+        count=self._strategy.split(pos)
         self._left_retry_times = 2 * count + 1
 
     def _load_next_split_order(self) -> Optional[SplitOrder]:
@@ -290,11 +290,11 @@ class OrderCmd:
         elif event_type == "TRADE_UPDATE":
             self._handle_trade_update(data)
 
-    def close(self) -> None:
+    def close(self,reason="指令已取消") -> None:
         """关闭指令（取消）"""
         if self.status in [OrderCmdStatus.FINISHED, OrderCmdStatus.CANCELING]:
             return
-        self._cancel("指令已取消")
+        self._cancel(reason)
 
     def get_pending_order(self) -> Optional[OrderData]:
         """获取当前挂单"""

@@ -3,6 +3,8 @@
 使用APScheduler管理定时任务，直接从config.yaml加载配置
 """
 
+import asyncio
+import inspect
 from datetime import datetime
 from typing import Callable, List
 
@@ -95,7 +97,29 @@ class TaskScheduler:
         def wrap_job_func(func: Callable, job: Job) -> Callable:
             def wrapped():
                 try:
-                    func()
+                    # 检测是否为协程函数
+                    if inspect.iscoroutinefunction(func):
+                        # 异步函数：在事件循环中执行
+                        from src.app_context import get_app_context
+
+                        ctx = get_app_context()
+                        loop = ctx.get_event_loop()
+
+                        if loop and loop.is_running():
+                            # 使用 run_coroutine_threadsafe 在线程中安全地调度协程
+                            future = asyncio.run_coroutine_threadsafe(func(), loop)
+                            # 等待结果，设置5分钟超时
+                            try:
+                                future.result(timeout=300)
+                            except asyncio.TimeoutError:
+                                logger.error(f"异步任务执行超时（300秒）: {job.job_name}")
+                            except Exception as e:
+                                logger.error(f"异步任务执行失败: {job.job_name}, {e}")
+                        else:
+                            logger.error(f"事件循环未运行，无法执行异步任务: {job.job_name}")
+                    else:
+                        # 同步函数：直接调用
+                        func()
                 finally:
                     job.last_trigger_time = datetime.now()
 
@@ -253,7 +277,7 @@ class TaskScheduler:
             bool: 是否操作成功
         """
         try:
-            job_config = self._job_configs.get(job_id)
+            job_config = self._jobs.get(job_id)
             if not job_config:
                 logger.error(f"任务不存在: {job_id}")
                 return False
@@ -265,13 +289,13 @@ class TaskScheduler:
 
             if action == "pause":
                 apscheduler_job.pause()
-                job_config["enabled"] = False
-                logger.info(f"暂停任务: {job_config['job_name']} ({job_id})")
+                job_config.enabled = False
+                logger.info(f"暂停任务: {job_config.job_name} ({job_id})")
                 return True
             elif action == "resume":
                 apscheduler_job.resume()
-                job_config["enabled"] = True
-                logger.info(f"恢复任务: {job_config['job_name']} ({job_id})")
+                job_config.enabled = True
+                logger.info(f"恢复任务: {job_config.job_name} ({job_id})")
                 return True
             elif action == "trigger":
                 return self.trigger_job(job_id)
@@ -299,7 +323,7 @@ class TaskScheduler:
 
         self._jobs[job_id].enabled = enabled
         if enabled:
-            self.scheduler.reschedule_job(job_id, trigger=self._jobs[job_id].trigger)
+            self.scheduler.resume_job(job_id)
         else:
             self.scheduler.pause_job(job_id)
 

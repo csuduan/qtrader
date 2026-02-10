@@ -119,38 +119,13 @@ class OrderCmdExecutor:
         self._pending_cmds[cmd.cmd_id] = cmd
         self._history_cmds[cmd.cmd_id] = cmd
 
+        self.logger.info(f"添加OrderCmd到执行器: {cmd.cmd_id} {cmd.symbol} {cmd.offset} {cmd.direction} {cmd.volume}手")
         # 查询持仓信息（只对平仓指令需要）
         pos = None
         if cmd.offset == Offset.CLOSE:
             pos = self._trading_engine.get_position(cmd.symbol)
         # 拆单
-        if pos is not None:
-            cmd.split(pos)
-        else:
-            # 创建空持仓用于拆单
-            empty_pos = PositionData(
-                symbol=cmd.symbol,
-                exchange=Exchange.LOCAL,
-                pos=0,
-                pos_long=0,
-                pos_short=0,
-                account_id="",
-                pos_long_yd=0,
-                pos_short_yd=0,
-                pos_long_td=0,
-                pos_short_td=0,
-                open_price_long=0,
-                open_price_short=0,
-                float_profit_long=0,
-                float_profit_short=0,
-                hold_profit_long=0,
-                hold_profit_short=0,
-                margin_long=0,
-                margin_short=0,
-            )
-            cmd.split(empty_pos)
-
-        self.logger.debug(f"注册 OrderCmd: {cmd.cmd_id}")
+        cmd.split(pos)
         # 触发状态变更事件 (PENDING -> RUNNING)
         self._emit_cmd_update(cmd)
 
@@ -272,10 +247,12 @@ class OrderCmdExecutor:
                     volume=req.volume,
                     price=req.price or 0,
                 )
-                if order is not None:
+                if order:
                     cmd.add_order(order)
             except Exception as e:
-                self.logger.error(f"下单失败 {cmd.cmd_id}: {e}")
+                self.logger.exception(f"下单失败 {cmd.cmd_id}: {e}")
+                cmd.close(f"报单被拒: {e}")
+                
         elif isinstance(req, OrderData):
             # 撤单（异步）
             try:

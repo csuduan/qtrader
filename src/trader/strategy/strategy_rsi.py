@@ -126,7 +126,7 @@ class RsiStrategy(BaseStrategy):
 
         try:
             # 只处理指定合约的K线
-            if bar.symbol != self.param.symbol:
+            if bar.symbol != self.symbol:
                 return
 
             logger.info(

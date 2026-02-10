@@ -19,18 +19,30 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
-def _run_async(coro):
+def _run_async(coro, timeout: float = 300):
     """
-    在当前运行的事件循环中运行协程
+    在当前运行的事件循环中运行协程并等待结果
 
-    用于从同步上下文调用异步方法
+    Args:
+        coro: 协程对象
+        timeout: 超时时间（秒），默认300秒
+
+    Returns:
+        协程的返回值，超时或失败返回 None
     """
     try:
         loop = asyncio.get_running_loop()
-        asyncio.run_coroutine_threadsafe(coro, loop)
+        future = asyncio.run_coroutine_threadsafe(coro, loop)
+        return future.result(timeout=timeout)
     except RuntimeError:
-        # 没有运行的事件循环
         logger.warning("没有运行的事件循环，无法执行异步任务")
+        return None
+    except asyncio.TimeoutError:
+        logger.error(f"异步任务执行超时（{timeout}秒）")
+        return None
+    except Exception as e:
+        logger.error(f"异步任务执行失败: {e}")
+        return None
 
 
 class JobManager:
@@ -171,11 +183,11 @@ class JobManager:
         """测试日志任务（每5秒执行）"""
         logger.info("这是一条测试日志 - 定时任务运行中")
 
-    def execute_position_rotation(self, instruction: Optional[str] = "") -> None:
+    async def execute_position_rotation(self, instruction: Optional[str] = "") -> None:
         """执行换仓操作"""
         logger.info("开始执行换仓任务")
         try:
-            self.position_manager.execute_position_rotation(instruction)
+            await self.position_manager.execute_position_rotation(instruction)
             logger.info("换仓任务完成")
         except Exception as e:
             logger.error(f"换仓任务执行失败: {e}")

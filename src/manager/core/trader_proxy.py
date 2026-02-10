@@ -218,15 +218,13 @@ class TraderProxy:
                     continue
                 
                 if self.socket_client.is_connected():
+                    await self._set_state(TraderState.CONNECTED)
                     await asyncio.sleep(check_interval)
-                    continue
-                
-                 # 进程存在，且为未连接
-                self.last_heartbeat = datetime.now()
-                if self.socket_client.is_connected():
                     attempt = 0
                     continue
                 
+                 # 进程存在，且为未连接
+                self.last_heartbeat = datetime.now()           
                 # 状态变为连接中
                 await self._set_state(TraderState.CONNECTING)
                 logger.info(
@@ -979,6 +977,109 @@ class TraderProxy:
         except Exception as e:
             logger.error(f"TraderProxy [{self.account_id}] 获取策略报单指令请求失败: {e}")
             return []
+
+    # ==================== 任务管理接口 ====================
+
+    async def trigger_job(self, job_id: str) -> bool:
+        """
+        手动触发定时任务
+
+        通过socket发送请求到远程Trader
+
+        Args:
+            job_id: 任务ID
+
+        Returns:
+            是否成功
+        """
+        if not self.socket_client or not self.socket_client.is_connected():
+            logger.error(f"TraderProxy [{self.account_id}] 未连接到Trader，无法发送触发任务请求")
+            return False
+
+        try:
+            response = await self.socket_client.request(
+                "trigger_job", {"job_id": job_id}, timeout=10.0
+            )
+            return bool(response)
+        except Exception as e:
+            logger.error(f"TraderProxy [{self.account_id}] 触发任务请求失败: {e}")
+            return False
+
+    async def toggle_job(self, job_id: str, enabled: bool) -> bool:
+        """
+        切换任务启用状态
+
+        通过socket发送请求到远程Trader
+
+        Args:
+            job_id: 任务ID
+            enabled: 是否启用
+
+        Returns:
+            是否成功
+        """
+        if not self.socket_client or not self.socket_client.is_connected():
+            logger.error(f"TraderProxy [{self.account_id}] 未连接到Trader，无法发送切换任务状态请求")
+            return False
+
+        try:
+            response = await self.socket_client.request(
+                "toggle_job", {"job_id": job_id, "enabled": enabled}, timeout=10.0
+            )
+            return bool(response)
+        except Exception as e:
+            logger.error(f"TraderProxy [{self.account_id}] 切换任务状态请求失败: {e}")
+            return False
+
+    async def pause_job(self, job_id: str) -> bool:
+        """
+        暂停任务
+
+        通过socket发送请求到远程Trader
+
+        Args:
+            job_id: 任务ID
+
+        Returns:
+            是否成功
+        """
+        if not self.socket_client or not self.socket_client.is_connected():
+            logger.error(f"TraderProxy [{self.account_id}] 未连接到Trader，无法发送暂停任务请求")
+            return False
+
+        try:
+            response = await self.socket_client.request(
+                "pause_job", {"job_id": job_id}, timeout=10.0
+            )
+            return bool(response)
+        except Exception as e:
+            logger.error(f"TraderProxy [{self.account_id}] 暂停任务请求失败: {e}")
+            return False
+
+    async def resume_job(self, job_id: str) -> bool:
+        """
+        恢复任务
+
+        通过socket发送请求到远程Trader
+
+        Args:
+            job_id: 任务ID
+
+        Returns:
+            是否成功
+        """
+        if not self.socket_client or not self.socket_client.is_connected():
+            logger.error(f"TraderProxy [{self.account_id}] 未连接到Trader，无法发送恢复任务请求")
+            return False
+
+        try:
+            response = await self.socket_client.request(
+                "resume_job", {"job_id": job_id}, timeout=10.0
+            )
+            return bool(response)
+        except Exception as e:
+            logger.error(f"TraderProxy [{self.account_id}] 恢复任务请求失败: {e}")
+            return False
 
     @property
     def gateway(self) -> "_GatewayStatus":

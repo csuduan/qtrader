@@ -253,6 +253,13 @@ class BaseStrategy:
                 # 平仓指令
                 self.pos_volume -= cmd.filled_volume            
             self._pending_cmd = None
+
+            if "报单被拒" in cmd.finish_reason:
+                if cmd.offset == Offset.OPEN:
+                    self.opening_paused = True
+                elif cmd.offset == Offset.CLOSE:
+                    self.closing_paused = True
+                return
             return
 
     def get_trading_status(self) -> str:

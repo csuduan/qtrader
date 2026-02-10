@@ -80,6 +80,10 @@ async def main_async(args):
     logger.info(f"调试模式: {args.debug}")
     logger.info("=" * 60)
 
+    # 注册当前事件循环到 AppContext
+    loop = asyncio.get_running_loop()
+    ctx.register(AppContext.KEY_EVENT_LOOP, loop)
+
     # 启动事件引擎
     event_engine = AsyncEventEngine(name=f"Trader")
     event_engine.start()

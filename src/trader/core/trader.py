@@ -572,6 +572,75 @@ class Trader:
         jobs = self.task_scheduler.get_jobs()
         return [job.model_dump() for job in jobs.values()]
 
+    @request("trigger_job")
+    async def _req_trigger_job(self, data: dict) -> bool:
+        """处理手动触发任务请求"""
+        if self.task_scheduler is None:
+            logger.error(f"Trader [{self.account_id}] 任务调度器未初始化")
+            return False
+        job_id = data.get("job_id")
+        if not job_id:
+            logger.error(f"Trader [{self.account_id}] 缺少 job_id")
+            return False
+        success = self.task_scheduler.trigger_job(job_id)
+        if success:
+            logger.info(f"Trader [{self.account_id}] 任务已触发: {job_id}")
+        else:
+            logger.warning(f"Trader [{self.account_id}] 触发任务失败: {job_id}")
+        return success
+
+    @request("toggle_job")
+    async def _req_toggle_job(self, data: dict) -> bool:
+        """处理切换任务状态请求"""
+        if self.task_scheduler is None:
+            logger.error(f"Trader [{self.account_id}] 任务调度器未初始化")
+            return False
+        job_id = data.get("job_id")
+        enabled = data.get("enabled")
+        if not job_id or enabled is None:
+            logger.error(f"Trader [{self.account_id}] 缺少 job_id 或 enabled")
+            return False
+        success = self.task_scheduler.update_job_status(job_id, enabled)
+        if success:
+            logger.info(f"Trader [{self.account_id}] 任务状态已更新: {job_id} -> {enabled}")
+        else:
+            logger.warning(f"Trader [{self.account_id}] 更新任务状态失败: {job_id}")
+        return success
+
+    @request("pause_job")
+    async def _req_pause_job(self, data: dict) -> bool:
+        """处理暂停任务请求"""
+        if self.task_scheduler is None:
+            logger.error(f"Trader [{self.account_id}] 任务调度器未初始化")
+            return False
+        job_id = data.get("job_id")
+        if not job_id:
+            logger.error(f"Trader [{self.account_id}] 缺少 job_id")
+            return False
+        success = self.task_scheduler.operate_job(job_id, "pause")
+        if success:
+            logger.info(f"Trader [{self.account_id}] 任务已暂停: {job_id}")
+        else:
+            logger.warning(f"Trader [{self.account_id}] 暂停任务失败: {job_id}")
+        return success
+
+    @request("resume_job")
+    async def _req_resume_job(self, data: dict) -> bool:
+        """处理恢复任务请求"""
+        if self.task_scheduler is None:
+            logger.error(f"Trader [{self.account_id}] 任务调度器未初始化")
+            return False
+        job_id = data.get("job_id")
+        if not job_id:
+            logger.error(f"Trader [{self.account_id}] 缺少 job_id")
+            return False
+        success = self.task_scheduler.operate_job(job_id, "resume")
+        if success:
+            logger.info(f"Trader [{self.account_id}] 任务已恢复: {job_id}")
+        else:
+            logger.warning(f"Trader [{self.account_id}] 恢复任务失败: {job_id}")
+        return success
+
     # ========== 策略管理请求处理 ==========
     @request("list_strategies")
     async def _req_list_strategies(self, data: dict) -> list:

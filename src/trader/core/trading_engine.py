@@ -302,38 +302,37 @@ class TradingEngine:
             logger.error(f"风控检查失败: 手数 {volume} 超过限制")
             raise Exception(f"风控检查失败: 手数 {volume} 超过限制")
 
-        try:
-            if self.gateway is None:
-                raise Exception("Gateway未初始化")
+        
+        if self.gateway is None:
+            raise Exception("Gateway未初始化")
 
-            # 转换为枚举类型
-            if isinstance(direction, str):
-                direction = Direction(direction)
-            if isinstance(offset, str):
-                offset = Offset(offset)
+        # 转换为枚举类型
+        if isinstance(direction, str):
+            direction = Direction(direction)
+        if isinstance(offset, str):
+            offset = Offset(offset)
 
-            req = OrderRequest(
-                symbol=symbol,
-                direction=direction,
-                offset=offset,
-                volume=volume,
-                price=price if price > 0 else None,
+        req = OrderRequest(
+            symbol=symbol,
+            direction=direction,
+            offset=offset,
+            volume=volume,
+            price=price if price > 0 else None,
+        )
+
+        order_data =  self.gateway.send_order(req)
+        if order_data is not None:
+            logger.bind(tags=["trade"]).info(
+                f"下单: {symbol} {direction} {offset} {volume}手 @{price if price > 0 else 'MARKET'}, 委托单ID: {order_data.order_id}"
             )
+            order_data.insert_time = datetime.now()
+            # 更新风控计数
+            self.risk_control.on_order_inserted()
+        else:
+            logger.error(f"下单失败: {symbol} {direction} {offset} {volume}手 @{price if price > 0 else 'MARKET'}")
+        return order_data
 
-            order_data =  self.gateway.send_order(req)
 
-            if order_data is not None:
-                logger.bind(tags=["trade"]).info(
-                    f"下单: {symbol} {direction} {offset} {volume}手 @{price if price > 0 else 'MARKET'}, 委托单ID: {order_data.order_id}"
-                )
-                order_data.insert_time = datetime.now()
-                # 更新风控计数
-                self.risk_control.on_order_inserted()
-
-            return order_data
-
-        except Exception as e:
-            raise Exception(f"下单失败: {e}")
 
     def cancel_order(self, order_id: str) -> bool:
         """
@@ -453,7 +452,7 @@ class TradingEngine:
             bool: 订阅是否成功
         """
         if self.gateway:
-            self.gateway.subscribe(symbol)
+            return self.gateway.subscribe(symbol)
         return True
 
     def subscribe_bars(self, symbol: str, interval: str) -> bool:

@@ -234,7 +234,7 @@ class TqGateway(BaseGateway):
             formatted_symbol = self._format_symbol(req.symbol)
             if not formatted_symbol:
                 logger.error(f"无效的合约代码: {req.symbol}")
-                return None
+                raise Exception(f"无效的合约代码: {req.symbol}")
 
             # 获取行情信息(市价单使用对手价)
             price = req.price
@@ -819,7 +819,6 @@ class TqGateway(BaseGateway):
             if part in self._upper_symbols:
                 return self._upper_symbols[part]
         logger.warning(f"未找到匹配的合约符号: {symbol}")
-        return None
 
     def _parse_exchange(self, exchange_code: str) -> Exchange:
         """解析交易所代码"""
