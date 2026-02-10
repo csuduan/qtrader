@@ -36,30 +36,8 @@
                   </el-button>
                   <template #dropdown>
                     <el-dropdown-menu>
-                      <!-- 未启动状态：显示启动 -->
-                      <el-dropdown-item
-                        :command="{ action: 'start_trader', accountId: acc.account_id }"
-                        v-if="isAccountStopped(acc)"
-                      >
-                        <el-icon><VideoPlay /></el-icon>
-                        启动
-                      </el-dropdown-item>
-
-                      <!-- 已启动但未连接状态：显示停止 -->
-                      <el-dropdown-item
-                        :command="{ action: 'stop_trader', accountId: acc.account_id }"
-                        v-if="isAccountStarting(acc)"
-                      >
-                        <el-icon><VideoPause /></el-icon>
-                        停止
-                      </el-dropdown-item>
-
-                      <!-- 已连接状态：显示停止、连接网关、断开网关、暂停交易、恢复交易 -->
+                      <!-- 已连接状态：显示连接网关、断开网关、暂停交易、恢复交易 -->
                       <template v-if="isAccountConnected(acc)">
-                        <el-dropdown-item :command="{ action: 'stop_trader', accountId: acc.account_id }">
-                          <el-icon><VideoPause /></el-icon>
-                          停止
-                        </el-dropdown-item>
                         <el-dropdown-item
                           :command="{ action: 'connect_gateway', accountId: acc.account_id }"
                           v-if="!acc.gateway_connected"
