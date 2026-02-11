@@ -54,6 +54,7 @@ class JobManager:
         config: TraderConfig,
         trading_engine: TradingEngine,
         position_manager: SwitchPosManager,
+        socket_server=None,
     ):
         """
         初始化任务管理器
@@ -62,10 +63,12 @@ class JobManager:
             config: 应用配置
             trading_engine: 交易引擎实例
             position_manager: 换仓管理器实例
+            socket_server: Socket服务器实例（可选）
         """
         self.config = config
         self.trading_engine = trading_engine
         self.position_manager = position_manager
+        self.socket_server = socket_server
 
     async def pre_market_connect(self) -> None:
         """盘前自动连接"""
@@ -245,3 +248,350 @@ class JobManager:
             logger.info("所有策略已重置")
         except Exception as e:
             logger.exception(f"重置策略失败: {e}")
+
+    async def check_rotation_result(self) -> None:
+        """检查换仓结果，如果当天需要执行的换仓文件还没有全部完成，发出告警通知"""
+        from datetime import date
+
+        logger.info("开始检查换仓结果")
+        session = get_session()
+        if not session:
+            logger.error("无法获取数据库会话")
+            return
+
+        try:
+            from src.models.po import RotationInstructionPo
+
+            # 获取今天的日期
+            today = date.today()
+            today_str = today.strftime("%Y%m%d")
+
+            # 查询今天启用且未删除的换仓指令
+            instructions = (
+                session.query(RotationInstructionPo)
+                .filter(
+                    RotationInstructionPo.trading_date == today_str,
+                    RotationInstructionPo.enabled == True,
+                    RotationInstructionPo.is_deleted == False,
+                )
+                .all()
+            )
+
+            if not instructions:
+                logger.info("今天没有换仓指令需要检查")
+                return
+
+            # 统计未完成的换仓指令
+            unfinished = []
+            for inst in instructions:
+                # 判断是否未完成：状态不是 FINISHED 或者还有剩余手数
+                if inst.status != "FINISHED" or inst.remaining_volume > 0:
+                    unfinished.append({
+                        "id": inst.id,
+                        "strategy_id": inst.strategy_id,
+                        "symbol": inst.symbol,
+                        "direction": inst.direction,
+                        "offset": inst.offset,
+                        "volume": inst.volume,
+                        "filled_volume": inst.filled_volume,
+                        "remaining_volume": inst.remaining_volume,
+                        "status": inst.status,
+                    })
+
+            if unfinished:
+                # 发送告警
+                await self._send_rotation_alarm(today_str, unfinished)
+            else:
+                logger.info(f"今天({today_str})的所有换仓指令已完成")
+        except Exception as e:
+            logger.exception(f"检查换仓结果失败: {e}")
+        finally:
+            session.close()
+
+    async def _send_rotation_alarm(self, trading_date: str, unfinished: list) -> None:
+        """发送换仓告警"""
+        try:
+            from src.models.object import AlarmData
+
+            now = datetime.now()
+            unfinished_count = len(unfinished)
+            unfinished_detail = "; ".join([
+                f"{u['strategy_id']}/{u['symbol']}/{u['direction']}/{u['offset']}"
+                f"(剩余{u['remaining_volume']}手)"
+                for u in unfinished
+            ])
+
+            alarm_data = AlarmData(
+                account_id=self.config.account_id,
+                alarm_date=now.strftime("%Y-%m-%d"),
+                alarm_time=now.strftime("%H:%M:%S"),
+                source="ROTATION_CHECK",
+                title=f"换仓未完成告警 - 共{unfinished_count}条",
+                detail=f"交易日: {trading_date}, 未完成: {unfinished_detail}",
+                status="UNCONFIRMED",
+                created_at=now,
+            )
+
+            # 通过 Socket服务器发送告警到 Manager
+            if self.socket_server:
+                await self.socket_server.send_push("alarm", alarm_data.model_dump())
+                logger.warning(f"已发送换仓告警到Manager: {alarm_data.title}")
+            else:
+                # 如果没有 Socket服务器，记录 ERROR 日志（会被告警处理器捕获）
+                logger.error(f"换仓告警: {alarm_data.title} - {alarm_data.detail}")
+        except Exception as e:
+            logger.exception(f"发送换仓告警失败: {e}")
+
+    async def opening_check(self) -> None:
+        """
+        开盘检查任务
+
+        检查项：
+        1. 交易接口连接检查
+        2. 换仓文件导入检查（可选，如果配置了换仓目录）
+        3. 参数文件更新检查（可选，如果配置了参数目录）
+        """
+        logger.info("开始执行开盘检查任务")
+        now = datetime.now()
+
+        try:
+            # 1. 交易接口连接检查
+            if not self.trading_engine.connected:
+                await self._send_opening_alarm(
+                    "交易接口未连接",
+                    "开盘前交易接口未连接，请检查网络或配置"
+                )
+                logger.warning("开盘检查：交易接口未连接")
+            else:
+                logger.info("开盘检查：交易接口已连接")
+
+            # 2. 换仓文件导入检查（如果配置了换仓目录）
+            if self.config.paths and self.config.paths.switchPos_files:
+                await self._check_switchpos_import(now)
+
+            # 3. 参数文件更新检查（如果配置了参数目录）
+            if self.config.paths and self.config.paths.params:
+                missing_files = await self._check_param_files()
+                if missing_files:
+                    await self._send_opening_alarm(
+                        "参数文件缺失",
+                        f"以下策略参数文件不存在: {', '.join(missing_files)}"
+                    )
+                    logger.warning(f"开盘检查：参数文件缺失 - {missing_files}")
+
+            logger.info("开盘检查任务完成")
+
+        except Exception as e:
+            logger.exception(f"开盘检查任务执行失败: {e}")
+
+    async def _check_switchpos_import(self, now: datetime) -> None:
+        """
+        检查换仓文件导入
+
+        查询数据库中今日是否有换仓文件导入记录
+        如果没有则告警
+        """
+        try:
+            session = get_session()
+            if not session:
+                logger.warning("开盘检查：无法获取数据库会话")
+                return
+
+            try:
+                from src.models.po import SwitchPosImportPo
+                from datetime import date
+
+                today = date.today()
+                today_str = now.strftime("%Y-%m-%d")
+
+                # 查询今天是否有导入记录
+                count = (
+                    session.query(SwitchPosImportPo)
+                    .filter(SwitchPosImportPo.created_at >= today_str)
+                    .count()
+                )
+
+                if count == 0:
+                    await self._send_opening_alarm(
+                        "换仓文件未导入",
+                        f"今日({today_str})未检测到换仓文件导入记录"
+                    )
+                    logger.warning("开盘检查：今日无换仓文件导入记录")
+                else:
+                    logger.info(f"开盘检查：今日已有 {count} 条换仓文件导入记录")
+
+            finally:
+                session.close()
+
+        except Exception as e:
+            logger.warning(f"检查换仓文件导入失败: {e}")
+
+    async def _check_param_files(self) -> list[str]:
+        """
+        检查参数文件是否存在
+
+        遍历所有启用的策略，检查其 params_file 配置的文件是否存在
+
+        Returns:
+            list[str]: 缺失的文件列表，格式为 "strategy_id: params_file"
+        """
+        missing_files = []
+
+        if not self.config.strategies:
+            return missing_files
+
+        try:
+            params_dir = Path(self.config.paths.params)
+
+            for strategy_id, strategy_config in self.config.strategies.items():
+                if not strategy_config.enabled:
+                    continue
+
+                params_file = strategy_config.params_file
+                if params_file:
+                    file_path = params_dir / params_file
+                    if not file_path.exists():
+                        missing_files.append(f"{strategy_id}: {params_file}")
+
+        except Exception as e:
+            logger.warning(f"检查参数文件失败: {e}")
+
+        return missing_files
+
+    async def _send_opening_alarm(self, title: str, detail: str) -> None:
+        """
+        发送开盘检查告警
+
+        Args:
+            title: 告警标题
+            detail: 告警详情
+        """
+        try:
+            from src.models.object import AlarmData
+
+            now = datetime.now()
+
+            alarm_data = AlarmData(
+                account_id=self.config.account_id,
+                alarm_date=now.strftime("%Y-%m-%d"),
+                alarm_time=now.strftime("%H:%M:%S"),
+                source="OPENING_CHECK",
+                title=f"开盘检查告警 - {title}",
+                detail=detail,
+                status="UNCONFIRMED",
+                created_at=now,
+            )
+
+            # 通过 Socket服务器发送告警到 Manager
+            if self.socket_server:
+                await self.socket_server.send_push("alarm", alarm_data.model_dump())
+                logger.warning(f"已发送开盘检查告警到Manager: {title}")
+            else:
+                # 如果没有 Socket服务器，记录 ERROR 日志（会被告警处理器捕获）
+                logger.error(f"开盘检查告警: {title} - {detail}")
+
+        except Exception as e:
+            logger.exception(f"发送开盘检查告警失败: {e}")
+
+    async def closing_process(self) -> None:
+        """
+        收盘处理任务
+
+        处理项：
+        1. 导出持仓到 CSV（使用现有的 post_market_export）
+        2. 确保交易记录持久化（事件驱动已自动完成）
+        3. 持久化策略持仓状态（占位功能）
+        """
+        logger.info("开始执行收盘处理任务")
+
+        try:
+            # 1. 导出持仓
+            await self.post_market_export()
+
+            # 2. 确保交易记录持久化（事件驱动已自动完成）
+            logger.info("交易记录由事件驱动自动持久化，无需额外处理")
+
+            # 3. 持久化策略持仓状态（占位功能）
+            await self._persist_strategy_positions()
+
+            logger.info("收盘处理任务完成")
+
+        except Exception as e:
+            logger.exception(f"收盘处理任务执行失败: {e}")
+
+    async def _persist_strategy_positions(self) -> None:
+        """
+        持久化策略持仓状态
+
+        获取所有策略的持仓信息并保存到数据库
+        保存字段：交易日、策略编号、多头、空头、持仓均价、更新时间
+
+        注：这是占位功能，实际数据结构和持久化方式待完善
+        """
+        try:
+            from src.app_context import get_app_context
+
+            ctx = get_app_context()
+            strategy_manager: StrategyManager = ctx.get_strategy_manager()
+
+            if not strategy_manager:
+                logger.warning("策略管理器未初始化，跳过策略持仓持久化")
+                return
+
+            session = get_session()
+            if not session:
+                logger.warning("无法获取数据库会话，跳过策略持仓持久化")
+                return
+
+            try:
+                from src.models.po import StrategyPositionPo
+                from datetime import date
+
+                today = date.today()
+                trading_date_str = today.strftime("%Y-%m-%d")
+
+                persist_count = 0
+                for strategy_id, strategy in strategy_manager.strategies.items():
+                    if not strategy.enabled:
+                        continue
+
+                    # 检查是否已有今日记录
+                    existing = (
+                        session.query(StrategyPositionPo)
+                        .filter(
+                            StrategyPositionPo.account_id == self.config.account_id,
+                            StrategyPositionPo.trading_date == trading_date_str,
+                            StrategyPositionPo.strategy_id == strategy_id,
+                        )
+                        .first()
+                    )
+
+                    pos_data = {
+                        "account_id": self.config.account_id,
+                        "trading_date": trading_date_str,
+                        "strategy_id": strategy_id,
+                        "long_volume": strategy.pos_long,
+                        "short_volume": strategy.pos_short,
+                        "avg_price": strategy.pos_price,
+                    }
+
+                    if existing:
+                        # 更新现有记录
+                        existing.long_volume = pos_data["long_volume"]
+                        existing.short_volume = pos_data["short_volume"]
+                        existing.avg_price = pos_data["avg_price"]
+                    else:
+                        # 创建新记录
+                        new_record = StrategyPositionPo(**pos_data)
+                        session.add(new_record)
+
+                    persist_count += 1
+
+                session.commit()
+                logger.info(f"已持久化 {persist_count} 个策略的持仓状态")
+
+            finally:
+                session.close()
+
+        except Exception as e:
+            logger.warning(f"持久化策略持仓失败: {e}")

@@ -194,6 +194,7 @@ class AppConfig(BaseModel):
     paths: PathsConfig = Field(default_factory=PathsConfig)
     socket: SocketConfig = Field(default_factory=SocketConfig)
     api: ApiConfig = Field(default_factory=ApiConfig)
+    scheduler: Optional[SchedulerConfig] = None
 
     class Config:
         extra = "allow"  # 允许额外字段
@@ -239,27 +240,14 @@ class ConfigLoader:
         self.app_config = self._load_app_config()
 
         # 动态扫描config目录下所有account-*.yaml文件
-        account_files = list(self.config_dir.glob("account-*.yaml"))
-        logger.info(f"扫描到 {len(account_files)} 个账户配置文件")
+        
 
-        loaded_account_ids = set()
-        for account_file in account_files:
+        for account_id in self.app_config.account_ids:
             try:
                 # 从文件名提取account_id
-                account_id = account_file.stem.replace("account-", "")
-
-                # 避免重复加载
-                if account_id in loaded_account_ids:
-                    continue
-
-                try:
-                    account = self._load_account_config(account_id)
-                    self.app_config.accounts.append(account)
-                    loaded_account_ids.add(account_id)
-                    logger.info(f"已加载账户配置: {account_id} (enabled: {account.enabled})")
-                except FileNotFoundError:
-                    # 跳过不存在的配置文件
-                    continue
+                account = self._load_account_config(account_id)
+                self.app_config.accounts.append(account)
+                logger.info(f"已加载账户配置: {account_id} (enabled: {account.enabled})")
             except Exception as e:
                 logger.error(f"加载账户配置文件 {account_file.name} 失败: {e}")
 

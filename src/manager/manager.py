@@ -10,55 +10,14 @@ from typing import Any, Dict, List, Optional
 
 from src.manager.trader_proxy import TraderProxy
 from src.models.object import AccountData, Direction, Offset, OrderData, OrderRequest
-from src.utils.config_loader import AccountConfig, DatabaseConfig, SocketConfig
+from src.utils.config_loader import AccountConfig, DatabaseConfig, SocketConfig,AppConfig
 from src.utils.logger import get_logger
 from src.utils.scheduler import TaskScheduler
+from src.app_context import get_app_context, AppContext
+ctx:AppContext = get_app_context()
 
 logger = get_logger(__name__)
 
-
-class _GlobalConfigAdapter:
-    """
-    将全局配置适配为AppConfig接口的适配器类
-    用于TraderProxy等期望AppConfig的组件
-    """
-
-    def __init__(self, socket_config: SocketConfig):
-        self._socket_config = socket_config
-
-    @property
-    def socket(self):
-        return self._socket_config
-
-    @property
-    def api(self):
-        from src.utils.config_loader import ApiConfig
-
-        return ApiConfig()
-
-    @property
-    def paths(self):
-        from src.utils.config_loader import PathsConfig
-
-        return PathsConfig()
-
-    @property
-    def trading(self):
-        from src.utils.config_loader import TradingConfig
-
-        return TradingConfig()
-
-    @property
-    def risk_control(self):
-        from src.utils.config_loader import RiskControlConfig
-
-        return RiskControlConfig()
-
-    @property
-    def scheduler(self):
-        from src.utils.config_loader import SchedulerConfig
-
-        return SchedulerConfig()
 
 
 class TradingManager:
@@ -92,7 +51,7 @@ class TradingManager:
         self.database_config = DatabaseConfig()
 
         # 创建全局配置适配器（用于传递给TraderProxy）
-        self._global_config_adapter = _GlobalConfigAdapter(self.socket_config)
+        # self._global_config_adapter = _GlobalConfigAdapter(self.socket_config)
 
         # Socket目录（独立模式的Trader进程会创建socket文件）
         socket_dir = self.socket_config.socket_dir
@@ -105,6 +64,9 @@ class TradingManager:
         self._running = False
         self._health_check_running = False
         self._health_check_task: Optional[asyncio.Task] = None
+
+        # Scheduler（将在 start() 中初始化）
+        self._scheduler = None
 
         logger.info("交易管理器初始化完成")
 
@@ -130,7 +92,6 @@ class TradingManager:
 
         trader = TraderProxy(
             account_config=account_config,
-            global_config=self._global_config_adapter,
             socket_path=socket_path,
             heartbeat_timeout=self.socket_config.heartbeat_timeout,
         )
@@ -667,6 +628,20 @@ class TradingManager:
             else:
                 logger.error(f"Trader Proxy [{account.account_id}] 启动失败")
 
+        # 初始化并启动 Scheduler（复用 utils/scheduler.py）
+        from src.manager.job_mgr import ManagerJobManager
+        from src.utils.scheduler import TaskScheduler
+
+        job_manager = ManagerJobManager(self)
+
+        # 从全局配置加载 Manager 的 scheduler 配置
+        app_config: AppConfig = ctx.get_config()
+        scheduler_config = app_config.scheduler
+
+        self._scheduler = TaskScheduler(scheduler_config, job_manager)
+        self._scheduler.start()
+        logger.info("Manager Scheduler 已启动")
+
         logger.info("交易管理器启动完成")
 
     async def stop(self) -> None:
@@ -680,5 +655,10 @@ class TradingManager:
         # 停止所有Trader
         for account_id in list(self.traders.keys()):
             await self.stop_trader(account_id)
+
+        # 停止 ManagerScheduler
+        if self._scheduler:
+            self._scheduler.shutdown()
+            logger.info("ManagerScheduler 已停止")
 
         logger.info("交易管理器已停止")

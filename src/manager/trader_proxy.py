@@ -49,7 +49,6 @@ class TraderProxy:
     def __init__(
         self,
         account_config: AccountConfig,
-        global_config: Any,  # 可以是 AppConfig 或 _GlobalConfigAdapter
         socket_path: str,
         heartbeat_timeout: int = 30,
     ):
@@ -64,7 +63,6 @@ class TraderProxy:
         """
         self.account_id = account_config.account_id
         self.account_config = account_config
-        self.global_config = global_config
         self.socket_path = socket_path
         self.heartbeat_timeout = heartbeat_timeout
         self._running = False

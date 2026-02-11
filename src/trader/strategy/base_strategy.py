@@ -120,6 +120,7 @@ class BaseStrategy:
         self.pos_long: int = 0  # 空头
         self.pos_short: int = 0  # 多头
         self.pos_price: float = 0.0  # 持仓均价
+        self.close_profit: float = 0.0  # 平仓盈亏
 
         # 暂停状态
         self.opening_paused: bool = False
@@ -137,10 +138,8 @@ class BaseStrategy:
         self._pending_cmd = None
         self._hist_cmds = {}
         self.signal = None
-        #self.pos_long = 0
-        #self.pos_short = 0
-        #self.pos_price = None
         self.trading_day = trading_day
+        self.close_profit = 0.0
 
         # 解析参数
         if self.config.params:
@@ -242,7 +241,7 @@ class BaseStrategy:
                         volume=pos,
                         price=0
                     )
-                await self.send_order_cmd(exit_cmd)
+                    await self.send_order_cmd(exit_cmd)
         else:
             # 开仓处理
             if self._pending_cmd and not self._pending_cmd.is_finished:

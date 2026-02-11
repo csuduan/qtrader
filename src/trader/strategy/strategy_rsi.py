@@ -66,6 +66,7 @@ class RsiStrategy(BaseStrategy):
         self._pending_cmd = None
         self._hist_cmds = {}
         self.trading_day = trading_day
+        self.close_profit = 0.0
 
         # 本策略临时变量
         self.short_k_bars: deque[BarData] = deque()  # 短周期K线（short_k分钟）

@@ -1,0 +1,51 @@
+account_ids:
+  - "DQ"
+  - "GWQ"
+  - "YX"
+
+paths:
+  logs: "./data/logs"
+  database: "./data/db/q-manager.db"
+
+# Socket 配置
+socket:
+  socket_dir: "./data/socks"
+  health_check_interval: 10
+  heartbeat_timeout: 30
+
+# API服务配置
+api:
+  host: "0.0.0.0"
+  port: 8000
+  cors_origins:
+    - "http://localhost:3000"
+    - "http://localhost:5173"
+    - "http://localhost:8080"
+    - "http://localhost:3001"
+
+# Manager 定时任务配置
+scheduler:
+  jobs:
+    # Trader 健康检查
+    - job_id: "trader_health_check"
+      job_name: "Trader健康检查"
+      job_description: "检查所有Trader进程的连接状态"
+      cron_expression: "0 0,30 8-22 * * *"  # 每半小时 8:00-22:00
+      job_method: "trader_health_check"
+      enabled: true
+
+    # 清理告警
+    - job_id: "cleanup_alarms"
+      job_name: "清理告警"
+      job_description: "清理3天前的告警记录"
+      cron_expression: "0 0 3 * * *"  # 每天凌晨 3:00
+      job_method: "cleanup_alarms"
+      enabled: true
+
+    # 清理日志
+    - job_id: "cleanup_logs"
+      job_name: "清理日志"
+      job_description: "清理5天前的日志文件"
+      cron_expression: "0 0 3 * * *"  # 每天凌晨 3:00
+      job_method: "cleanup_logs"
+      enabled: true

@@ -115,7 +115,7 @@ class Trader:
         self.switchPos_manager.start()
         # 启动任务调度器及作业管理器
         self.job_manager = JobManager(
-            self.account_config, self.trading_engine, self.switchPos_manager
+            self.account_config, self.trading_engine, self.switchPos_manager, self.socket_server
         )
         if self.account_config.scheduler:
             self.task_scheduler = TaskScheduler(self.account_config.scheduler, self.job_manager)

@@ -276,3 +276,21 @@ class ContractPo(Base):
 
     def __repr__(self):
         return f"<ContractPo(symbol={self.symbol}, exchange_id={self.exchange_id}, update_date={self.update_date})>"
+
+
+class StrategyPositionPo(Base):
+    """策略持仓记录表"""
+
+    __tablename__ = "strategy_positions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_id = Column(String(50), nullable=False, index=True)
+    trading_date = Column(String(10), nullable=False, index=True)  # YYYY-MM-DD
+    strategy_id = Column(String(100), nullable=False, index=True)
+    long_volume = Column(Integer, nullable=False, default=0)  # 多头手数
+    short_volume = Column(Integer, nullable=False, default=0)  # 空头手数
+    avg_price = Column(Numeric(20, 4), nullable=True)  # 持仓均价
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    def __repr__(self):
+        return f"<StrategyPositionPo(account_id={self.account_id}, strategy_id={self.strategy_id}, trading_date={self.trading_date}, long={self.long_volume}, short={self.short_volume})>"
