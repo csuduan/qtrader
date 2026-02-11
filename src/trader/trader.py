@@ -671,7 +671,9 @@ class Trader:
                 base_params=base_params,
                 ext_params=ext_params,
                 signal=strategy.get_signal(),
-                pos_volume=strategy.pos_volume,
+                pos_long=strategy.pos_long,
+                pos_short=strategy.pos_short,
+                pos_volume=strategy.pos_long - strategy.pos_short,
                 pos_price=strategy.pos_price,
                 trading_status=strategy.get_trading_status(),
             )
@@ -702,7 +704,9 @@ class Trader:
                 base_params=base_params,
                 ext_params=ext_params,
                 signal=strategy.get_signal(),
-                pos_volume=strategy.pos_volume,
+                pos_long=strategy.pos_long,
+                pos_short=strategy.pos_short,
+                pos_volume=strategy.pos_long - strategy.pos_short,
                 pos_price=strategy.pos_price,
                 trading_status=strategy.get_trading_status(),
             )
@@ -845,7 +849,7 @@ class Trader:
             return {"success": False, "message": f"策略 {strategy_id} 不存在"}
 
         try:
-            strategy.disable()
+            strategy.enable(False)
             return {"success": True, "message": "禁用策略成功"}
         except Exception as e:
             logger.exception(f"禁用策略失败: {e}")

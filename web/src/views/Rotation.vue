@@ -57,7 +57,7 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="offset" label="开平" width="70" />
+          <el-table-column prop="offset" label="开平" width="120" />
           <el-table-column prop="volume" label="手数" width="70" />
           <el-table-column label="进度" width="120">
             <template #default="{ row }">

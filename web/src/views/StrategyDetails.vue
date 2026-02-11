@@ -178,8 +178,13 @@
         <el-divider content-position="left">当前持仓状态</el-divider>
         <el-row :gutter="20">
           <el-col :span="8">
-            <el-form-item label="持仓手数">
-              <el-input-number v-model="signalForm.pos_volume" :min="0" :max="100" />
+            <el-form-item label="多头持仓">
+              <el-input-number v-model="signalForm.pos_long" :min="0" :max="100" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="8">
+            <el-form-item label="空头持仓">
+              <el-input-number v-model="signalForm.pos_short" :min="0" :max="100" />
             </el-form-item>
           </el-col>
           <el-col :span="8">
@@ -315,7 +320,8 @@ const signalForm = ref<any>({
   exit_time: '',
   exit_price: 0,
   exit_reason: '',
-  pos_volume: 0,
+  pos_long: 0,
+  pos_short: 0,
   pos_price: null
 })
 
@@ -414,8 +420,9 @@ async function loadStrategy() {
       exit_time: signal.exit_time || '',
       exit_price: signal.exit_price || 0,
       exit_reason: signal.exit_reason || '',
-      // 使用API返回的持仓数据
-      pos_volume: strategy.value.pos_volume || 0,
+      // 使用API返回的持仓数据（区分多头和空头）
+      pos_long: strategy.value.pos_long || 0,
+      pos_short: strategy.value.pos_short || 0,
       pos_price: strategy.value.pos_price || null
     }
   } catch (error: any) {

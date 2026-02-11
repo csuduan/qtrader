@@ -65,8 +65,6 @@ class RsiStrategy(BaseStrategy):
         self.signal = None
         self._pending_cmd = None
         self._hist_cmds = {}
-        self.pos_volume = 0
-        self.pos_price = None
         self.trading_day = trading_day
 
         # 本策略临时变量
@@ -76,9 +74,14 @@ class RsiStrategy(BaseStrategy):
         self._short_bar_buf: List[BarData] = []  # 短周期K线缓存
 
         # 创建RsiParam实例
-        if self.config.params:
+        if self.config.params and len(self.config.params) > 0:
             self.param:RsiParam = RsiParam(**self.config.params)
             self.symbol = self.param.symbol
+            self.volume = self.param.volume
+        else:
+            self.enabled = False
+            logger.error(f"策略 [{self.strategy_id}] 未配置参数")
+            return False
 
         # 加载上一个交易日的数据
         hist_bars = self.load_hist_bars(
@@ -137,18 +140,18 @@ class RsiStrategy(BaseStrategy):
 
             bar_time = bar.datetime.time()
             # 强制平仓检查（使用原始K线时间）
-            if self.signal and not self.signal.exit_time and bar_time >= self.param.force_exit_time:
+            if self.signal and  self.signal.side!=0 and not self.signal.exit_time and bar_time >= self.param.force_exit_time:
                 self.signal.exit_price = bar.close_price
-                self.signal.exit_time = bar.datetime
+                self.signal.exit_time = bar_time
                 self.signal.exit_reason = "FORCE"
                 logger.info(f"策略 [{self.strategy_id}] 信号结束: {self.signal}")
 
             # 止盈止损检查
-            if self.signal and not self.signal.exit_time :
+            if self.signal and self.signal.side!=0 and  not self.signal.exit_time :
                 exit_reason = self._check_exit_conditions(bar.close_price, self.signal)
                 if exit_reason:
                     self.signal.exit_price = bar.close_price
-                    self.signal.exit_time = bar.datetime
+                    self.signal.exit_time = bar_time
                     self.signal.exit_reason = exit_reason
                     logger.info(f"策略 [{self.strategy_id}] 信号结束: {self.signal}")
 
@@ -174,7 +177,8 @@ class RsiStrategy(BaseStrategy):
             self.signal = Signal(
                 side=side,
                 entry_price=bar.close_price,
-                entry_time=bar.datetime,
+                entry_time=bar_time,
+                entry_volume=self.volume,
             )
             logger.info(f"策略 [{self.strategy_id}] 信号开始: {self.signal}")
         except Exception as e:

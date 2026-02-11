@@ -70,7 +70,16 @@ export const useStore = defineStore('main', () => {
       filtered = trades.value.filter(trade => trade.account_id === selectedAccountId.value)
     }
     // 按成交时间倒序排列（最新的在前面）
-    return [...filtered].sort((a, b) => b.trade_date_time - a.trade_date_time)
+    // trade_date_time 可能是 number（时间戳）或 string（ISO 格式）
+    return [...filtered].sort((a, b) => {
+      const timeA = typeof a.trade_date_time === 'number'
+        ? a.trade_date_time
+        : new Date(a.trade_date_time).getTime()
+      const timeB = typeof b.trade_date_time === 'number'
+        ? b.trade_date_time
+        : new Date(b.trade_date_time).getTime()
+      return timeB - timeA
+    })
   })
 
   // 当前账户的订单

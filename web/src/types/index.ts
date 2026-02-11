@@ -397,8 +397,12 @@ export interface StrategyRes {
   base_params?: ParamDefinition[]
   ext_params?: ParamDefinition[]
   signal?: StrategySignalData
-  pos_volume: number  // 当前持仓量
-  pos_price: number | null  // 当前持仓均价
+  // 持仓信息（区分多头和空头）
+  pos_long: number  // 多头持仓量
+  pos_short: number  // 空头持仓量
+  pos_price: number | null  // 持仓均价
+  // 保留旧字段以兼容
+  pos_volume?: number  // 净持仓量（pos_long - pos_short）
   trading_status?: string
   opening_paused?: boolean
   closing_paused?: boolean

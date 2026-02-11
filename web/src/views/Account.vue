@@ -44,7 +44,7 @@
         <el-descriptions-item label="保证金占用">
           ¥{{ formatNumber(store.currentAccount.margin) }}
            <el-tag :type="store.currentAccount.risk_ratio > 1 ? 'danger' : 'success'">
-            {{ formatNumber(store.currentAccount.risk_ratio) }}%
+            {{ formatNumber(store.currentAccount.risk_ratio*100) }}%
           </el-tag>
         </el-descriptions-item>
         <el-descriptions-item label="更新时间">{{ formatDateTime(store.currentAccount.updated_at) }}</el-descriptions-item>

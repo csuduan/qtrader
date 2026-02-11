@@ -23,7 +23,7 @@
         </template>
         <el-table-column prop="strategy_id" label="策略ID" width="180" fixed />
         <el-table-column prop="config.symbol" label="合约" width="120" />
-        <el-table-column prop="config.bar" label="时间类型" width="100">
+        <el-table-column prop="config.bar" label="K线" width="100">
           <template #default="{ row }">
             <el-tag size="small" type="info">{{ row.config.bar || '-' }}</el-tag>
           </template>
@@ -37,36 +37,47 @@
             />
           </template>
         </el-table-column>
-        <el-table-column label="暂停开仓" width="100">
+        <el-table-column label="停开" width="80">
           <template #default="{ row }">
             <el-checkbox
               v-model="row.opening_paused"
+              :class="{ 'checkbox-paused': row.opening_paused }"
               @change="handleToggleOpeningPaused(row.strategy_id, row.opening_paused)"
             />
           </template>
         </el-table-column>
-        <el-table-column label="暂停平仓" width="100">
+        <el-table-column label="停平" width="80">
           <template #default="{ row }">
             <el-checkbox
               v-model="row.closing_paused"
+              :class="{ 'checkbox-paused': row.closing_paused }"
               @change="handleToggleClosingPaused(row.strategy_id, row.closing_paused)"
             />
           </template>
         </el-table-column>
-        <el-table-column label="信号" width="100">
+        <el-table-column label="持仓" width="100" align="center">
+          <template #default="{ row }">
+            <div class="position-info">
+              <span class="pos-long">{{ row.pos_long }}</span>
+              <span class="pos-separator">|</span>
+              <span class="pos-short">{{ row.pos_short }}</span>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="信号" width="100" align="center">
           <template #default="{ row }">
             <el-tooltip v-if="row.signal && row.signal.side !== 0" placement="left" :show-after="200">
               <template #content>
                 <div class="signal-detail">
                   <div>方向: <span :class="row.signal.side > 0 ? 'text-long' : 'text-short'">{{ row.signal.side > 0 ? '多头' : '空头' }}</span></div>
                   <div v-if="row.signal.entry_price">入场价: {{ row.signal.entry_price.toFixed(2) }}</div>
-                  <div v-if="row.signal.entry_time">入场时间: {{ formatDateTime(row.signal.entry_time) }}</div>
+                  <div v-if="row.signal.entry_time">入场时间: {{ row.signal.entry_time }}</div>
                   <div v-if="row.signal.entry_volume">目标手数: {{ row.signal.entry_volume }}</div>
                   <div v-if="row.signal.pos_volume">持仓手数: {{ row.signal.pos_volume }}</div>
                   <div v-if="row.signal.pos_price">持仓均价: {{ row.signal.pos_price.toFixed(2) }}</div>
                   <div v-if="row.signal.exit_time" class="exit-info">
                     <div>退出价: {{ row.signal.exit_price?.toFixed(2) || '-' }}</div>
-                    <div>退出时间: {{ formatDateTime(row.signal.exit_time) }}</div>
+                    <div>退出时间: {{ row.signal.exit_time }}</div>
                     <div>退出原因: {{ getExitReasonText(row.signal.exit_reason) }}</div>
                   </div>
                 </div>
@@ -75,14 +86,15 @@
                 {{ row.signal.side > 0 ? '多' : '空' }}
               </el-tag>
             </el-tooltip>
-            <el-tag v-else type="info" size="small">无</el-tag>
+            <span v-else class="text-empty">-</span>
           </template>
         </el-table-column>
-        <el-table-column label="交易状态" width="100">
+        <el-table-column label="交易状态" width="100" align="center">
           <template #default="{ row }">
-            <el-tag :type="getTradingStatusType(row.trading_status)" size="small">
-              {{ row.trading_status || '无' }}
+            <el-tag v-if="row.trading_status" :type="getTradingStatusType(row.trading_status)" size="small">
+              {{ row.trading_status }}
             </el-tag>
+            <span v-else class="text-empty">-</span>
           </template>
         </el-table-column>
         <el-table-column label="操作">
@@ -122,17 +134,6 @@ const replayAllLoading = ref(false)
 
 function navigateToDetails(strategyId: string) {
   router.push(`/strategy/${strategyId}`)
-}
-
-function formatDateTime(dateStr: string | undefined): string {
-  if (!dateStr) return '-'
-  const date = new Date(dateStr)
-  return date.toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
-  })
 }
 
 function getExitReasonText(reason: string | undefined): string {
@@ -295,5 +296,46 @@ onMounted(async () => {
   margin-left: 8px;
   color: var(--el-text-color-secondary);
   font-size: 12px;
+}
+
+.position-info {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.pos-separator {
+  color: var(--el-text-color-secondary);
+  margin: 0 2px;
+}
+
+.pos-long {
+  color: var(--el-color-danger);
+  font-weight: 500;
+}
+
+.pos-short {
+  color: var(--el-color-success);
+  font-weight: 500;
+}
+
+.pos-price {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.text-empty {
+  color: var(--el-text-color-placeholder);
+}
+
+/* 勾选状态的 checkbox 显示红色 */
+.checkbox-paused :deep(.el-checkbox__input.is-checked .el-checkbox__inner) {
+  background-color: var(--el-color-danger);
+  border-color: var(--el-color-danger);
+}
+
+.checkbox-paused :deep(.el-checkbox__input.is-checked + .el-checkbox__label) {
+  color: var(--el-color-danger);
 }
 </style>

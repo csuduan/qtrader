@@ -338,7 +338,7 @@ class OrderCmd:
         traded = order.traded if order.traded is not None else 0
         if traded > 0:
             # 更新报单指令
-            traded_price = order.traded_price if order.traded_price is not None else 0.0
+            traded_price = order.traded_price or 0.0
             total_cost = self.filled_volume * self.filled_price + traded * traded_price
             self.filled_volume += traded
             if self.filled_volume > 0:

@@ -208,7 +208,7 @@ class TestBaseStrategyInitialization:
     def test_signal_and_position_initialization(self, strategy: BaseStrategy):
         """测试信号和持仓初始化为空"""
         assert strategy.signal is None
-        assert strategy.pos_volume == 0
+        assert strategy.pos_long == 0
         assert strategy.pos_price is None
 
     def test_pause_state_initial_values(self, strategy: BaseStrategy):
@@ -253,12 +253,12 @@ class TestBaseStrategyInit:
 
     def test_init_resets_position(self, strategy: BaseStrategy):
         """测试重置持仓 (pos_volume=0, pos_price=None)"""
-        strategy.pos_volume = 10
+        strategy.pos_long = 10
         strategy.pos_price = 3500.0
 
         strategy.init(datetime.now())
 
-        assert strategy.pos_volume == 0
+        assert strategy.pos_long == 0
         assert strategy.pos_price is None
 
     def test_init_parses_params_from_config(self, strategy: BaseStrategy):
@@ -378,7 +378,7 @@ class TestBaseStrategyExecuteSignal:
     async def test_execute_signal_with_exit_signal(self, strategy: BaseStrategy):
         """测试平仓信号：发送平仓指令"""
         strategy.init(datetime.now())
-        strategy.pos_volume = 5
+        strategy.pos_long = 5
         strategy.signal = Signal(side=1, exit_time=datetime.now())
 
         await strategy.execute_signal()
@@ -424,7 +424,7 @@ class TestBaseStrategyExecuteSignal:
     async def test_execute_signal_respects_position_volume(self, strategy: BaseStrategy):
         """测试持仓数量检查"""
         strategy.init(datetime.now())
-        strategy.pos_volume = 5
+        strategy.pos_long = 5
         strategy.signal = Signal(side=1, entry_time=datetime.now())
 
         await strategy.execute_signal()
@@ -454,13 +454,13 @@ class TestBaseStrategyOnCmdChange:
 
         strategy._on_cmd_change(cmd)
 
-        assert strategy.pos_volume == 5
+        assert strategy.pos_long == 5
         assert strategy.pos_price == 3500.0
         assert strategy._pending_cmd is None
 
     def test_on_cmd_change_close_order_reduces_position(self, strategy: BaseStrategy):
         """测试平仓指令完成减少持仓"""
-        strategy.pos_volume = 10
+        strategy.pos_long = 10
         strategy.pos_price = 3500.0
 
         cmd = OrderCmd(
@@ -476,7 +476,7 @@ class TestBaseStrategyOnCmdChange:
 
         strategy._on_cmd_change(cmd)
 
-        assert strategy.pos_volume == 5
+        assert strategy.pos_long == 5
         assert strategy._pending_cmd is None
 
     def test_on_cmd_change_rejected_sets_pause(self, strategy: BaseStrategy):
@@ -511,7 +511,7 @@ class TestBaseStrategyOnCmdChange:
 
     def test_on_cmd_change_ignores_non_pending_cmd(self, strategy: BaseStrategy):
         """测试非自己指令忽略"""
-        strategy.pos_volume = 5
+        strategy.pos_long = 5
         other_cmd = OrderCmd(
             symbol="SHFE.rb2505",
             direction=Direction.BUY,
@@ -522,10 +522,10 @@ class TestBaseStrategyOnCmdChange:
         other_cmd._cancel("全部完成")
         # 不设置为 pending_cmd
 
-        original_volume = strategy.pos_volume
+        original_volume = strategy.pos_long
         strategy._on_cmd_change(other_cmd)
 
-        assert strategy.pos_volume == original_volume
+        assert strategy.pos_long == original_volume
 
 
 # ==================== TestBaseStrategyTradingStatus ====================
