@@ -424,3 +424,16 @@ class OrderCmdFinishReason(str, Enum):
     CANCELLED = "CANCELLED"  # 已取消
     TIMEOUT = "TIMEOUT"  # 超时
     ORDER_ERROR = "ORDER_ERROR"  # 报单异常
+
+
+class AlarmData(BaseModel):
+    """告警数据传输对象"""
+
+    account_id: str = Field(..., description="账户ID")
+    alarm_date: str = Field(..., description="告警日期 YYYY-MM-DD")
+    alarm_time: str = Field(..., description="告警时间 HH:MM:SS")
+    source: str = Field(..., description="告警来源 TRADER/MANAGER")
+    title: str = Field(..., description="告警标题")
+    detail: Optional[str] = Field(None, description="告警详情")
+    status: str = Field(default="UNCONFIRMED", description="告警状态")
+    created_at: DateTime = Field(default_factory=DateTime.now, description="创建时间")

@@ -19,21 +19,13 @@
             {{ getBrokerTypeName(store.currentAccount.broker_type) }}
           </el-tag>
         </el-descriptions-item>
-        <el-descriptions-item label="币种">{{ store.currentAccount.currency }}</el-descriptions-item>
-        <el-descriptions-item label="风险率">
-          <el-tag :type="store.currentAccount.risk_ratio > 1 ? 'danger' : 'success'">
-            {{ formatNumber(store.currentAccount.risk_ratio) }}%
-          </el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="总资产" :span="2">
+        <el-descriptions-item label="总资产">
           <span class="balance">¥{{ formatNumber(store.currentAccount.balance) }}</span>
         </el-descriptions-item>
         <el-descriptions-item label="可用资金">
           <span class="available">¥{{ formatNumber(store.currentAccount.available) }}</span>
         </el-descriptions-item>
-        <el-descriptions-item label="保证金占用">
-          ¥{{ formatNumber(store.currentAccount.margin) }}
-        </el-descriptions-item>
+    
         <el-descriptions-item label="浮动盈亏">
           <span :class="store.currentAccount.float_profit >= 0 ? 'profit' : 'loss'">
             ¥{{ formatNumber(store.currentAccount.float_profit) }}
@@ -48,6 +40,12 @@
           <span :class="store.currentAccount.close_profit >= 0 ? 'profit' : 'loss'">
             ¥{{ formatNumber(store.currentAccount.close_profit) }}
           </span>
+        </el-descriptions-item>
+        <el-descriptions-item label="保证金占用">
+          ¥{{ formatNumber(store.currentAccount.margin) }}
+           <el-tag :type="store.currentAccount.risk_ratio > 1 ? 'danger' : 'success'">
+            {{ formatNumber(store.currentAccount.risk_ratio) }}%
+          </el-tag>
         </el-descriptions-item>
         <el-descriptions-item label="更新时间">{{ formatDateTime(store.currentAccount.updated_at) }}</el-descriptions-item>
       </el-descriptions>
@@ -70,6 +68,9 @@
         v-loading="loading"
         table-layout="fixed"
       >
+        <template #empty>
+          <el-empty description="暂无持仓" />
+        </template>
         <el-table-column prop="symbol" label="合约" width="150" fixed>
           <template #default="{ row }">
             {{ row.symbol }}
@@ -97,15 +98,15 @@
             {{ row.pos_short > 0 ? formatNumber(row.open_price_short) : '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="margin" label="保证金" width="110">
+        <el-table-column label="保证金" width="110">
           <template #default="{ row }">
-            ¥{{ formatNumber(row.margin) }}
+            ¥{{ formatNumber((row.margin_long || 0) + (row.margin_short || 0)) }}
           </template>
         </el-table-column>
-        <el-table-column prop="float_profit" label="浮动盈亏" width="130">
+        <el-table-column label="浮动盈亏" width="130">
           <template #default="{ row }">
-            <span :class="row.float_profit >= 0 ? 'profit' : 'loss'">
-              ¥{{ formatNumber(row.float_profit) }}
+            <span :class="(row.float_profit_long || 0) + (row.float_profit_short || 0) >= 0 ? 'profit' : 'loss'">
+              ¥{{ formatNumber((row.float_profit_long || 0) + (row.float_profit_short || 0)) }}
             </span>
           </template>
         </el-table-column>
@@ -135,8 +136,6 @@
           </template>
         </el-table-column>
       </el-table>
-
-      <el-empty v-if="store.currentPositions.length === 0" description="暂无持仓" />
     </el-card>
 
     <el-dialog v-model="showCloseDialog" title="确认平仓" width="500px">

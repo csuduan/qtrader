@@ -460,6 +460,28 @@ export interface OrderCmd {
 /** 报单指令响应（用于前端显示） */
 export type OrderCmdRes = OrderCmd
 
+/** 合约信息 */
+export interface ContractInfo {
+  symbol: string
+  exchange_id: string
+  name: string
+  product_type: string
+  volume_multiple: number
+  price_tick: number
+  min_volume: number
+  option_strike: number | null
+  option_underlying: string | null
+  option_type: string | null
+  update_date: string
+  updated_at: string | null
+}
+
+/** 交易所信息 */
+export interface ExchangeInfo {
+  exchange_id: string
+  contract_count: number
+}
+
 /** 策略操作状态 */
 export interface StrategyOperationState {
   enabled: boolean

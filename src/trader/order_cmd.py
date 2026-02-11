@@ -368,6 +368,9 @@ class OrderCmd:
             #指令已完成或者取消中
             return
 
+        if not "全部完成" in reason:
+            logger.error(f"报单指令取消：{reason}")
+
         # 检查是否有未完成的挂单
         if self._pending_order and self._pending_order.is_active():
             # 有挂单需要撤销，进入取消中状态

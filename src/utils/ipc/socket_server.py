@@ -563,6 +563,19 @@ class SocketServer:
         """
         return any(conn.is_connected() for conn in self._clients.values())
 
+    async def send_push(self, push_type: str, data: Dict[str, Any]) -> bool:
+        """
+        发送推送消息到所有Manager客户端
+
+        Args:
+            push_type: 推送类型 (account, order, trade, position, tick, alarm, heartbeat)
+            data: 推送数据
+
+        Returns:
+            是否至少一个客户端发送成功
+        """
+        return await self.send_message(push_type, data)
+
     async def send_heartbeat(self) -> bool:
         """
         发送心跳到所有连接
@@ -570,4 +583,4 @@ class SocketServer:
         Returns:
             是否至少一个客户端发送成功
         """
-        return await self.send_message("heartbeat", {})
+        return await self.send_push("heartbeat", {})

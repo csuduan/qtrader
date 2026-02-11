@@ -18,6 +18,9 @@
       </template>
 
       <el-table :data="strategies" stripe v-loading="loading" table-layout="auto">
+        <template #empty>
+          <el-empty description="暂无策略" />
+        </template>
         <el-table-column prop="strategy_id" label="策略ID" width="180" fixed />
         <el-table-column prop="config.symbol" label="合约" width="120" />
         <el-table-column prop="config.bar" label="时间类型" width="100">
@@ -94,8 +97,6 @@
           </template>
         </el-table-column>
       </el-table>
-
-      <el-empty v-if="strategies.length === 0" description="暂无策略" />
     </el-card>
   </div>
 </template>

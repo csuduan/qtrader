@@ -40,6 +40,9 @@
             table-layout="fixed"
             @selection-change="handleSelectionChange"
           >
+            <template #empty>
+              <el-empty description="暂无换仓指令" />
+            </template>
           <el-table-column type="selection" width="55" />
           <el-table-column prop="strategy_id" label="策略编号" width="150" />
           <el-table-column label="合约" width="150" fixed>
@@ -94,8 +97,6 @@
             </template>
           </el-table-column>
         </el-table>
-
-        <el-empty v-if="instructions.length === 0" description="暂无换仓指令" />
       </el-card>
 
     <!-- 导入CSV对话框 -->

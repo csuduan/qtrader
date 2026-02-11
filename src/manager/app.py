@@ -32,7 +32,7 @@ from src.manager.api.websocket_manager import websocket_manager
 from src.manager.manager import TradingManager
 from src.utils.config_loader import AccountConfig, DatabaseConfig, get_config_loader
 from src.utils.database import Database, get_database, init_database
-from src.utils.event_engine import Event, EventEngine, EventTypes
+from src.utils.async_event_engine import Event, AsyncEventEngine
 from src.utils.logger import get_logger, setup_logger
 
 logger = get_logger(__name__)
@@ -98,7 +98,7 @@ async def lifespan(app: FastAPI):
     all_accounts = _app_config.accounts
     active_accounts = [acc for acc in all_accounts if acc.enabled]
     disabled_accounts = [acc for acc in all_accounts if not acc.enabled]
-    _event_engine = EventEngine()
+    _event_engine = AsyncEventEngine()
     _event_engine.start()
     # 创建交易管理器（传入账户配置）
     _trading_manager = TradingManager(all_accounts)

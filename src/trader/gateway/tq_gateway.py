@@ -8,6 +8,7 @@ import asyncio
 import queue
 import threading
 import time
+import math
 from contextlib import closing
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Set, Union
@@ -37,9 +38,11 @@ from src.models.object import (
     TickData,
     TradeData,
 )
+from src.models.po import ContractPo
 from src.trader.gateway.base_gateway import BaseGateway
 from src.utils.async_event_engine import AsyncEventEngine
 from src.utils.config_loader import GatewayConfig
+from src.utils.database import get_database
 from src.utils.logger import get_logger
 from src.app_context import get_app_context
 
@@ -118,6 +121,12 @@ class TqGateway(BaseGateway):
             if self._running:
                 logger.warning("TqSdk已启动，无需重复启动")
                 return True
+
+            # 先尝试从数据库加载今天的合约信息
+            today = datetime.now().strftime("%Y-%m-%d")
+            result = self._load_contracts_from_db(today)
+            if result is not None:
+                logger.info(f"从数据库加载了 {len(self._contracts)} 个合约信息")
 
             # 启动tq主线程
             self._tq_thead = threading.Thread(target=self._tq_run, name=f"TqSdk_Thread", daemon=True)
@@ -230,6 +239,10 @@ class TqGateway(BaseGateway):
             if not self.connected:
                 logger.error("TqSdk未连接")
                 return None
+            
+            # 调用TqSdk下单
+            if self.api is None:
+                raise Exception("TqSdk未连接")
 
             formatted_symbol = self._format_symbol(req.symbol)
             if not formatted_symbol:
@@ -240,7 +253,7 @@ class TqGateway(BaseGateway):
             price = req.price
             if price is None or price == 0:
                 quote = self._quotes.get(formatted_symbol)
-                if not quote:
+                if not quote or math.isnan(quote.last_price):
                     logger.error(f"未获取到行情信息: {formatted_symbol}")
                     raise Exception(f"未获取到行情信息: {formatted_symbol}")
 
@@ -250,9 +263,7 @@ class TqGateway(BaseGateway):
                 else:
                     price = quote.bid_price1
 
-            # 调用TqSdk下单
-            if self.api is None:
-                raise Exception("TqSdk未连接")
+
             order = self.api.insert_order(
                 symbol=formatted_symbol,
                 direction=req.direction.value,
@@ -292,6 +303,153 @@ class TqGateway(BaseGateway):
         except Exception as e:
             logger.exception(f"撤单失败: {e}")
             raise e
+
+
+    def _load_contracts_from_db(self, update_date: str) -> Optional[Dict[str, ContractData]]:
+        """
+        从数据库加载指定更新日期的合约信息
+
+        Args:
+            update_date: 更新日期 (YYYY-MM-DD)
+
+        Returns:
+            合约信息字典，如果没有则返回None
+        """
+        try:
+            db = get_database()
+            if not db:
+                logger.warning("数据库未初始化，无法加载合约信息")
+                return None
+
+            with db.get_session() as session:
+                contract_pos = (
+                    session.query(ContractPo)
+                    .filter(ContractPo.update_date == update_date)
+                    .all()
+                )
+
+                if not contract_pos:
+                    logger.info(f"数据库中没有更新日期为 {update_date} 的合约信息")
+                    return None
+
+                loaded_count = 0
+                for po in contract_pos:
+                    exchange = exchange_map.get(po.exchange_id, Exchange.NONE)
+                    if exchange == Exchange.NONE:
+                        continue
+                    contract = ContractData(
+                        symbol=po.symbol,
+                        exchange=exchange,
+                        name=po.instrument_name or po.symbol,
+                        product_type=ProductType.FUTURES,
+                        multiple=po.volume_multiple,
+                        pricetick=float(po.price_tick),
+                        min_volume=po.min_volume,
+                        option_strike=float(po.option_strike) if po.option_strike else None,
+                        option_underlying=po.option_underlying,
+                        option_type=po.option_type,
+                    )
+                    self._contracts[contract.symbol] = contract
+                    self._upper_symbols[contract.symbol.rsplit(".")[1].upper()] = contract.symbol
+                    loaded_count += 1
+
+                logger.info(f"从数据库加载了 {loaded_count} 个合约信息 (更新日期: {update_date})")
+                return self._contracts
+        except Exception as e:
+            logger.error(f"从数据库加载合约信息失败: {e}")
+            return None
+
+    def _query_and_save_contracts(self, update_date: str) -> None:
+        """
+        从API查询合约信息并保存到数据库
+
+        Args:
+            update_date: 更新日期 (YYYY-MM-DD)
+        """
+        try:
+            if self.api is None:
+                logger.error("TqSdk未连接，无法查询合约信息")
+                return
+
+            # 查询合约列表
+            quotes = self.api.query_quotes(ins_class=["FUTURE"], expired=False)
+            quotes = [x for x in quotes if len(x) >= 10]
+            symbol_infos = self.api.query_symbol_info(quotes)
+            logger.info(f"从API查询到 {len(symbol_infos)} 个合约")
+
+            db = get_database()
+            if not db:
+                logger.warning("数据库未初始化，无法保存合约信息")
+            else:
+                # 确保表已创建
+                try:
+                    db.create_tables()
+                    logger.info("确保合约信息表已创建")
+                except Exception as e:
+                    logger.warning(f"创建表时出现错误（可能是表已存在）: {e}")
+
+            contracts_to_save = []
+
+            for index, item in symbol_infos.iterrows():
+                instrument_id = item.instrument_id
+                if item.exchange_id not in exchange_map:
+                    continue
+
+                exchange = exchange_map[item.exchange_id]
+                contract = ContractData(
+                    symbol=instrument_id,
+                    exchange=exchange,
+                    name=item.instrument_name,
+                    product_type=ProductType.FUTURES,
+                    multiple=item.volume_multiple,
+                    pricetick=item.price_tick,
+                    min_volume=1,
+                    option_strike=None,
+                    option_underlying=None,
+                    option_type=None,
+                )
+                self._contracts[contract.symbol] = contract
+                self._upper_symbols[contract.symbol.rsplit(".")[1].upper()] = contract.symbol
+
+                # 准备保存到数据库的数据
+                if db:
+                    contract_po = ContractPo(
+                        symbol=instrument_id,
+                        exchange_id=item.exchange_id,
+                        instrument_name=item.instrument_name,
+                        product_type="FUTURES",
+                        volume_multiple=item.volume_multiple,
+                        price_tick=item.price_tick,
+                        min_volume=1,
+                        option_strike=None,
+                        option_underlying=None,
+                        option_type=None,
+                        update_date=update_date,
+                    )
+                    contracts_to_save.append(contract_po)
+
+            logger.info(f"从API加载了 {len(self._contracts)} 个合约信息，准备保存 {len(contracts_to_save)} 个到数据库")
+
+            # 批量保存到数据库
+            if db and contracts_to_save:
+                try:
+                    with db.get_session() as session:
+                        # 先删除今天之前的数据
+                        deleted_count = session.query(ContractPo).filter(
+                            ContractPo.update_date < update_date
+                        ).delete(synchronize_session=False)
+                        logger.info(f"删除了 {deleted_count} 条旧合约信息")
+                        # 批量插入新数据
+                        session.add_all(contracts_to_save)
+                        session.commit()
+                        logger.info(f"成功保存 {len(contracts_to_save)} 个合约信息到数据库")
+                except Exception as e:
+                    logger.error(f"保存合约信息到数据库失败: {e}", exc_info=True)
+
+            logger.info(f"成功从API加载 {len(self._contracts)} 个合约信息")
+
+        except Exception as e:
+            logger.error(f"从API查询合约信息失败: {e}", exc_info=True)
 
     def get_contracts(self) -> Dict[str, ContractData]:
         """查询合约（兼容）"""
@@ -351,7 +509,7 @@ class TqGateway(BaseGateway):
         """获取K线数据"""
         try:
             if not self.connected or not self.api:
-                logger.error("TqSdk未连接")
+                logger.warning("TqSdk未连接")
                 return None
 
             kline_data = self._klines.get((symbol, interval))  # type: ignore[call-overload]
@@ -695,29 +853,9 @@ class TqGateway(BaseGateway):
             # 发送初始数据
             self._push_account(self._convert_account(self._account))
 
-            # 获取合约列表
-            ls = self.api.query_quotes(ins_class=["FUTURE"], expired=False)
-            ls = [x for x in ls if len(x)>=10]
-            symbol_infos = self.api.query_symbol_info(ls)
-            for index, item in symbol_infos.iterrows():
-                instrument_id = item.instrument_id
-                if item.exchange_id not in exchange_map:
-                    continue
-                contract = ContractData(
-                    symbol=instrument_id,
-                    exchange=exchange_map[item.exchange_id],
-                    name=item.instrument_name,
-                    product_type=ProductType.FUTURES,
-                    multiple=item.volume_multiple,
-                    pricetick=item.price_tick,
-                    min_volume=1,
-                    option_strike=None,
-                    option_underlying=None,
-                    option_type=None,
-                )
-                self._contracts[contract.symbol] = contract
-                self._upper_symbols[contract.symbol.rsplit(".")[1].upper()] = contract.symbol
-            logger.info(f"成功加载{len(self._contracts)}个合约")
+            # 加载合约列表：先从数据库加载今天的，如果没有则从API查询
+            if len(self._contracts) <= 0:
+                self._query_and_save_contracts(datetime.now().strftime("%Y-%m-%d"))
 
             self.connected = True
             self.trading_day = self.get_trading_day()

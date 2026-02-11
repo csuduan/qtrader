@@ -141,6 +141,9 @@
           </template>
 
           <el-table :data="tasks" stripe v-loading="loadingTasks" height="300" table-layout="fixed">
+            <template #empty>
+              <el-empty description="暂无定时任务" />
+            </template>
             <el-table-column prop="job_name" label="任务名称" min-width="200" />
             <el-table-column prop="job_group" label="分组" width="120" />
             <el-table-column prop="job_description" label="描述" min-width="200" show-overflow-tooltip />
@@ -190,8 +193,6 @@
               </template>
             </el-table-column>
           </el-table>
-
-          <el-empty v-if="tasks.length === 0" description="暂无定时任务" />
         </el-card>
       </el-col>
     </el-row>

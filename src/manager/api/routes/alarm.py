@@ -157,3 +157,43 @@ async def confirm_alarm(
         return error_response(code=500, message=f"确认告警失败: {str(e)}")
     finally:
         session.close()
+
+
+@router.post("/confirm_all")
+async def confirm_all_alarms(
+    req: Optional[AlarmConfirmReq] = None,
+    request: Request = None,
+):
+    """
+    批量确认所有未处理的告警
+
+    将所有状态为 UNCONFIRMED 的告警改为 CONFIRMED
+    支持按账户ID筛选
+
+    返回确认的告警数量
+    """
+    db = get_db(request)
+    session: Session = db.get_session_sync()
+    try:
+        # 构建查询条件
+        query = session.query(AlarmPo).filter(AlarmPo.status == "UNCONFIRMED")
+
+        # 如果提供了账户ID，按账户筛选
+        account_id = None
+        if req and req.account_id:
+            account_id = req.account_id
+            query = query.filter(AlarmPo.account_id == account_id)
+
+        # 批量更新
+        confirmed_count = query.update({"status": "CONFIRMED"}, synchronize_session=False)
+        session.commit()
+
+        return success_response(
+            data={"confirmed_count": confirmed_count}, message=f"已确认 {confirmed_count} 条告警"
+        )
+    except Exception as e:
+        session.rollback()
+        logger.exception(f"批量确认告警失败: {e}")
+        return error_response(code=500, message=f"批量确认告警失败: {str(e)}")
+    finally:
+        session.close()

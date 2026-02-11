@@ -64,8 +64,8 @@
                     v-for="acc in sortedAccounts"
                     :key="acc.account_id"
                     :command="acc.account_id"
-                    :class="{ 'is-selected': acc.account_id === store.selectedAccountId, 'is-disabled': !acc.connected }"
-                    :disabled="!acc.connected"
+                    :class="{ 'is-selected': acc.account_id === store.selectedAccountId, 'is-disabled': acc.status !== 'connected' }"
+                    :disabled="acc.status !== 'connected'"
                   >
                     <div class="account-dropdown-item">
                       <span class="account-name">{{ acc.account_id }}</span>
@@ -83,30 +83,8 @@
               </el-button>
               <template #dropdown>
                 <el-dropdown-menu>
-                  <!-- 未启动状态：显示启动 -->
-                  <el-dropdown-item
-                    :command="{ action: 'start_trader' }"
-                    v-if="isAccountStopped(store.currentAccount)"
-                  >
-                    <el-icon><VideoPlay /></el-icon>
-                    启动
-                  </el-dropdown-item>
-
-                  <!-- 已启动但未连接状态：显示停止 -->
-                  <el-dropdown-item
-                    :command="{ action: 'stop_trader' }"
-                    v-if="isAccountStarting(store.currentAccount)"
-                  >
-                    <el-icon><VideoPause /></el-icon>
-                    停止
-                  </el-dropdown-item>
-
-                  <!-- 已连接状态：显示停止、连接网关、断开网关、暂停交易、恢复交易 -->
+                  <!-- 已连接状态：显示连接网关、断开网关、暂停交易、恢复交易 -->
                   <template v-if="isAccountConnected(store.currentAccount)">
-                    <el-dropdown-item :command="{ action: 'stop_trader' }">
-                      <el-icon><VideoPause /></el-icon>
-                      停止
-                    </el-dropdown-item>
                     <el-dropdown-item
                       :command="{ action: 'connect_gateway' }"
                       v-if="!store.currentAccount?.gateway_connected"
@@ -198,8 +176,8 @@ function formatNumber(num: number): string {
 // 排序后的账户列表：已连接的在前
 const sortedAccounts = computed(() => {
   return [...store.accounts].sort((a, b) => {
-    const aConnected = a.connected === true
-    const bConnected = b.connected === true
+    const aConnected = a.status === 'connected'
+    const bConnected = b.status === 'connected'
     if (aConnected === bConnected) return 0
     return aConnected ? -1 : 1
   })
@@ -230,7 +208,7 @@ function getStatusDotClass(acc: Account | null | undefined) {
 function handleSwitchAccount(accountId: string) {
   // 检查账户是否已连接
   const account = store.accounts.find(acc => acc.account_id === accountId)
-  if (!account || !account.connected) {
+  if (!account || account.status !== 'connected') {
     return
   }
   store.switchAccount(accountId)

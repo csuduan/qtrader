@@ -420,12 +420,66 @@ class TraderProxy:
             event_type = EventTypes.POSITION_UPDATE
         elif data_type == "tick":
             event_type = EventTypes.TICK_UPDATE
+        elif data_type == "alarm":
+            # 告警类型：保存到数据库并触发事件
+            self._handle_alarm_data(data)
+            return
 
         if event_type:
             event_engine = ctx.get_event_engine()
             if event_engine:
                 event_engine.put(event_type, data)
                 logger.debug(f"推送事件 [{event_type}] 从Trader [{self.account_id}]")
+
+    def _handle_alarm_data(self, data: Dict) -> None:
+        """
+        处理告警数据
+        保存到数据库并触发告警更新事件
+
+        Args:
+            data: 告警数据
+        """
+        from src.models.po import AlarmPo
+        from src.utils.database import get_database
+
+        db = get_database()
+
+        try:
+            with db.get_session() as session:
+                alarm = AlarmPo(
+                    account_id=data.get("account_id", self.account_id),
+                    alarm_date=data.get("alarm_date"),
+                    alarm_time=data.get("alarm_time"),
+                    source=data.get("source", "TRADER"),
+                    title=data.get("title"),
+                    detail=data.get("detail"),
+                    status=data.get("status", "UNCONFIRMED"),
+                )
+                session.add(alarm)
+                session.commit()
+                session.refresh(alarm)
+
+                logger.info(f"告警已保存到数据库: {alarm.title}")
+
+                # 触发告警更新事件
+                event_engine = ctx.get_event_engine()
+                if event_engine:
+                    alarm_dict = {
+                        "id": alarm.id,
+                        "account_id": alarm.account_id,
+                        "alarm_date": alarm.alarm_date,
+                        "alarm_time": alarm.alarm_time,
+                        "source": alarm.source,
+                        "title": alarm.title,
+                        "detail": alarm.detail,
+                        "status": alarm.status,
+                        "created_at": alarm.created_at.isoformat(),
+                    }
+                    event_engine.put(EventTypes.ALARM_UPDATE, alarm_dict)
+                    logger.debug(f"推送告警更新事件: {alarm.title}")
+
+        except Exception as e:
+            logger.error(f"处理告警数据失败: {e}")
 
     # ==================== 数据查询接口 ====================
 

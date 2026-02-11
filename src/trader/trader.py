@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 from src.app_context import AppContext, get_app_context
+from src.trader.alarm_handler import TraderAlarmHandler
 from src.trader.job_mgr import JobManager
 from src.trader.strategy_manager import StrategyManager
 from src.trader.trading_engine import TradingEngine
@@ -18,7 +19,7 @@ from src.utils.async_event_engine import AsyncEventEngine
 from src.utils.config_loader import TraderConfig
 from src.utils.event_engine import EventTypes
 from src.utils.ipc import SocketServer, request
-from src.utils.logger import get_logger
+from src.utils.logger import get_logger, logger
 from src.utils.scheduler import TaskScheduler
 
 logger = get_logger(__name__)
@@ -98,6 +99,11 @@ class Trader:
         self._server_task = asyncio.create_task(self.socket_server.start())
         await asyncio.sleep(0.2)
         logger.info(f"Trader [{self.account_id}] SocketServer已启动，继续初始化...")
+
+        # 启用Trader端告警处理器
+        alarm_handler = TraderAlarmHandler(self.account_id, self.socket_server)
+        logger.add(lambda msg: asyncio.create_task(alarm_handler(msg)), level="ERROR")
+        logger.info(f"Trader [{self.account_id}] 告警处理器已启用")
 
         # 启动交易引擎
         self.trading_engine = TradingEngine(self.account_config)
@@ -272,28 +278,28 @@ class Trader:
     async def _on_account_update(self, data):
         """账户更新事件处理器"""
         if self.socket_server:
-            await self.socket_server.send_message("account", data.model_dump())
+            await self.socket_server.send_push("account", data.model_dump())
         else:
             logger.info(f"账户更新: {data}")
 
     async def _on_order_update(self, data):
         """订单更新事件处理器"""
         if self.socket_server:
-            await self.socket_server.send_message("order", data.model_dump())
+            await self.socket_server.send_push("order", data.model_dump())
         else:
             logger.info(f"订单更新: {data}")
 
     async def _on_trade_update(self, data):
         """成交更新事件处理器"""
         if self.socket_server:
-            await self.socket_server.send_message("trade", data.model_dump())
+            await self.socket_server.send_push("trade", data.model_dump())
         else:
             logger.info(f"成交更新: {data}")
 
     async def _on_position_update(self, data):
         """持仓更新事件处理器"""
         if self.socket_server:
-            await self.socket_server.send_message("position", data.model_dump())
+            await self.socket_server.send_push("position", data.model_dump())
         else:
             logger.info(f"持仓更新: {data}")
 
@@ -301,6 +307,7 @@ class Trader:
         """行情更新事件处理器"""
         if self.socket_server:
             # 行情数据不实时推送，按需订阅
+            await self.socket_server.send_push("tick", data.model_dump())
             pass
 
     def _register_event_handlers(self) -> None:

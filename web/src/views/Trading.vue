@@ -28,6 +28,9 @@
                 table-layout="fixed"
                 height="calc(100vh - 320px)"
               >
+                <template #empty>
+                  <el-empty description="暂无订阅行情" />
+                </template>
                 <el-table-column prop="symbol" label="合约" width="80" >
                    <template #default="{ row }">
                     {{ row.symbol}}
@@ -49,14 +52,12 @@
                     {{ formatNumber(row.ask_price1) }}
                   </template>
                 </el-table-column>
-                <el-table-column prop="datetime" label="时间" width="80">
+                <el-table-column prop="datetime" label="时间" width="85">
                   <template #default="{ row }">
                     {{ formatTime(row.datetime) }}
                   </template>
                 </el-table-column>
               </el-table>
-
-              <el-empty v-if="quotes.length === 0" description="暂无订阅行情" />
             </el-card>
           </el-col>
 
@@ -90,6 +91,9 @@
                 table-layout="fixed"
                 @selection-change="handleOrderSelectionChange"
               >
+                <template #empty>
+                  <el-empty description="暂无委托单" />
+                </template>
                 <el-table-column prop="order_id" label="委托单ID" width="180" show-overflow-tooltip />
                 <el-table-column prop="symbol" label="合约" width="120" />
                 <el-table-column prop="direction" label="方向" width="80">
@@ -137,8 +141,6 @@
                   </template>
                 </el-table-column>
               </el-table>
-
-              <el-empty v-if="store.currentOrders.length === 0" description="暂无委托单" />
             </el-card>
           </el-col>
         </el-row>
@@ -167,6 +169,9 @@
           </template>
 
           <el-table :data="store.currentTrades" stripe v-loading="loading" height="400">
+            <template #empty>
+              <el-empty description="暂无成交记录" />
+            </template>
             <el-table-column prop="trade_id" label="成交ID" width="180" show-overflow-tooltip />
             <el-table-column prop="symbol" label="合约" width="120" />
             <el-table-column prop="direction" label="方向" width="80">
@@ -190,8 +195,6 @@
               </template>
             </el-table-column>
           </el-table>
-
-          <el-empty v-if="store.currentTrades.length === 0" description="暂无成交记录" />
         </el-card>
       </el-tab-pane>
 
@@ -201,7 +204,7 @@
             <div class="card-header">
               <span>报单指令</span>
               <el-space>
-                <el-radio-group v-model="orderCmdStatus" size="small">
+                <el-radio-group v-model="orderCmdStatus" >
                   <el-radio-button label="active">未完成</el-radio-button>
                   <el-radio-button label="finished">已完成</el-radio-button>
                 </el-radio-group>
@@ -214,6 +217,9 @@
           </template>
 
           <el-table :data="orderCmds" stripe v-loading="loading" height="400">
+            <template #empty>
+              <el-empty description="暂无报单指令" />
+            </template>
             <el-table-column prop="cmd_id" label="指令ID" width="180" show-overflow-tooltip />
             <el-table-column prop="source" label="来源" width="150" show-overflow-tooltip>
               <template #default="{ row }">
@@ -261,8 +267,59 @@
             <el-table-column prop="total_orders" label="总报单数" width="100" />
             <el-table-column prop="finish_reason" label="结束原因" width="180" show-overflow-tooltip />
           </el-table>
+        </el-card>
+      </el-tab-pane>
 
-          <el-empty v-if="orderCmds.length === 0" description="暂无报单指令" />
+      <el-tab-pane label="合约信息" name="contract">
+        <el-card shadow="hover">
+          <template #header>
+            <div class="card-header">
+              <span>合约信息</span>
+              <el-space>
+                <el-select v-model="contractFilter.exchange_id" placeholder="交易所" clearable style="width: 120px" @change="loadContracts">
+                  <el-option label="全部" value="" />
+                  <el-option v-for="ex in exchanges" :key="ex.exchange_id" :label="`${ex.exchange_id} (${ex.contract_count})`" :value="ex.exchange_id" />
+                </el-select>
+                <el-input v-model="contractFilter.symbol_keyword" placeholder="合约代码" clearable style="width: 150px" @keyup.enter="loadContracts" />
+                <el-button type="primary" @click="loadContracts" :loading="loading">
+                  <el-icon><Refresh /></el-icon>
+                  刷新
+                </el-button>
+              </el-space>
+            </div>
+          </template>
+
+          <el-table :data="contracts" stripe v-loading="loading" height="calc(100vh - 280px)">
+            <template #empty>
+              <el-empty description="暂无合约信息" />
+            </template>
+            <el-table-column prop="symbol" label="合约代码" width="120" fixed />
+            <el-table-column prop="name" label="合约名称" width="200" show-overflow-tooltip />
+            <el-table-column prop="exchange_id" label="交易所" width="100">
+              <template #default="{ row }">
+                <el-tag size="small">{{ row.exchange_id }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="product_type" label="类型" width="80" />
+            <el-table-column prop="volume_multiple" label="合约乘数" width="100" align="right" />
+            <el-table-column prop="price_tick" label="最小变动价位" width="120" align="right">
+              <template #default="{ row }">
+                {{ formatNumber(row.price_tick) }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="min_volume" label="最小手数" width="100" align="right" />
+            <el-table-column prop="option_strike" label="行权价" width="100" align="right">
+              <template #default="{ row }">
+                {{ row.option_strike ? formatNumber(row.option_strike) : '-' }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="option_underlying" label="标的合约" width="120">
+              <template #default="{ row }">
+                {{ row.option_underlying || '-' }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="update_date" label="更新日期" width="110" />
+          </el-table>
         </el-card>
       </el-tab-pane>
     </el-tabs>
@@ -370,9 +427,9 @@
 import { ref, reactive, watch, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useStore } from '@/stores'
-import { orderApi, quoteApi, orderCmdApi } from '@/api'
+import { orderApi, quoteApi, orderCmdApi, contractApi } from '@/api'
 import wsManager from '@/ws'
-import type { ManualOrderRequest, Order, Quote, OrderCmd } from '@/types'
+import type { ManualOrderRequest, Order, Quote, OrderCmd, ContractInfo, ExchangeInfo } from '@/types'
 
 const store = useStore()
 const loading = ref(false)
@@ -392,6 +449,15 @@ const quotes = ref<Quote[]>([])
 const tradeDateFilter = ref(new Date().toISOString().split('T')[0])
 const orderCmds = ref<OrderCmd[]>([])
 const orderCmdStatus = ref<'active' | 'finished'>('active')
+
+// 合约信息相关
+const contracts = ref<ContractInfo[]>([])
+const exchanges = ref<ExchangeInfo[]>([])
+const contractFilter = reactive({
+  exchange_id: '',
+  product_type: '',
+  symbol_keyword: ''
+})
 
 const statusMap: Record<string, string> = {
   'PENDING': 'ALIVE',
@@ -426,10 +492,11 @@ function handleTickUpdate(tickData: Quote) {
 
   const index = quotes.value.findIndex(q => q.symbol === tickData.symbol)
   if (index !== -1) {
-    quotes.value[index] = {
+    // 使用 splice 触发响应式更新
+    quotes.value.splice(index, 1, {
       ...quotes.value[index],
       ...tickData
-    }
+    })
   } else {
     quotes.value.push({
       ...tickData
@@ -477,6 +544,33 @@ async function loadOrderCmdData() {
     ElMessage.error(`加载报单指令失败: ${error.message}`)
   } finally {
     loading.value = false
+  }
+}
+
+async function loadContracts() {
+  loading.value = true
+  try {
+    const params = {
+      ...(contractFilter.exchange_id ? { exchange_id: contractFilter.exchange_id } : {}),
+      ...(contractFilter.symbol_keyword ? { symbol_keyword: contractFilter.symbol_keyword } : {})
+    }
+    contracts.value = await contractApi.getContracts(params)
+    // 如果是第一次加载且没有选择交易所，同时加载交易所列表
+    if (exchanges.value.length === 0) {
+      loadExchanges()
+    }
+  } catch (error: any) {
+    ElMessage.error(`加载合约信息失败: ${error.message}`)
+  } finally {
+    loading.value = false
+  }
+}
+
+async function loadExchanges() {
+  try {
+    exchanges.value = await contractApi.getExchanges()
+  } catch (error: any) {
+    console.error(`加载交易所列表失败: ${error.message}`)
   }
 }
 
@@ -634,6 +728,8 @@ watch(activeTab, (newTab) => {
     loadTradeData()
   } else if (newTab === 'order-cmd') {
     loadOrderCmdData()
+  } else if (newTab === 'contract') {
+    loadContracts()
   }
 })
 
@@ -663,6 +759,8 @@ onMounted(async () => {
     loadTradeData()
   } else if (activeTab.value === 'order-cmd') {
     loadOrderCmdData()
+  } else if (activeTab.value === 'contract') {
+    loadContracts()
   }
 
   wsManager.onTickUpdate(handleTickUpdate)

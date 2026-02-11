@@ -117,7 +117,12 @@ class AlarmHandler:
             except:
                 pass
 
+            # 跳过alarm_handler自身的错误
             if "alarm_handler" in str(module):
+                return
+
+            # 排除Manager模块的异常（只处理Trader推送过来的告警）
+            if "manager" in str(module).lower():
                 return
 
             # 获取日志级别

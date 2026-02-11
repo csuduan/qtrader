@@ -35,15 +35,24 @@
       </el-row>
 
       <el-row :gutter="20" class="mb-4">
-        <el-col :span="12">
+        <el-col :span="18">
           <div style="display: flex; align-items: center;">
             <span style="margin-right: 12px; font-size: 14px;">告警状态:</span>
-            <el-select v-model="statusFilter" @change="handleFilterChange" placeholder="选择告警状态" style="width: 200px;">
-              <el-option label="未处理" value="UNCONFIRMED" />
-              <el-option label="已处理" value="CONFIRMED" />
-              <el-option label="全部" value="" />
-            </el-select>
+            <el-radio-group v-model="statusFilter" @change="handleFilterChange" size="small">
+              <el-radio-button value="UNCONFIRMED">未处理</el-radio-button>
+              <el-radio-button value="CONFIRMED">已处理</el-radio-button>
+            </el-radio-group>
           </div>
+        </el-col>
+        <el-col :span="6" style="text-align: right;">
+          <el-button
+            type="primary"
+            @click="handleConfirmAll"
+            :loading="confirmingAll"
+            :disabled="!hasUnconfirmedAlarms"
+          >
+            全部标记已处理
+          </el-button>
         </el-col>
       </el-row>
 
@@ -80,7 +89,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useStore } from '@/stores'
 import { alarmApi } from '@/api'
@@ -97,8 +106,14 @@ const stats = ref<AlarmStats>({
 })
 const loading = ref(false)
 const confirmingId = ref<number | null>(null)
-const statusFilter = ref<AlarmStatus | ''>('')
+const confirmingAll = ref(false)
+const statusFilter = ref<AlarmStatus | ''>('UNCONFIRMED')
 const statsTimer = ref<number | null>(null)
+
+// 是否有未处理的告警
+const hasUnconfirmedAlarms = computed(() => {
+  return alarms.value.some(a => a.status === 'UNCONFIRMED')
+})
 
 async function loadAlarms() {
   loading.value = true
@@ -134,6 +149,20 @@ async function handleConfirm(alarmId: number) {
     ElMessage.error(`标记失败: ${error.message}`)
   } finally {
     confirmingId.value = null
+  }
+}
+
+async function handleConfirmAll() {
+  confirmingAll.value = true
+  try {
+    const result = await alarmApi.confirmAllAlarms(store.selectedAccountId || undefined)
+    ElMessage.success(`已标记 ${result.confirmed_count} 条告警为已处理`)
+    await loadAlarms()
+    await loadStats()
+  } catch (error: any) {
+    ElMessage.error(`批量标记失败: ${error.message}`)
+  } finally {
+    confirmingAll.value = false
   }
 }
 

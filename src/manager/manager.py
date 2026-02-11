@@ -661,12 +661,11 @@ class TradingManager:
                 logger.warning(f"跳过没有 account_id 的账户配置")
                 continue
             await self.create_trader(account.account_id)
-            if account.enabled:
-                success = await self.start_trader(account.account_id)
-                if success:
-                    logger.info(f"Trader Proxy [{account.account_id}] 启动成功")
-                else:
-                    logger.error(f"Trader Proxy [{account.account_id}] 启动失败")
+            success = await self.start_trader(account.account_id)
+            if success:
+                logger.info(f"Trader Proxy [{account.account_id}] 启动成功")
+            else:
+                logger.error(f"Trader Proxy [{account.account_id}] 启动失败")
 
         logger.info("交易管理器启动完成")
 

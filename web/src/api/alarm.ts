@@ -21,5 +21,11 @@ export const alarmApi = {
     return request.post(`/alarm/confirm/${alarmId}`, {
       ...(accountId ? { account_id: accountId } : {})
     })
+  },
+
+  confirmAllAlarms(accountId?: string): Promise<{ confirmed_count: number }> {
+    return request.post('/alarm/confirm_all', {
+      ...(accountId ? { account_id: accountId } : {})
+    })
   }
 }

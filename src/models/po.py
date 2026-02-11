@@ -252,3 +252,27 @@ class SystemParamPo(Base):
 
     def __repr__(self):
         return f"<SystemParamPo(key={self.param_key}, type={self.param_type}, value={self.param_value})>"
+
+
+class ContractPo(Base):
+    """合约信息表"""
+
+    __tablename__ = "contracts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    symbol = Column(String(80), unique=True, nullable=False, index=True)
+    exchange_id = Column(String(20), nullable=False, index=True)
+    instrument_name = Column(String(100), nullable=True)
+    product_type = Column(String(20), nullable=False, default="FUTURES")
+    volume_multiple = Column(Integer, nullable=False, default=1)
+    price_tick = Column(Numeric(20, 6), nullable=False, default=0.01)
+    min_volume = Column(Integer, nullable=False, default=1)
+    option_strike = Column(Numeric(20, 4), nullable=True)
+    option_underlying = Column(String(80), nullable=True)
+    option_type = Column(String(20), nullable=True)
+    update_date = Column(String(10), nullable=False, index=True)  # YYYY-MM-DD
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    def __repr__(self):
+        return f"<ContractPo(symbol={self.symbol}, exchange_id={self.exchange_id}, update_date={self.update_date})>"
