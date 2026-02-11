@@ -8,8 +8,11 @@ conda activate qts
 # 安装依赖(可选)
 pip install -r requirements.txt
 
-# 运行主服务
-python -m src.main
+# 运行管理平台 (Manager 进程)
+python -m src.run_manager
+
+# 运行交易账户 (Trader 进程)
+python -m src.run_trader --account-id DQ
 
 # 格式化代码
 black src/ --line-length 100 --target py38
@@ -19,7 +22,7 @@ isort src/ --profile black
 mypy src/
 
 # 检查运行进程
-lsof -i :8000  # 后端API
+lsof -i :8000  # Manager API 端口
 ```
 
 ### 前端 (Vue)
@@ -31,7 +34,7 @@ npm run dev     # 开发服务器 (默认端口5173，代理到8000)
 
 ### 使用 Chrome DevTools 测试
 使用 `chrome-devtools` MCP 工具测试前端：
-1. 启动后端 (`python -m src.main`) 和前端 (`cd web && npm run dev`)
+1. 启动 Manager (`python -m src.run_manager`) 和前端 (`cd web && npm run dev`)
 2. 使用 `new_page` 导航到 `http://localhost:5173`
 3. 使用 `take_snapshot` 检查页面结构
 4. 使用 `list_console_messages` 检查错误
@@ -66,10 +69,55 @@ npm run dev     # 开发服务器 (默认端口5173，代理到8000)
 
 ## 架构说明
 
+### 多进程架构
+
+Q-Trader 采用 Manager-Trader 分离的多进程架构，实现了多账户独立运行：
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Manager 进程                            │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
+│  │   FastAPI    │  │   WebSocket  │  │   Scheduler  │       │
+│  │   Web 服务    │  │   实时推送    │  │   定时任务    │        │
+│  └──────────────┘  └──────────────┘  └──────────────┘        │
+│                             │                                │
+│                    ┌────────▼────────┐                     │
+│                    │ TradingManager  │                     │
+│                    │  交易管理器      │                     │
+│                    └────────┬────────┘                     │
+│                             │                                │
+│              ┌──────────────┼──────────────┐                │
+│              │              │              │                │
+│         ┌────▼────┐   ┌────▼────┐   ┌────▼────┐           │
+│         │Trader DQ│   │Trader GW│   │Trader...│          │
+│         │Proxy    │   │Proxy    │   │Proxy    │          │
+│         └────┬────┘   └────┬────┘   └────┬────┘           │
+└──────────────┼─────────────┼─────────────┼──────────────────┘
+               │             │             │
+           Unix Socket    Unix Socket   Unix Socket
+               │             │             │
+         ┌─────▼─────┐ ┌────▼─────┐ ┌────▼─────┐
+         │Trader DQ  │ │Trader GW │ │Trader ...│
+         │ 交易进程   │ │ 交易进程  │ │ 交易进程  │
+         └───────────┘ └──────────┘ └───────────┘
+```
+
+* 多进程架构
+- **多进程架构**: 采用 Manager-Trader 分离架构，支持多账户独立运行
+- **Manager 进程**: 管理 Web 服务、API、WebSocket
+- **Trader 进程**: 独立进程执行交易，通过 Unix Socket 与 Manager 通信
+- 每个账户独立数据库、独立进程、互不干扰
+
+* 进程间通信
+Manager 和 Trader 通过 Unix Domain Socket 进行通信：
+- **请求-响应模式**: Manager 主动查询 Trader 数据（账户、持仓、订单等）
+- **推送模式**: Trader 主动推送数据更新（tick、订单状态、成交等）
+
+
 ### 事件驱动系统
 - 交易引擎使用事件引擎进行解耦通知
 - 事件在 `update()` 方法中的 `api.wait_update()` 之后触发
-- 事件类型在 `src.trading_engine.EventTypes` 类中定义
+- 事件类型在 `src.trader.trading_engine.EventTypes` 类中定义
 - 全局事件引擎: `src.utils.event.event_engine`
 - 使用示例见 `examples/event_usage.py`
 
@@ -79,6 +127,9 @@ npm run dev     # 开发服务器 (默认端口5173，代理到8000)
 3. **事件处理器应在 Gateway 的 `update()` 方法中的 `api.wait_update()` 之后触发**
 4. **账户信息采用缓存机制** - 每3秒批量更新并通过WebSocket推送
 5. **追踪订单所有权** - 每个订单映射到创建它的策略，据此进行事件路由
+6. **使用正确的模块路径** - API相关使用 `src.manager.api.*`，交易相关使用 `src.trader.*`
+7. **多进程通信** - Manager 通过 `TraderProxy` 与 Trader 通信，不直接访问 Trader 内部对象
+8. **前端路径注意** - 前端相关路径为 `web/src/`，不要与 `src/` 混淆
 
 ### 前后端通信规范
 
@@ -114,10 +165,10 @@ npm run dev     # 开发服务器 (默认端口5173，代理到8000)
 - `code=9999`: 其他业务错误
 
 **后端实现**
-- 使用 `src.api.responses.success_response()` 包装成功响应
-- 使用 `src.api.responses.error_response()` 包装错误响应
+- 使用 `src.manager.api.responses.success_response()` 包装成功响应
+- 使用 `src.manager.api.responses.error_response()` 包装错误响应
 - Pydantic模型通过 `from_attributes = True` 自动序列化ORM对象
-- 日期时间自动转换为ISO格式字符串
+- 日期时间自动转换为ISO格式字符串（成交时间字段特殊处理，见数据类型约束）
 
 **前端实现**
 - 使用 `web/src/api/request.ts` 的axios实例
@@ -176,6 +227,19 @@ npm run dev     # 开发服务器 (默认端口5173，代理到8000)
 - 金额字段：浮点数，保留2位小数
 - 数量字段：整数
 
+**时间字段格式**
+- 默认格式：ISO 8601字符串 (datetime → isoformat())
+- **成交时间字段特殊处理**：`trade_date_time` 支持两种格式
+  - **后端输出**：ISO 8601字符串（自动从 Unix 时间戳或 datetime 对象转换）
+  - **前端接收**：`number | string`（兼容 Unix 时间戳秒或 ISO 字符串）
+  - **后端处理逻辑**：
+    - 支持 datetime 对象转换为 Unix 时间戳
+    - 支持 int/float 类型的时间戳
+    - 最终统一转换为 ISO 格式返回给前端
+  - **前端处理逻辑**：
+    - 排序时兼容两种格式（数字直接比较，字符串转换为 Date）
+    - 显示时使用统一的日期格式化函数
+
 **枚举类型**
 - `direction`: "BUY" | "SELL"
 - `offset`: "OPEN" | "CLOSE" | "CLOSETODAY"
@@ -183,7 +247,7 @@ npm run dev     # 开发服务器 (默认端口5173，代理到8000)
 - `price_type`: 价格类型字符串
 
 **类型同步规则**
-1. 后端在 `src/api/schemas.py` 定义Pydantic模型
+1. 后端在 `src.manager.api.schemas.py` 定义Pydantic模型
 2. 前端在 `web/src/types/index.ts` 定义对应的TypeScript接口
 3. 字段名称、类型、结构必须保持一致
 4. 可选字段使用Optional (Python) / | null (TypeScript)
@@ -191,7 +255,7 @@ npm run dev     # 开发服务器 (默认端口5173，代理到8000)
 #### 错误处理规范
 
 **后端错误处理**
-- 全局异常处理器捕获所有未处理异常（`src.api.responses.global_exception_handler`）
+- 全局异常处理器捕获所有未处理异常（`src.manager.api.responses.global_exception_handler`）
 - HTTP异常由 `http_exception_handler` 处理
 - 请求验证错误由 `validation_exception_handler` 处理
 - 所有错误使用 `get_logger(__name__)` 记录日志

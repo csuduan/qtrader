@@ -491,9 +491,19 @@ const subscribeForm = reactive({
 const sortedTrades = computed(() => {
   if (!store.currentTrades || store.currentTrades.length === 0) return []
   return [...store.currentTrades].sort((a, b) => {
-    // trade_date_time 是 Unix 时间戳（秒），转换为数字进行比较
-    const timeA = Number(a.trade_date_time || 0)
-    const timeB = Number(b.trade_date_time || 0)
+    // trade_date_time 可能是数字（Unix时间戳秒）或字符串（ISO格式）
+    let timeA = 0
+    let timeB = 0
+    if (typeof a.trade_date_time === 'number') {
+      timeA = a.trade_date_time
+    } else if (typeof a.trade_date_time === 'string') {
+      timeA = new Date(a.trade_date_time).getTime() / 1000
+    }
+    if (typeof b.trade_date_time === 'number') {
+      timeB = b.trade_date_time
+    } else if (typeof b.trade_date_time === 'string') {
+      timeB = new Date(b.trade_date_time).getTime() / 1000
+    }
     return timeB - timeA
   })
 })

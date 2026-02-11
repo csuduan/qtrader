@@ -59,7 +59,7 @@ export interface Trade {
   offset: string
   price: number
   volume: number
-  trade_date_time: number
+  trade_date_time: number | string  // Unix时间戳或ISO字符串
   created_at: string
 }
 

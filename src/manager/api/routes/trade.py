@@ -42,8 +42,17 @@ async def get_trades(
         # 按成交时间倒序排序
         trades_list.sort(key=lambda x: x.trade_time or 0, reverse=True)
 
-        return success_response(
-            data=[
+        data = []
+        for trade in trades_list:
+            # 将 datetime 转换为 Unix 时间戳（秒）
+            trade_time_ts = 0
+            if trade.trade_time:
+                if isinstance(trade.trade_time, datetime):
+                    trade_time_ts = int(trade.trade_time.timestamp())
+                elif isinstance(trade.trade_time, (int, float)):
+                    trade_time_ts = int(trade.trade_time)
+
+            data.append(
                 TradeRes(
                     id=0,
                     account_id=trade.account_id,
@@ -60,13 +69,12 @@ async def get_trades(
                     ),
                     price=float(trade.price),
                     volume=trade.volume,
-                    trade_date_time=trade.trade_time or datetime.now(),
+                    trade_date_time=datetime.fromtimestamp(trade_time_ts) if trade_time_ts else datetime.now(),
                     created_at=datetime.now(),
                 )
-                for trade in trades_list
-            ],
-            message="获取成功",
-        )
+            )
+
+        return success_response(data=data, message="获取成功")
     except Exception as e:
         logger.exception(f"获取成交记录失败: {e}", exc_info=True)
         return error_response(code=500, message=f"获取成交记录失败: {str(e)}")
