@@ -38,6 +38,10 @@ async def get_trades(
     try:
         # 从内存查询（使用 TradingManager）
         trades_list: List[TradeData] = await trading_manager.get_trades(account_id=account_id)
+
+        # 按成交时间倒序排序
+        trades_list.sort(key=lambda x: x.trade_time or 0, reverse=True)
+
         return success_response(
             data=[
                 TradeRes(

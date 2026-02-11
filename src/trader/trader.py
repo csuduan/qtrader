@@ -1024,6 +1024,8 @@ class Trader:
     @request("get_rotation_instructions")
     async def _req_get_rotation_instructions(self, data: dict) -> dict:
         """处理获取换仓指令列表请求"""
+        from datetime import datetime
+
         from src.models.po import RotationInstructionPo
         from src.utils.database import get_database
 
@@ -1033,9 +1035,19 @@ class Trader:
         status_filter = data.get("status")
         enabled_filter = data.get("enabled")
 
+        # 获取今天的日期，格式为YYYYMMDD
+        today = datetime.now().strftime("%Y%m%d")
+
         with db.get_session() as session:
             query = session.query(RotationInstructionPo).filter(
                 RotationInstructionPo.is_deleted == False
+            )
+
+            # 只查询交易日大于等于今天的记录
+            # 如果trading_date为NULL，也包含在内（可能是未设置的记录）
+            query = query.filter(
+                (RotationInstructionPo.trading_date >= today) |
+                (RotationInstructionPo.trading_date == None)
             )
 
             if status_filter:

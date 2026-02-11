@@ -37,6 +37,9 @@ async def get_order_cmds_status(
         if not result:
             return success_response(data=[], message="获取成功")
 
+        # 按开始时间倒序排序（最新的在前）
+        result.sort(key=lambda x: x.get("started_at") or "", reverse=True)
+
         return success_response(
             data=[
                 OrderCmdRes(

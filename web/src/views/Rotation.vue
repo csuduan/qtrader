@@ -340,11 +340,16 @@ function getProgress(total: number, remaining: number): number {
 
 
 function handleDialogOpen() {
+  // 清空上传组件的文件列表
+  uploadRef.value?.clearFiles()
+  // 重置所有状态
   importForm.file = null
   csvPreview.value = []
   csvHeaders.value = []
   uploadPercentage.value = 0
   uploadStatus.value = ''
+  // 重置导入模式
+  importMode.value = 'append'
 }
 
 function handleFileRemove() {

@@ -168,7 +168,7 @@
             </div>
           </template>
 
-          <el-table :data="store.currentTrades" stripe v-loading="loading" height="400">
+          <el-table :data="sortedTrades" stripe v-loading="loading" height="400">
             <template #empty>
               <el-empty description="暂无成交记录" />
             </template>
@@ -216,7 +216,7 @@
             </div>
           </template>
 
-          <el-table :data="orderCmds" stripe v-loading="loading" height="400">
+          <el-table :data="sortedOrderCmds" stripe v-loading="loading" height="400">
             <template #empty>
               <el-empty description="暂无报单指令" />
             </template>
@@ -424,7 +424,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, watch, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, watch, onMounted, onUnmounted, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useStore } from '@/stores'
 import { orderApi, quoteApi, orderCmdApi, contractApi } from '@/api'
@@ -485,6 +485,27 @@ const cancelForm = reactive({
 
 const subscribeForm = reactive({
   symbol: ''
+})
+
+// 按时间倒序排序的成交记录
+const sortedTrades = computed(() => {
+  if (!store.currentTrades || store.currentTrades.length === 0) return []
+  return [...store.currentTrades].sort((a, b) => {
+    // trade_date_time 是 Unix 时间戳（秒），转换为数字进行比较
+    const timeA = Number(a.trade_date_time || 0)
+    const timeB = Number(b.trade_date_time || 0)
+    return timeB - timeA
+  })
+})
+
+// 按开始时间倒序排序的报单指令
+const sortedOrderCmds = computed(() => {
+  if (!orderCmds.value || orderCmds.value.length === 0) return []
+  return [...orderCmds.value].sort((a, b) => {
+    const timeA = a.started_at ? new Date(a.started_at).getTime() : 0
+    const timeB = b.started_at ? new Date(b.started_at).getTime() : 0
+    return timeB - timeA
+  })
 })
 
 function handleTickUpdate(tickData: Quote) {
