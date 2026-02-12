@@ -137,10 +137,10 @@
           </template>
         </div>
         <div class="header-right">
-          <span>总资产: ¥{{ formatNumber(store.isMultiAccountMode ? store.accountsSummary.totalBalance : (store.account?.balance || 0)) }}</span>
+          <span>总资产: ¥{{ formatNumber(store.isMultiAccountMode ? (store.currentAccount?.balance || 0) : (store.account?.balance || 0)) }}</span>
           <el-divider direction="vertical" />
-          <span :class="(store.isMultiAccountMode ? store.accountsSummary.totalFloatProfit : (store.account?.float_profit || 0)) >= 0 ? 'profit' : 'loss'">
-            总盈亏: ¥{{ formatNumber(store.isMultiAccountMode ? store.accountsSummary.totalFloatProfit : (store.account?.float_profit || 0)) }}
+          <span :class="(store.isMultiAccountMode ? (store.currentAccount?.float_profit || 0) : (store.account?.float_profit || 0)) >= 0 ? 'profit' : 'loss'">
+            总盈亏: ¥{{ formatNumber(store.isMultiAccountMode ? (store.currentAccount?.float_profit || 0) : (store.account?.float_profit || 0)) }}
           </span>
         </div>
       </el-header>

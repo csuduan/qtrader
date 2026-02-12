@@ -321,10 +321,11 @@ async function loadAlertWechat() {
   }
 }
 
-// 监听当前账户变化，重新加载 alert_wechat
+// 监听当前账户变化，重新加载 alert_wechat 和定时任务
 watch(() => store.selectedAccountId, () => {
   if (store.selectedAccountId) {
     loadAlertWechat()
+    loadTasks()
   }
 })
 

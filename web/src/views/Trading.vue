@@ -782,6 +782,22 @@ watch(orderCmdStatus, () => {
   }
 })
 
+// 监听账户切换，重新加载当前 tab 的数据
+watch(() => store.selectedAccountId, (newId) => {
+  if (newId) {
+    if (activeTab.value === 'trading') {
+      loadQuotes()
+      loadOrderData()
+    } else if (activeTab.value === 'trade') {
+      loadTradeData()
+    } else if (activeTab.value === 'order-cmd') {
+      loadOrderCmdData()
+    } else if (activeTab.value === 'contract') {
+      loadContracts()
+    }
+  }
+})
+
 onMounted(async () => {
   if (activeTab.value === 'trading') {
     loadQuotes()

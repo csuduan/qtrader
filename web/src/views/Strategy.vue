@@ -114,7 +114,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useStore } from '@/stores'
@@ -242,6 +242,13 @@ async function handleReplayAll() {
     replayAllLoading.value = false
   }
 }
+
+// 监听账户切换，重新加载策略
+watch(() => store.selectedAccountId, (newId) => {
+  if (newId) {
+    loadStrategies()
+  }
+})
 
 onMounted(async () => {
   loadStrategies()

@@ -89,7 +89,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, watch, onMounted, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useStore } from '@/stores'
 import { alarmApi } from '@/api'
@@ -181,6 +181,14 @@ function getStatusText(status: string): string {
   }
   return texts[status] ?? status
 }
+
+// 监听账户切换，重新加载数据
+watch(() => store.selectedAccountId, async (newId) => {
+  if (newId) {
+    await loadAlarms()
+    await loadStats()
+  }
+})
 
 onMounted(async () => {
   await loadAlarms()

@@ -188,7 +188,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useStore } from '@/stores'
 import { positionApi } from '@/api'
@@ -284,6 +284,14 @@ function getBrokerTypeName(type: string | null): string {
   }
   return typeMap[type || ''] || type || ''
 }
+
+// 监听账户切换，重新加载数据
+watch(() => store.selectedAccountId, async (newId) => {
+  if (newId) {
+    await loadAccountData()
+    await loadPositionData()
+  }
+})
 
 onMounted(async () => {
   await loadAccountData()

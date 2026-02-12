@@ -228,7 +228,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, watch, onMounted } from 'vue'
 import { ElMessage, ElMessageBox, type UploadInstance, type UploadUserFile } from 'element-plus'
 import { VideoPlay, Refresh, Delete, Upload } from '@element-plus/icons-vue'
 import { rotationApi } from '@/api'
@@ -524,6 +524,13 @@ async function handleImport() {
     importing.value = false
   }
 }
+
+// 监听账户切换，重新加载数据
+watch(() => store.selectedAccountId, (newId) => {
+  if (newId) {
+    loadData()
+  }
+})
 
 onMounted(() => {
   loadData()

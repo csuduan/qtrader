@@ -243,7 +243,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, watch, onMounted, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useStore } from '@/stores'
 import { alarmApi, systemApi, accountApi } from '@/api'
@@ -438,6 +438,13 @@ async function handleSelectAccount(accountId: string) {
   // 最后刷新账户列表以确保显示最新的账户状态
   await store.loadAllAccounts()
 }
+
+// 监听账户切换，重新加载告警统计
+watch(() => store.selectedAccountId, (newId) => {
+  if (newId) {
+    loadAlarmStats()
+  }
+})
 
 onMounted(async () => {
   // App.vue 已经在 loadAllData 中加载了账户列表，这里不需要重复加载
