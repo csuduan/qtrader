@@ -373,7 +373,7 @@ class TqGateway(BaseGateway):
 
             # 查询合约列表
             quotes = self.api.query_quotes(ins_class=["FUTURE"], expired=False)
-            quotes = [x for x in quotes if len(x) >= 10]
+            quotes = [x for x in quotes if len(x) <= 12]
             symbol_infos = self.api.query_symbol_info(quotes)
             logger.info(f"从API查询到 {len(symbol_infos)} 个合约")
 
@@ -431,20 +431,20 @@ class TqGateway(BaseGateway):
             logger.info(f"从API加载了 {len(self._contracts)} 个合约信息，准备保存 {len(contracts_to_save)} 个到数据库")
 
             # 批量保存到数据库
-            if db and contracts_to_save:
-                try:
-                    with db.get_session() as session:
-                        # 先删除今天之前的数据
-                        deleted_count = session.query(ContractPo).filter(
-                            ContractPo.update_date < update_date
-                        ).delete(synchronize_session=False)
-                        logger.info(f"删除了 {deleted_count} 条旧合约信息")
-                        # 批量插入新数据
-                        session.add_all(contracts_to_save)
-                        session.commit()
-                        logger.info(f"成功保存 {len(contracts_to_save)} 个合约信息到数据库")
-                except Exception as e:
-                    logger.error(f"保存合约信息到数据库失败: {e}", exc_info=True)
+            # if db and contracts_to_save:
+            #     try:
+            #         with db.get_session() as session:
+            #             # 先删除今天之前的数据
+            #             deleted_count = session.query(ContractPo).filter(
+            #                 ContractPo.update_date < update_date
+            #             ).delete(synchronize_session=False)
+            #             logger.info(f"删除了 {deleted_count} 条旧合约信息")
+            #             # 批量插入新数据
+            #             session.add_all(contracts_to_save)
+            #             session.commit()
+            #             logger.info(f"成功保存 {len(contracts_to_save)} 个合约信息到数据库")
+            #     except Exception as e:
+            #         logger.error(f"保存合约信息到数据库失败: {e}", exc_info=True)
 
             logger.info(f"成功从API加载 {len(self._contracts)} 个合约信息")
 
@@ -854,8 +854,8 @@ class TqGateway(BaseGateway):
             self._push_account(self._convert_account(self._account))
 
             # 加载合约列表：先从数据库加载今天的，如果没有则从API查询
-            if len(self._contracts) <= 0:
-                self._query_and_save_contracts(datetime.now().strftime("%Y-%m-%d"))
+            #if len(self._contracts) <= 0:
+            self._query_and_save_contracts(datetime.now().strftime("%Y-%m-%d"))
 
             self.connected = True
             self.trading_day = self.get_trading_day()
