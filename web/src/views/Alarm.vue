@@ -91,11 +91,8 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { ElMessage } from 'element-plus'
-import { useStore } from '@/stores'
 import { alarmApi } from '@/api'
 import type { Alarm, AlarmStats, AlarmStatus } from '@/types'
-
-const store = useStore()
 
 const alarms = ref<Alarm[]>([])
 const stats = ref<AlarmStats>({
