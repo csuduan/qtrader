@@ -72,9 +72,11 @@ async def get_all_accounts(
 ):
     """
     获取所有账户信息（多账号模式）
-    返回所有账户的资金情况
+    返回所有账户的资金情况，按照配置文件中account_ids的顺序排列
     """
     from datetime import datetime
+
+    from src.utils.config_loader import get_config_loader
 
     try:
         # 从 TradingManager 获取所有账户数据
@@ -108,7 +110,14 @@ async def get_all_accounts(
                     status=account_info.status.value if account_info.status else TraderState.STOPPED.value,
                 )
             )
-        sorted_list = sorted(accounts_list, key=lambda x: x.account_id)
+
+        # 按照配置文件中account_ids的顺序排序
+        config = get_config_loader().load_config()
+        account_order = {aid: i for i, aid in enumerate(config.account_ids)}
+        sorted_list = sorted(
+            accounts_list,
+            key=lambda x: account_order.get(x.account_id, float("inf"))
+        )
         return success_response(data=sorted_list, message="获取成功")
     except Exception as e:
         logger.exception(f"获取所有账户信息失败: {e}")

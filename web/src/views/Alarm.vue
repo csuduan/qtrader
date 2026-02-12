@@ -89,7 +89,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, computed } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useStore } from '@/stores'
 import { alarmApi } from '@/api'
@@ -118,7 +118,7 @@ const hasUnconfirmedAlarms = computed(() => {
 async function loadAlarms() {
   loading.value = true
   try {
-    alarms.value = await alarmApi.getTodayAlarms(store.selectedAccountId || undefined, statusFilter.value || undefined)
+    alarms.value = await alarmApi.getTodayAlarms(statusFilter.value || undefined)
   } catch (error: any) {
     ElMessage.error(`加载告警列表失败: ${error.message}`)
   } finally {
@@ -128,7 +128,7 @@ async function loadAlarms() {
 
 async function loadStats() {
   try {
-    stats.value = await alarmApi.getAlarmStats(store.selectedAccountId || undefined)
+    stats.value = await alarmApi.getAlarmStats()
   } catch (error: any) {
     console.error(`加载告警统计失败: ${error.message}`)
   }
@@ -141,7 +141,7 @@ function handleFilterChange() {
 async function handleConfirm(alarmId: number) {
   confirmingId.value = alarmId
   try {
-    await alarmApi.confirmAlarm(alarmId, store.selectedAccountId || undefined)
+    await alarmApi.confirmAlarm(alarmId)
     ElMessage.success('标记成功')
     await loadAlarms()
     await loadStats()
@@ -155,7 +155,7 @@ async function handleConfirm(alarmId: number) {
 async function handleConfirmAll() {
   confirmingAll.value = true
   try {
-    const result = await alarmApi.confirmAllAlarms(store.selectedAccountId || undefined)
+    const result = await alarmApi.confirmAllAlarms()
     ElMessage.success(`已标记 ${result.confirmed_count} 条告警为已处理`)
     await loadAlarms()
     await loadStats()
@@ -181,14 +181,6 @@ function getStatusText(status: string): string {
   }
   return texts[status] ?? status
 }
-
-// 监听账户切换，重新加载数据
-watch(() => store.selectedAccountId, async (newId) => {
-  if (newId) {
-    await loadAlarms()
-    await loadStats()
-  }
-})
 
 onMounted(async () => {
   await loadAlarms()

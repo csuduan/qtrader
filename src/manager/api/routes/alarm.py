@@ -169,14 +169,20 @@ async def confirm_all_alarms(
 
     将所有状态为 UNCONFIRMED 的告警改为 CONFIRMED
     支持按账户ID筛选
+    只处理当日的告警
 
     返回确认的告警数量
     """
     db = get_db(request)
     session: Session = db.get_session_sync()
     try:
-        # 构建查询条件
-        query = session.query(AlarmPo).filter(AlarmPo.status == "UNCONFIRMED")
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        # 构建查询条件：只处理当日未确认的告警
+        query = session.query(AlarmPo).filter(
+            AlarmPo.status == "UNCONFIRMED",
+            AlarmPo.alarm_date == today
+        )
 
         # 如果提供了账户ID，按账户筛选
         account_id = None

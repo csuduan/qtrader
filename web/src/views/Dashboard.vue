@@ -243,7 +243,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, computed } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useStore } from '@/stores'
 import { alarmApi, systemApi, accountApi } from '@/api'
@@ -348,7 +348,7 @@ async function handleCardClick(acc: Account) {
 
 async function loadAlarmStats() {
   try {
-    const result = await alarmApi.getAlarmStats(store.selectedAccountId || undefined)
+    const result = await alarmApi.getAlarmStats()
     alarmStats.value = result || { today_total: 0, last_hour: 0, last_five_minutes: 0 }
   } catch (error: any) {
     console.error(`加载告警统计失败: ${error.message}`)
@@ -438,13 +438,6 @@ async function handleSelectAccount(accountId: string) {
   // 最后刷新账户列表以确保显示最新的账户状态
   await store.loadAllAccounts()
 }
-
-// 监听账户切换，重新加载告警统计
-watch(() => store.selectedAccountId, (newId) => {
-  if (newId) {
-    loadAlarmStats()
-  }
-})
 
 onMounted(async () => {
   // App.vue 已经在 loadAllData 中加载了账户列表，这里不需要重复加载

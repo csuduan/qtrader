@@ -1,11 +1,12 @@
 account_ids:
-  - "DQ"
   - "GWQ"
+  - "YJ"
   - "YX"
+  - "DQ"
 
 paths:
-  logs: "./data/logs"
-  database: "./data/db/q-manager.db"
+  logs: "/opt/data/qtrader/manager/logs"
+  database: "/opt/data/qtrader/manager/q-manager.db"
 
 # Socket 配置
 socket:
