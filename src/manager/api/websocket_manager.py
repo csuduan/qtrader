@@ -30,7 +30,7 @@ class WebSocketManager:
         event_engine.register(EventTypes.ORDER_UPDATE, self.broadcast_order)
         event_engine.register(EventTypes.TRADE_UPDATE, self.broadcast_trade)
         event_engine.register(EventTypes.TICK_UPDATE, self.broadcast_quote)
-        #event_engine.register(EventTypes.ACCOUNT_UPDATE, self.broadcast_account)
+        event_engine.register(EventTypes.ACCOUNT_UPDATE, self.broadcast_account)
         event_engine.register(EventTypes.ACCOUNT_STATUS, self.broadcast_account_status)
         event_engine.register(EventTypes.ALARM_UPDATE, self.broadcast_alarm)
         logger.info("WEBSOCKET已注册事件引擎订阅")

@@ -112,11 +112,10 @@ class TraderProxy:
                 account_update = {
                     "account_id": self.account_id,
                     "status": new_state.value,
-                    "gateway_connected": (new_state == TraderState.CONNECTED),
                     "timestamp": datetime.now().isoformat(),
                 }
                 event_engine.put(EventTypes.ACCOUNT_STATUS, account_update)
-                logger.debug(f"推送账户状态更新事件: {account_update}")
+                logger.info(f"推送账户状态更新事件: {account_update}")
         except Exception as e:
             logger.error(f"推送账户状态更新事件失败: {e}")
 

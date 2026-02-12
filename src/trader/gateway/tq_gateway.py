@@ -151,6 +151,7 @@ class TqGateway(BaseGateway):
             # 停止轮询
             self._running = False
             self.connected = False
+            self._push_account(self._convert_account(self._account))
 
             # 取消事件分发协程
             if self._dispatcher_task:
@@ -552,6 +553,7 @@ class TqGateway(BaseGateway):
             broker_type=getattr(self.config.broker, "type", "") if self.config.broker else "",
             currency="CNY",
             user_id="",
+            gateway_connected=self.connected,
             status=None,
         )
 
@@ -736,9 +738,9 @@ class TqGateway(BaseGateway):
                         self._push_position(position_data)
 
             # 检查账户变化
-            if self.api.is_changing(self._account):
-                account_data = self._convert_account(self._account)
-                self._push_account(account_data)
+            #if self.api.is_changing(self._account):
+            #    account_data = self._convert_account(self._account)
+            #    self._push_account(account_data)
 
             # 检查行情变化
             for quote in self._quotes.values():
@@ -851,13 +853,13 @@ class TqGateway(BaseGateway):
             self._trades = self.api.get_trade()
 
             # 发送初始数据
+            self.connected = True
             self._push_account(self._convert_account(self._account))
 
             # 加载合约列表：先从数据库加载今天的，如果没有则从API查询
             #if len(self._contracts) <= 0:
             self._query_and_save_contracts(datetime.now().strftime("%Y-%m-%d"))
 
-            self.connected = True
             self.trading_day = self.get_trading_day()
             logger.info(f"TqSdk连接成功,交易日: {self.trading_day}")
 
@@ -869,8 +871,6 @@ class TqGateway(BaseGateway):
             # 订阅kline
             for symbol, interval in self.kline_subs:
                 self.subscribe_bars(symbol, interval)
-
-
 
             logger.info("TqSdk开始轮询...")
             while self._running:
@@ -886,7 +886,8 @@ class TqGateway(BaseGateway):
                 except Exception as e:
                     logger.error(f"轮询线程异常: {e}")
                     time.sleep(1)
-
+            self.connected = False
+            self._push_account(self._convert_account(self._account))
             logger.info("TqSdk轮询线程已退出")
 
         except Exception as e:
