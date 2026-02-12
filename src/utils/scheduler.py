@@ -262,7 +262,7 @@ class TaskScheduler:
             logger.info(f"已手动触发任务: {job.name} ({job_id})")
             return True
         except Exception as e:
-            logger.error(f"触发任务失败: {job_id}, 错误: {e}")
+            logger.exception(f"触发任务失败: {job_id}, 错误: {e}")
             return False
 
     def operate_job(self, job_id: str, action: str) -> bool:

@@ -62,7 +62,7 @@ async def get_account_info(
             message="获取成功",
         )
     except Exception as e:
-        logger.error(f"获取账户信息失败: {e}", exc_info=True)
+        logger.exception(f"获取账户信息失败: {e}", exc_info=True)
         return error_response(code=500, message=f"获取账户信息失败: {str(e)}")
 
 

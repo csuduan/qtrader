@@ -1,36 +1,61 @@
 """
-Socket客户端 (Manager端)
-用于在独立模式下与Trader子进程通信
+Socket客户端 - V2版本，使用标准协议
+
+基于参考实现优化，包含：
+- 完善的自动重连机制（带退避策略）
+- 心跳检测和健康检查
+- 优化的请求-响应模式
+- 完善的连接状态管理
 """
 
 import asyncio
 import inspect
-import json
-import struct
 import uuid
-from typing import Any, Awaitable, Callable, Dict, Optional
+from typing import Any, Awaitable, Callable, Dict, Optional, Union
 
+from src.utils.ipc.protocol import (
+    MessageBody,
+    MessageProtocol,
+    MessageType,
+    create_heartbeat,
+    create_request,
+    create_response,
+)
+from src.utils.ipc.utils import BackoffStrategy, HealthChecker, generate_request_id
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
 HandlerType = Callable[[str, Any], None] | Callable[[str, Any], Awaitable[None]]
+PushHandlerType = Callable[[str, Dict], Any] | Callable[[str, Dict], Awaitable[Any]]
 
 
 class SocketClient:
     """
-    Unix Domain Socket 客户端 (Manager端)
+    Socket客户端 V2
 
-    在独立模式下，TraderProxy作为Socket客户端，
-    连接到Trader子进程的Socket服务器。
+    基于标准协议的高性能Socket客户端，特性：
+    - 自动重连机制（带退避策略）
+    - 心跳检测
+    - 请求-响应模式
+    - 推送消息处理
+    - 完善的错误处理
 
-    职责：
-    1. 连接到Trader Socket服务器
-    2. 发送查询请求（request-response模式）
-    3. 接收推送消息（账户/订单/成交/持仓/tick更新）
+    Attributes:
+        socket_path: Socket文件路径
+        account_id: 账户ID
     """
 
     def __init__(
-        self, socket_path: str, account_id: str, on_data_callback: HandlerType | None = None
+        self,
+        socket_path: str,
+        account_id: str,
+        on_data_callback: Optional[HandlerType] = None,
+        auto_reconnect: bool = True,
+        reconnect_interval: float = 3.0,
+        max_reconnect_attempts: int = 1000,  # 0表示无限重试
+        heartbeat_interval: float = 15.0,  # 默认15秒心跳间隔
+        request_timeout: float = 10.0,
     ):
         """
         初始化Socket客户端
@@ -38,34 +63,68 @@ class SocketClient:
         Args:
             socket_path: Socket文件路径
             account_id: 账户ID
-            on_data_callback: 数据回调函数 (account_id: str, data_type: str, data: dict) -> None
+            on_data_callback: 数据回调函数
+            auto_reconnect: 是否自动重连
+            reconnect_interval: 重连基础间隔（秒）
+            max_reconnect_attempts: 最大重连次数，0表示无限
+            heartbeat_interval: 心跳间隔（秒）
+            request_timeout: 请求超时时间（秒）
         """
         self.socket_path = socket_path
         self.account_id = account_id
         self.reader: Optional[asyncio.StreamReader] = None
         self.writer: Optional[asyncio.StreamWriter] = None
         self.connected = False
-        self.on_data_callback: HandlerType | None = on_data_callback
+        self.on_data_callback: Optional[HandlerType] = on_data_callback
+        self.protocol = MessageProtocol()
 
         # 请求-响应相关
         self._pending_requests: Dict[str, asyncio.Future] = {}
         self._receiving_task: Optional[asyncio.Task] = None
+        self._request_timeout = request_timeout
 
         # 重连相关
-        self._auto_reconnect = True
-        self._reconnect_interval = 3  # 重连间隔（秒）
-        self._max_reconnect_attempts = 0  # 0表示无限重连
+        self._auto_reconnect = auto_reconnect
+        self._reconnect_interval = reconnect_interval
+        self._max_reconnect_attempts = max_reconnect_attempts
         self._reconnect_task: Optional[asyncio.Task] = None
-        self._connection_closed_by_server = False  # 标记连接是否被服务端关闭
+        self._backoff = BackoffStrategy(
+            initial_delay=reconnect_interval, max_delay=60.0, multiplier=1.5
+        )
+
+        # 心跳相关
+        self._heartbeat_interval = heartbeat_interval
+        self._heartbeat_task: Optional[asyncio.Task] = None
+        self._health_checker = HealthChecker(interval=heartbeat_interval, timeout=5.0)
+
+        # 推送处理器
+        self._push_handlers: Dict[str, PushHandlerType] = {}
 
         # 连接断开回调
-        self._on_disconnect_callback: Optional[Callable[[], None]] = None
+        self._on_disconnect_callback: Optional[Callable[[], Any]] = None
+        self._on_connect_callback: Optional[Callable[[], Any]] = None
 
-        logger.info(f"[Manager-{account_id}] Socket客户端初始化: {socket_path}")
+        logger.info(f"SocketClient V2 初始化: {socket_path}")
 
-    async def connect(self, retry_interval: int = 3, max_retries: int = 30) -> bool:
+    def on_push(self, push_type: str) -> Callable:
         """
-        连接到Trader
+        推送处理器装饰器
+
+        Example:
+            @client.on_push("notification")
+            async def handle_notification(data: dict):
+                print(f"Received: {data}")
+        """
+
+        def decorator(func: PushHandlerType) -> PushHandlerType:
+            self._push_handlers[push_type] = func
+            return func
+
+        return decorator
+
+    async def connect(self, retry_interval: float = 3.0, max_retries: int = 30) -> bool:
+        """
+        连接到服务器
 
         Args:
             retry_interval: 重试间隔（秒）
@@ -78,41 +137,59 @@ class SocketClient:
             try:
                 self.reader, self.writer = await asyncio.open_unix_connection(self.socket_path)
                 self.connected = True
-                logger.info(f"[Trade Proxy-{self.account_id}] 已连接到Trader: {self.socket_path}")
+                self._backoff.reset()
 
-                # 等待注册确认消息
-                register_msg = await self._receive_message()
-                if register_msg and register_msg.get("type") == "register":
-                    registered_account_id = register_msg.get("data", {}).get("account_id")
-                    if registered_account_id == self.account_id:
-                        logger.info(f"[Trade Proxy-{self.account_id}] 连接注册成功")
-                        # 启动消息接收循环
-                        self._receiving_task = asyncio.create_task(self._receiving_loop())
-                        return True
-                    else:
-                        logger.warning(
-                            f"[Trade Proxy-{self.account_id}] 注册account_id不匹配: {registered_account_id}"
-                        )
-                        return False
+                # 启动接收循环
+                self._receiving_task = asyncio.create_task(self._receiving_loop())
+
+                # 启动心跳任务
+                if self._heartbeat_interval > 0:
+                    self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+
+                # 启动自动重连任务
+                if self._auto_reconnect and (
+                    self._reconnect_task is None or self._reconnect_task.done()
+                ):
+                    self._reconnect_task = asyncio.create_task(self._reconnect_loop())
+
+                logger.info(f"SocketClient V2 已连接: {self.socket_path}")
+
+                # 调用连接回调
+                if self._on_connect_callback:
+                    try:
+                        if asyncio.iscoroutinefunction(self._on_connect_callback):
+                            await self._on_connect_callback()
+                        else:
+                            self._on_connect_callback()
+                    except Exception as e:
+                        logger.error(f"执行连接回调时出错: {e}")
 
                 return True
 
             except FileNotFoundError:
                 logger.debug(
-                    f"[Manager-{self.account_id}] Socket文件不存在，将在{retry_interval}秒后重试 "
-                    f"({i+1}/{max_retries})"
+                    f"Socket文件不存在，将在{retry_interval}秒后重试 " f"({i+1}/{max_retries})"
                 )
                 await asyncio.sleep(retry_interval)
             except Exception as e:
-                logger.error(f"[Manager-{self.account_id}] 连接Trader失败: {e}")
+                logger.error(f"连接服务器失败: {e}")
                 await asyncio.sleep(retry_interval)
 
-        logger.error(f"[Manager-{self.account_id}] 连接Trader失败，已达到最大重试次数")
+        logger.error(f"连接服务器失败，已达到最大重试次数")
         return False
 
     async def disconnect(self) -> None:
         """断开连接"""
         self.connected = False
+
+        # 停止心跳任务
+        if self._heartbeat_task:
+            self._heartbeat_task.cancel()
+            try:
+                await self._heartbeat_task
+            except asyncio.CancelledError:
+                pass
+            self._heartbeat_task = None
 
         # 停止接收任务
         if self._receiving_task:
@@ -136,212 +213,205 @@ class SocketClient:
             except Exception:
                 pass
 
-        logger.info(f"[Manager-{self.account_id}] 已断开Trader连接")
+        logger.info(f"SocketClient V2 已断开")
 
     async def request(
-        self, request_type: str, data: Dict[str, Any], timeout: float = 10.0
+        self, request_type: str, data: Dict[str, Any], timeout: Optional[float] = None
     ) -> Optional[Dict[str, Any]]:
         """
-        发送请求到Trader并等待响应（request-response模式）
-
-        所有请求都使用此方法，包括：
-        - 查询请求: get_account, get_orders, get_trades, get_positions, etc.
-        - 交易请求: order_req, cancel_req
+        发送请求并等待响应
 
         Args:
             request_type: 请求类型
-            data: 请求参数
-            timeout: 超时时间（秒）
+            data: 请求数据
+            timeout: 超时时间（秒），None则使用默认值
 
         Returns:
             响应数据，失败返回None
         """
         if not self.connected or not self.writer:
-            logger.warning(f"[Manager-{self.account_id}] 未连接到Trader")
+            logger.warning(f"未连接到服务器")
             return None
 
-        # 生成请求ID
         request_id = str(uuid.uuid4())
-
-        # 创建Future等待响应
         future: asyncio.Future[Dict[str, Any]] = asyncio.Future()
         self._pending_requests[request_id] = future
 
         try:
-            # 发送请求
-            message = {"type": request_type, "request_id": request_id, "data": data}
+            logger.info(f"开始请求: {request_type} {request_id}")
+            message = create_request(
+                data={"type": request_type, "data": data}, request_id=request_id
+            )
 
-            # 序列化为JSON
-            json_bytes = json.dumps(message, ensure_ascii=False).encode("utf-8")
-            length = len(json_bytes)
-
-            # 发送：4字节长度 + JSON内容
-            self.writer.write(struct.pack(">I", length))
-            self.writer.write(json_bytes)
+            data_bytes = self.protocol.encode(message)
+            self.writer.write(data_bytes)
             await self.writer.drain()
 
-            # 等待响应
-            response = await asyncio.wait_for(future, timeout=timeout)
-            if request_type != "ping":
-                logger.info(f"[Trade Proxy-{self.account_id}] 请求成功: {request_type}")
-            return response
+            use_timeout = timeout if timeout is not None else self._request_timeout
+            response_data = await asyncio.wait_for(future, timeout=use_timeout)
+            logger.info(f"收到响应: {request_type} {request_id}")
+            return response_data
 
         except asyncio.TimeoutError:
-            logger.warning(f"[Manager-{self.account_id}] 请求超时: {request_type}")
+            logger.warning(f"请求超时: {request_type}")
             self._pending_requests.pop(request_id, None)
             return None
         except Exception as e:
-            logger.exception(f"[Manager-{self.account_id}] 请求失败: {request_type}, {e}")
+            logger.exception(f"请求失败: {request_type}, {e}")
             self._pending_requests.pop(request_id, None)
             return None
 
     async def _receiving_loop(self) -> None:
-        """消息接收循环"""
+        """接收消息循环"""
         while self.connected:
             try:
-                message = await self._receive_message()
+                if self.reader is None:
+                    logger.error("Reader is None, cannot receive messages")
+                    break
+                message = await self.protocol.read_message(self.reader)
                 if not message:
-                    logger.info(f"[Manager-{self.account_id}] Trader关闭了连接")
+                    logger.info("服务器关闭了连接")
                     break
 
                 await self._handle_message(message)
 
             except asyncio.IncompleteReadError:
-                logger.info(f"[Manager-{self.account_id}] Trader关闭了连接 (IncompleteReadError)")
+                logger.info("服务器关闭了连接")
                 break
             except ConnectionResetError:
-                logger.warning(f"[Manager-{self.account_id}] 连接被重置 (ConnectionResetError)")
+                logger.warning("连接被重置")
                 break
             except ConnectionAbortedError:
-                logger.warning(f"[Manager-{self.account_id}] 连接被中止 (ConnectionAbortedError)")
+                logger.warning("连接被中止")
                 break
             except Exception as e:
-                logger.error(f"[Manager-{self.account_id}] 接收消息时出错: {e}")
+                logger.error(f"接收消息时出错: {e}")
                 break
 
-        # 连接断开，更新状态
+        # 连接断开
         was_connected = self.connected
         self.connected = False
 
-        # 通知连接断开
         if was_connected:
             asyncio.create_task(self._notify_disconnection())
 
-        # 如果启用了自动重连，并且连接是被服务端关闭的，触发重连
-        if self._auto_reconnect and self._connection_closed_by_server:
-            logger.info(f"[Manager-{self.account_id}] 检测到连接断开，将尝试自动重连")
-            # 重连循环会在单独的task中处理
-
-    async def _receive_message(self) -> Optional[Dict[str, Any]]:
-        """
-        接收消息
-
-        消息格式：
-        - 4字节长度前缀（Big Endian）
-        - JSON内容
-
-        Returns:
-            消息字典，失败返回None
-        """
-        if self.reader is None:
-            logger.error(f"[Manager-{self.account_id}] StreamReader 未初始化")
-            return None
-
-        try:
-            # 读取4字节长度前缀
-            length_bytes = await self.reader.readexactly(4)
-            length = struct.unpack(">I", length_bytes)[0]
-
-            # 读取JSON内容
-            json_bytes = await self.reader.readexactly(length)
-            message: Dict[str, Any] = json.loads(json_bytes.decode("utf-8"))  # type: ignore[no-any-return]
-
-            return message
-
-        except asyncio.IncompleteReadError:
-            return None
-        except Exception as e:
-            logger.error(f"[Manager-{self.account_id}] 接收消息失败: {e}")
-            return None
-
-    async def _handle_message(self, message: Dict[str, Any]) -> None:
-        """
-        处理接收到的消息
-
-        Args:
-            message: 消息内容
-        """
-        message_type = message.get("type")
-        if message_type is None:
-            logger.warning(f"[Manager-{self.account_id}] 消息中缺少 'type' 字段")
-            return
-
-        # 检查是否是响应消息
-        if message_type == "response":
-            # 响应消息
-            request_id = message.get("request_id")
+    async def _handle_message(self, message: MessageBody) -> None:
+        """处理消息"""
+        if message.msg_type == MessageType.RESPONSE:
+            request_id = message.request_id
             if not request_id:
-                logger.error(f"响应消息缺少request_id，{message}")
+                # 没有request_id的响应可能是服务器主动推送的（如注册确认）
+                logger.debug(f"收到无request_id的响应消息（可能是服务器主动推送）: {message.data}")
                 return
-            # 这是响应消息
+
             future = self._pending_requests.pop(request_id, None)
             if future and not future.done():
-                # data 可能为 None，需要处理
-                status = message.get("status", "")
-                msg_text = message.get("message") or ""
-                if status == "error":
-                    future.set_exception(Exception(f"请求失败:{msg_text}"))
+                if message.error:
+                    future.set_exception(Exception(message.error))
                 else:
-                    data = message.get("data")
-                    future.set_result(data if isinstance(data, dict) else {})
+                    future.set_result(message.data)
             return
-        else:
-            # 这是推送消息
-            data = message.get("data", {})
-            # 调用注册的处理器
-            handler = self.on_data_callback
+
+        elif message.msg_type == MessageType.PUSH:
+            # 处理推送消息
+            push_data = message.data if isinstance(message.data, dict) else {}
+            push_type = push_data.get("type", "unknown")
+            data = push_data.get("data", {})
+
+            # 调用专用推送处理器
+            handler = self._push_handlers.get(push_type)
             if handler:
                 try:
                     if inspect.iscoroutinefunction(handler):
-                        await handler(message_type, data)
+                        await handler(push_type, data)
                     else:
-                        handler(message_type, data)
+                        handler(push_type, data)
                 except Exception as e:
-                    logger.error(
-                        f"[Manager-{self.account_id}] 处理消息 [{message_type}] 时出错: {e}"
-                    )
+                    logger.error(f"处理推送消息时出错: {e}")
+            # 调用通用回调
+            elif self.on_data_callback:
+                try:
+                    if inspect.iscoroutinefunction(self.on_data_callback):
+                        await self.on_data_callback(push_type, data)
+                    else:
+                        self.on_data_callback(push_type, data)
+                except Exception as e:
+                    logger.error(f"处理消息时出错: {e}")
             else:
-                logger.warning(f"[Manager-{self.account_id}] 未注册的消息类型: {message_type}")
+                logger.debug(f"收到推送消息但未处理: {push_type}")
 
-    def is_connected(self) -> bool:
-        """
-        检查是否连接到Trader
+        elif message.msg_type == MessageType.HEARTBEAT:
+            # 收到心跳响应，无需处理
+            pass
 
-        Returns:
-            是否连接
-        """
-        # 检查连接状态并验证writer是否仍然有效
+    async def _reconnect_loop(self) -> None:
+        """自动重连循环"""
+        attempt = 0
+
+        while self._auto_reconnect:
+            if self.connected:
+                # 连接正常，等待一段时间后再次检查
+                await asyncio.sleep(1)
+                continue
+
+            # 检查是否达到最大重连次数
+            if self._max_reconnect_attempts > 0 and attempt >= self._max_reconnect_attempts:
+                logger.error(f"重连失败，已达到最大重连次数 ({self._max_reconnect_attempts})")
+                break
+
+            attempt += 1
+            delay = self._backoff.get_delay()
+            logger.info(
+                f"尝试重新连接... ({attempt}/{self._max_reconnect_attempts if self._max_reconnect_attempts > 0 else '∞'}), 等待 {delay:.1f}s"
+            )
+            await asyncio.sleep(delay)
+
+            try:
+                success = await self.connect(retry_interval=self._reconnect_interval, max_retries=1)
+
+                if success:
+                    logger.info("重连成功")
+                    attempt = 0
+                    self._backoff.reset()
+                else:
+                    logger.warning("重连失败，将在下次重试")
+            except Exception as e:
+                logger.error(f"重连时出错: {e}")
+
+    async def _heartbeat_loop(self) -> None:
+        """心跳发送循环"""
+        while self.connected:
+            try:
+                await asyncio.sleep(self._heartbeat_interval)
+                if not self.connected:
+                    break
+
+                # 发送心跳
+                success = await self._send_heartbeat()
+                if not success:
+                    logger.warning("心跳发送失败")
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"心跳循环出错: {e}")
+
+    async def _send_heartbeat(self) -> bool:
+        """发送心跳包"""
         if not self.connected or not self.writer:
             return False
-        # 检查writer是否已关闭
-        if self.writer.is_closing():
+
+        try:
+            message = create_heartbeat()
+            data = self.protocol.encode(message)
+            self.writer.write(data)
+            await self.writer.drain()
+            return True
+        except Exception as e:
+            logger.debug(f"发送心跳失败: {e}")
             return False
-        return True
-
-    def set_disconnect_callback(self, callback: Callable[[], None]) -> None:
-        """
-        设置连接断开回调
-
-        Args:
-            callback: 连接断开时的回调函数
-        """
-        self._on_disconnect_callback = callback
 
     async def _notify_disconnection(self) -> None:
-        """通知连接已断开"""
-        # 标记连接被服务端关闭
-        self._connection_closed_by_server = True
-
+        """通知连接断开"""
         if self._on_disconnect_callback:
             try:
                 if asyncio.iscoroutinefunction(self._on_disconnect_callback):
@@ -349,67 +419,44 @@ class SocketClient:
                 else:
                     self._on_disconnect_callback()
             except Exception as e:
-                logger.error(f"[Manager-{self.account_id}] 执行断开回调时出错: {e}")
+                logger.error(f"执行断开回调时出错: {e}")
 
-    async def _reconnect_loop(self) -> None:
-        """
-        自动重连循环
+    def set_disconnect_callback(self, callback: Callable[[], Any]) -> None:
+        """设置连接断开回调"""
+        self._on_disconnect_callback = callback
 
-        当连接断开时，自动尝试重新连接
-        """
-        attempt = 0
-
-        while self._auto_reconnect:
-            if self.is_connected():
-                # 连接正常，等待一段时间后再次检查
-                await asyncio.sleep(1)
-                continue
-
-            # 检查是否达到最大重连次数
-            if self._max_reconnect_attempts > 0 and attempt >= self._max_reconnect_attempts:
-                logger.error(
-                    f"[Manager-{self.account_id}] 重连失败，已达到最大重连次数 "
-                    f"({self._max_reconnect_attempts})"
-                )
-                break
-
-            attempt += 1
-            logger.info(
-                f"[Manager-{self.account_id}] 尝试重新连接... ({attempt}/"
-                f"{self._max_reconnect_attempts if self._max_reconnect_attempts > 0 else '∞'})"
-            )
-
-            try:
-                # 尝试连接
-                success = await self.connect(
-                    retry_interval=self._reconnect_interval, max_retries=1  # 每次重连只尝试一次
-                )
-
-                if success:
-                    logger.info(f"[Manager-{self.account_id}] 重连成功")
-                    attempt = 0  # 重置重连计数
-                    # 通知重连成功
-                    self._connection_closed_by_server = False
-                else:
-                    logger.warning(
-                        f"[Manager-{self.account_id}] 重连失败，将在{self._reconnect_interval}秒后重试"
-                    )
-                    await asyncio.sleep(self._reconnect_interval)
-
-            except Exception as e:
-                logger.error(f"[Manager-{self.account_id}] 重连时出错: {e}")
-                await asyncio.sleep(self._reconnect_interval)
+    def set_connect_callback(self, callback: Callable[[], Any]) -> None:
+        """设置连接成功回调"""
+        self._on_connect_callback = callback
 
     def start_auto_reconnect(self) -> None:
         """启动自动重连"""
         if self._reconnect_task is None or self._reconnect_task.done():
             self._auto_reconnect = True
             self._reconnect_task = asyncio.create_task(self._reconnect_loop())
-            logger.info(f"[Manager-{self.account_id}] 已启动自动重连")
+            logger.info("已启动自动重连")
 
     def stop_auto_reconnect(self) -> None:
         """停止自动重连"""
         self._auto_reconnect = False
         if self._reconnect_task and not self._reconnect_task.done():
             self._reconnect_task.cancel()
-            logger.info(f"[Manager-{self.account_id}] 已停止自动重连")
+            logger.info("已停止自动重连")
+
+    async def health_check(self) -> bool:
+        """执行健康检查"""
+        return await self._health_checker.check(self._send_heartbeat)
+
+    def is_connected(self) -> bool:
+        """检查是否已连接"""
+        return self.connected and self.writer is not None and not self.writer.is_closing()
+
+    def get_stats(self) -> Dict[str, Any]:
+        """获取统计信息"""
+        return {
+            "connected": self.connected,
+            "pending_requests": len(self._pending_requests),
+            "auto_reconnect": self._auto_reconnect,
+            "heartbeat_interval": self._heartbeat_interval,
+            "reconnect_attempts": self._max_reconnect_attempts,
+        }

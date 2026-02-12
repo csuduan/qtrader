@@ -36,7 +36,12 @@ class Database:
         self.db_path = db_path
         self.db_url = f"sqlite:///{db_path}"
         self.engine = create_engine(self.db_url, echo=echo)
-        self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
+        self.SessionLocal = sessionmaker(
+            autocommit=False,
+            autoflush=False,
+            bind=self.engine,
+            expire_on_commit=False,
+        )
         logger.info(f"数据库连接已创建: {db_path}")
 
     def create_tables(self) -> None:
@@ -81,6 +86,11 @@ class Database:
             Session: SQLAlchemy会话对象
         """
         return self.SessionLocal()
+
+    def close(self) -> None:
+        """关闭数据库连接"""
+        self.engine.dispose()
+        logger.info("数据库连接已关闭")
 
 
 def init_database(db_path: str, account_id: str = "default", echo: bool = False) -> Database:
@@ -137,19 +147,20 @@ def close_database() -> None:
     """关闭数据库连接"""
     global _db
     if _db:
-        _db.engine.dispose()
+        _db.close()
         _db = None
-        logger.info("数据库连接已关闭")
 
 
 @contextmanager
 def session_scope():
     """提供事务范围的上下文管理器"""
     session = get_session()
+    if session is None:
+        raise RuntimeError("数据库未初始化，请先调用 init_database()")
     try:
         yield session
         session.commit()
-    except:
+    except Exception:
         session.rollback()
         raise
     finally:

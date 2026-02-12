@@ -23,7 +23,7 @@ from src.models.po import SwitchPosImportPo as OrderFile
 from src.trader.trading_engine import TradingEngine
 from src.trader.order_cmd import OrderCmd, SplitStrategyType
 from src.utils.config_loader import AppConfig, TraderConfig
-from src.utils.database import get_session
+from src.utils.database import session_scope
 from src.utils.helpers import parse_symbol
 from src.utils.logger import get_logger
 
@@ -90,33 +90,29 @@ class SwitchPosManager:
         Args:
             file_path: 换仓指令文件路径
         """
-        try:
-            lines = csv_text.strip().split("\n")
-            if len(lines) < 2:
-                raise ValueError("CSV文件为空或格式错误")
+        lines = csv_text.strip().split("\n")
+        if len(lines) < 2:
+            raise ValueError("CSV文件为空或格式错误")
 
-            header = lines[0].strip().split(",")
-            logger.info(f"准备导入换仓文件，文件名: {filename}, 模式: {mode}, 列: {header}")
+        header = lines[0].strip().split(",")
+        logger.info(f"准备导入换仓文件，文件名: {filename}, 模式: {mode}, 列: {header}")
 
-            imported_count = 0
-            failed_count = 0
-            errors = []
+        imported_count = 0
+        failed_count = 0
+        errors = []
 
-            trading_date = None
-            if filename:
-                import re
+        trading_date = None
+        if filename:
+            import re
 
-                matchs = re.findall(r"\d{8}", filename)
-                if matchs:
-                    trading_date = matchs[0]
-                    logger.info(f"从文件名提取交易日: {trading_date}")
-                else:
-                    raise ValueError(f"文件名格式错误，无法提取交易日: {filename}")
+            matchs = re.findall(r"\d{8}", filename)
+            if matchs:
+                trading_date = matchs[0]
+                logger.info(f"从文件名提取交易日: {trading_date}")
+            else:
+                raise ValueError(f"文件名格式错误，无法提取交易日: {filename}")
 
-            session = get_session()
-            if session is None:
-                logger.error("无法获取数据库会话")
-                raise RuntimeError("无法获取数据库会话")
+        with session_scope() as session:
             for line_num, line in enumerate(lines[1:], start=2):
                 try:
                     values = line.strip().split(",")
@@ -203,51 +199,41 @@ class SwitchPosManager:
                     logger.error(f"第{line_num}行解析失败: {e}, 内容: {line}")
                     failed_count += 1
                     errors.append({"row": line_num, "error": str(e), "content": line})
-                    session.rollback()
                     continue
 
-            session.commit()
             logger.info(f"CSV导入完成，成功: {imported_count}, 失败: {failed_count}")
 
-            # 对导入的合约进行订阅
-            self.subscribe_today_symbols()
+        # 对导入的合约进行订阅
+        self.subscribe_today_symbols()
 
-            data = {"imported": imported_count, "failed": failed_count, "errors": errors[:10]}
-            return data
-        except Exception as e:
-            raise Exception(f"导入文件失败{e}")
+        data = {"imported": imported_count, "failed": failed_count, "errors": errors[:10]}
+        return data
 
     def subscribe_today_symbols(self) -> None:
         """订阅今日换仓记录中的所有合约"""
         try:
-            session = get_session()
-            if not session:
-                logger.error("无法获取数据库会话")
-                return
-
-            today = datetime.now().strftime("%Y%m%d")
-            instructions = (
-                session.query(RotationInstructionPo)
-                .filter(
-                    RotationInstructionPo.trading_date == today,
-                    RotationInstructionPo.is_deleted == False,
-                    RotationInstructionPo.enabled == True,
+            with session_scope() as session:
+                today = datetime.now().strftime("%Y%m%d")
+                instructions = (
+                    session.query(RotationInstructionPo)
+                    .filter(
+                        RotationInstructionPo.trading_date == today,
+                        RotationInstructionPo.is_deleted == False,
+                        RotationInstructionPo.enabled == True,
+                    )
+                    .all()
                 )
-                .all()
-            )
 
-            if not instructions:
-                logger.info("今日无换仓记录，无需订阅合约")
-                return
+                if not instructions:
+                    logger.info("今日无换仓记录，无需订阅合约")
+                    return
 
-            symbols = [instruction.symbol for instruction in instructions]
-            self.trading_engine.subscribe_symbol(symbols)
-            logger.info(f"换仓管理器订阅换仓合约完成")
+                symbols = [instruction.symbol for instruction in instructions]
+                self.trading_engine.subscribe_symbol(symbols)
+                logger.info(f"换仓管理器订阅换仓合约完成")
 
         except Exception as e:
             logger.error(f"订阅今日换仓合约时出错: {e}")
-        finally:
-            session.close()
 
     def scan_and_process_orders(self) -> None:
         """扫描并处理交易指令文件"""
@@ -263,30 +249,30 @@ class SwitchPosManager:
                 return
 
             # logger.info(f"扫描到 {len(csv_files)} 个换仓文件")
-            session = get_session()
-            for csv_file in csv_files:
-                # 检查该文件是否已导入
-                existing = session.query(OrderFile).filter_by(file_name=csv_file.name).first()
-                if existing:
-                    continue
+            with session_scope() as session:
+                for csv_file in csv_files:
+                    # 检查该文件是否已导入
+                    existing = session.query(OrderFile).filter_by(file_name=csv_file.name).first()
+                    if existing:
+                        continue
 
-                # 导入文件
-                result = self.import_csv(
-                    csv_file.read_text(encoding="gbk"), csv_file.name, mode="replace"
-                )
-                # 记录导入成功，写入导入记录
-                if result and result.get("imported", 0) > 0:
-                    record = OrderFile(
-                        file_name=csv_file.name,
-                        file_path=str(csv_file.parent),
-                        created_at=datetime.now(),
+                    # 导入文件
+                    result = self.import_csv(
+                        csv_file.read_text(encoding="gbk"), csv_file.name, mode="replace"
                     )
-                    session.add(record)
-                    session.commit()
-                    logger.info(f"文件 {csv_file.name} 导入记录已保存")
+                    # 记录导入成功，写入导入记录
+                    if result and result.get("imported", 0) > 0:
+                        record = OrderFile(
+                            file_name=csv_file.name,
+                            file_path=str(csv_file.parent),
+                            created_at=datetime.now(),
+                        )
+                        session.add(record)
+                        #session.commit()
+                        logger.info(f"文件 {csv_file.name} 导入记录已保存")
 
         except Exception as e:
-            logger.error(f"扫描订单文件时出错: {e}")
+            logger.exception(f"扫描订单文件时出错: {e}")
 
     async def execute_position_rotation(self, trading_type: str = "", is_manual: bool = False) -> None:
         """
@@ -451,17 +437,15 @@ class SwitchPosManager:
         Args:
             instruction: 待更新的指令
         """
-        session = get_session()
-        if not session:
+        if not instructions:
             return
 
         try:
-            for instruction in instructions:
-                session.merge(instruction)
-            session.commit()
+            with session_scope() as session:
+                for instruction in instructions:
+                    session.merge(instruction)
         except Exception as e:
             logger.error(f"更新指令状态时出错: {e}")
-            session.rollback()
 
     def _check_instruction(
         self, instruction: RotationInstructionPo, is_manual: bool = False
@@ -504,28 +488,23 @@ class SwitchPosManager:
         Returns:
             List[RotationInstructionPo]: 所有指令列表
         """
-        session = get_session()
-        if not session:
-            return []
-
         try:
-            today = datetime.now().strftime("%Y%m%d")
-            instructions = (
-                session.query(RotationInstructionPo)
-                .filter(
-                    RotationInstructionPo.status != "COMPLETED",
-                    RotationInstructionPo.trading_date == today,
-                    RotationInstructionPo.is_deleted == False,
-                    RotationInstructionPo.enabled == True,
+            with session_scope() as session:
+                today = datetime.now().strftime("%Y%m%d")
+                instructions = (
+                    session.query(RotationInstructionPo)
+                    .filter(
+                        RotationInstructionPo.status != "COMPLETED",
+                        RotationInstructionPo.trading_date == today,
+                        RotationInstructionPo.is_deleted == False,
+                        RotationInstructionPo.enabled == True,
+                    )
+                    .all()
                 )
-                .all()
-            )
-            return instructions
+                return instructions
         except Exception as e:
             logger.error(f"获取所有指令列表时出错: {e}")
             return []
-        finally:
-            session.close()
 
     def _update_instruction(self, instruction: RotationInstructionPo) -> None:
         """
@@ -534,17 +513,11 @@ class SwitchPosManager:
         Args:
             instruction: 待更新的指令
         """
-        session = get_session()
-        if not session:
-            return
-
         try:
-            session.merge(instruction)
-            session.commit()
+            with session_scope() as session:
+                session.merge(instruction)
         except Exception as e:
             logger.error(f"更新指令状态时出错: {e}")
-        finally:
-            session.close()
 
 
     def _load_all_instructions(self) -> List[OrderInstruction]:

@@ -1187,7 +1187,6 @@ class Trader:
             account_id=data.get("account_id", self.account_id),
             strategy_id=data.get("strategy_id"),
             symbol=data.get("symbol"),
-            exchange_id=data.get("exchange_id"),
             offset=data.get("offset"),
             direction=data.get("direction"),
             volume=data.get("volume"),
@@ -1219,7 +1218,6 @@ class Trader:
                 "account_id": instruction.account_id,
                 "strategy_id": instruction.strategy_id,
                 "symbol": instruction.symbol,
-                "exchange_id": instruction.exchange_id,
                 "offset": instruction.offset,
                 "direction": instruction.direction,
                 "volume": instruction.volume,
@@ -1273,7 +1271,6 @@ class Trader:
                 "account_id": instruction.account_id,
                 "strategy_id": instruction.strategy_id,
                 "symbol": instruction.symbol,
-                "exchange_id": instruction.exchange_id,
                 "offset": instruction.offset,
                 "direction": instruction.direction,
                 "volume": instruction.volume,
@@ -1501,7 +1498,6 @@ class Trader:
                     "param_type": param.param_type,
                     "description": param.description,
                     "group": param.group,
-                    "created_at": param.created_at.isoformat() if param.created_at else None,
                     "updated_at": param.updated_at.isoformat() if param.updated_at else None,
                 }
         return None
@@ -1541,7 +1537,6 @@ class Trader:
                 "param_type": param.param_type,
                 "description": param.description,
                 "group": param.group,
-                "created_at": param.created_at.isoformat() if param.created_at else None,
                 "updated_at": param.updated_at.isoformat() if param.updated_at else None,
             }
 

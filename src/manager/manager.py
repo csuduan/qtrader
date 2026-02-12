@@ -126,7 +126,7 @@ class TradingManager:
             return success
 
         except Exception as e:
-            logger.error(f"启动Trader Proxy [{account_id}] 失败: {e}")
+            logger.exception(f"启动Trader Proxy [{account_id}] 失败: {e}")
             return False
 
     async def stop_trader(self, account_id: str) -> bool:
@@ -151,7 +151,7 @@ class TradingManager:
             return success
 
         except Exception as e:
-            logger.error(f"停止Trader [{account_id}] 失败: {e}")
+            logger.exception(f"停止Trader [{account_id}] 失败: {e}")
             return False
 
     async def restart_trader(self, account_id: str) -> bool:

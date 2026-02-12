@@ -25,15 +25,11 @@ from src.utils.ipc.protocol import (
     create_response,
 )
 
-# V1版本（向后兼容）
-from src.utils.ipc.socket_client import SocketClient as SocketClientV1
-from src.utils.ipc.socket_client_v2 import SocketClient
-from src.utils.ipc.socket_server import SocketServer as SocketServerV1
-from src.utils.ipc.socket_server import request
+from src.utils.ipc.socket_client import SocketClient
 
 # V2版本（推荐）
-from src.utils.ipc.socket_server_v2 import SocketServer
-from src.utils.ipc.socket_server_v2 import request as request_v2
+from src.utils.ipc.socket_server import SocketServer
+from src.utils.ipc.socket_server import request
 
 # 工具类
 from src.utils.ipc.utils import (
@@ -44,14 +40,9 @@ from src.utils.ipc.utils import (
 )
 
 __all__ = [
-    # V1版本（向后兼容）
-    "SocketClientV1",
-    "SocketServerV1",
-    "request",
-    # V2版本（推荐）
     "SocketClient",
     "SocketServer",
-    "request_v2",
+    "request",
     # 协议相关
     "MessageType",
     "MessageBody",

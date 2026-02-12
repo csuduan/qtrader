@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from src.app_context import get_app_context
 from src.models.object import AccountData, OrderData, PositionData, TradeData
 from src.models.po import AccountPo, OrderPo, PositionPo, TradePo
-from src.utils.database import get_session
+from src.utils.database import session_scope
 from src.utils.event_engine import EventEngine, EventTypes, HandlerType
 from src.utils.logger import get_logger
 
@@ -76,29 +76,23 @@ class Persistence:
                 logger.warning("账户更新事件缺少account_id")
                 return
 
-            session = get_session()
-            if not session:
-                logger.error("无法获取数据库会话")
-                return
+            with session_scope() as session:
+                account_po = session.query(AccountPo).filter_by(account_id=account_id).first()
+                if not account_po:
+                    account_po = AccountPo(account_id=account_id)
 
-            account_po = session.query(AccountPo).filter_by(account_id=account_id).first()
-            if not account_po:
-                account_po = AccountPo(account_id=account_id)
+                account_po.broker_name = None  # type: ignore[assignment]
+                account_po.currency = "CNY"  # type: ignore[assignment]
+                account_po.balance = Decimal(data.balance)  # type: ignore[assignment]
+                account_po.available = Decimal(str(data.available))  # type: ignore[assignment]
+                account_po.margin = Decimal(str(data.margin))  # type: ignore[assignment]
+                account_po.float_profit = Decimal(str(data.float_profit or 0))  # type: ignore[assignment]
+                account_po.position_profit = Decimal(str(data.hold_profit or 0))  # type: ignore[assignment]
+                account_po.close_profit = Decimal(str(data.close_profit or 0))  # type: ignore[assignment]
+                account_po.risk_ratio = Decimal(str(data.risk_ratio or 0))  # type: ignore[assignment]
+                account_po.updated_at = datetime.now()  # type: ignore[assignment]
 
-            account_po.broker_name = None  # type: ignore[assignment]
-            account_po.currency = "CNY"  # type: ignore[assignment]
-            account_po.balance = Decimal(data.balance)  # type: ignore[assignment]
-            account_po.available = Decimal(str(data.available))  # type: ignore[assignment]
-            account_po.margin = Decimal(str(data.margin))  # type: ignore[assignment]
-            account_po.float_profit = Decimal(str(data.float_profit or 0))  # type: ignore[assignment]
-            account_po.position_profit = Decimal(str(data.hold_profit or 0))  # type: ignore[assignment]
-            account_po.close_profit = Decimal(str(data.close_profit or 0))  # type: ignore[assignment]
-            account_po.risk_ratio = Decimal(str(data.risk_ratio or 0))  # type: ignore[assignment]
-            account_po.updated_at = datetime.now()  # type: ignore[assignment]
-
-            session.add(account_po)
-            session.commit()
-            session.close()
+                session.add(account_po)
 
             logger.debug(f"账户信息已持久化: {account_id}")
 
@@ -124,37 +118,31 @@ class Persistence:
                 logger.warning("持仓更新事件缺少必要字段")
                 return
 
-            session = get_session()
-            if not session:
-                logger.error("无法获取数据库会话")
-                return
-
-            position_po = (
-                session.query(PositionPo).filter_by(account_id=account_id, symbol=symbol).first()
-            )
-
-            if not position_po:
-                position_po = PositionPo(
-                    account_id=account_id,
-                    symbol=symbol,
+            with session_scope() as session:
+                position_po = (
+                    session.query(PositionPo).filter_by(account_id=account_id, symbol=symbol).first()
                 )
 
-            position_po.pos_long = data.pos_long  # type: ignore[assignment]
-            position_po.pos_short = data.pos_short  # type: ignore[assignment]
-            position_po.open_price_long = Decimal(str(data.open_price_long))  # type: ignore[assignment]
-            position_po.open_price_short = Decimal(str(data.open_price_short))  # type: ignore[assignment]
-            # 处理None值：如果为None则使用0
-            float_profit_long = data.float_profit_long or 0
-            float_profit_short = data.float_profit_short or 0
-            margin_long = data.margin_long or 0
-            margin_short = data.margin_short or 0
-            position_po.float_profit = Decimal(str(float_profit_long + float_profit_short))  # type: ignore[assignment]
-            position_po.margin = Decimal(str(margin_long + margin_short))  # type: ignore[assignment]
-            position_po.updated_at = datetime.now()  # type: ignore[assignment]
+                if not position_po:
+                    position_po = PositionPo(
+                        account_id=account_id,
+                        symbol=symbol,
+                    )
 
-            session.add(position_po)
-            session.commit()
-            session.close()
+                position_po.pos_long = data.pos_long  # type: ignore[assignment]
+                position_po.pos_short = data.pos_short  # type: ignore[assignment]
+                position_po.open_price_long = Decimal(str(data.open_price_long))  # type: ignore[assignment]
+                position_po.open_price_short = Decimal(str(data.open_price_short))  # type: ignore[assignment]
+                # 处理None值：如果为None则使用0
+                float_profit_long = data.float_profit_long or 0
+                float_profit_short = data.float_profit_short or 0
+                margin_long = data.margin_long or 0
+                margin_short = data.margin_short or 0
+                position_po.float_profit = Decimal(str(float_profit_long + float_profit_short))  # type: ignore[assignment]
+                position_po.margin = Decimal(str(margin_long + margin_short))  # type: ignore[assignment]
+                position_po.updated_at = datetime.now()  # type: ignore[assignment]
+
+                session.add(position_po)
 
             logger.debug(f"持仓信息已持久化: {symbol}")
 
@@ -190,31 +178,24 @@ class Persistence:
                 logger.warning("成交更新事件缺少trade_id")
                 return
 
-            session = get_session()
-            if not session:
-                logger.error("无法获取数据库会话")
-                return
+            with session_scope() as session:
+                existing = session.query(TradePo).filter_by(trade_id=trade_id).first()
+                if existing:
+                    return
 
-            existing = session.query(TradePo).filter_by(trade_id=trade_id).first()
-            if existing:
-                session.close()
-                return
+                trade_po = TradePo(
+                    account_id=account_id,
+                    trade_id=trade_id,
+                    order_id=data.order_id,
+                    symbol=data.symbol,
+                    direction=data.direction,
+                    offset=data.offset,
+                    price=Decimal(str(data.price)),
+                    volume=data.volume,
+                    trade_date_time=data.trade_time,
+                )
 
-            trade_po = TradePo(
-                account_id=account_id,
-                trade_id=trade_id,
-                order_id=data.order_id,
-                symbol=data.symbol,
-                direction=data.direction,
-                offset=data.offset,
-                price=Decimal(str(data.price)),
-                volume=data.volume,
-                trade_date_time=data.trade_time,
-            )
-
-            session.add(trade_po)
-            session.commit()
-            session.close()
+                session.add(trade_po)
 
             logger.debug(f"成交信息已持久化: {trade_id}")
 

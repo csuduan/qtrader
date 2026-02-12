@@ -90,7 +90,7 @@ class AsyncEventEngine:
                         try:
                             handler(event.data)
                         except Exception as e:
-                            logger.error(f"[{self._name}] 同步处理器执行失败: {e}")
+                            logger.exception(f"[{self._name}] 同步处理器执行失败: {e}")
 
                 if tasks:
                     await asyncio.gather(*tasks, return_exceptions=True)
@@ -112,7 +112,7 @@ class AsyncEventEngine:
                 logger.info(f"[{self._name}] 事件循环被取消")
                 break
             except Exception as e:
-                logger.error(f"[{self._name}] 事件循环错误: {e}")
+                logger.exception(f"[{self._name}] 事件循环错误: {e}")
                 # 短暂休眠后继续
                 await asyncio.sleep(0.1)
 

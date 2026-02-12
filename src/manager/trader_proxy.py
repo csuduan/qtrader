@@ -334,7 +334,7 @@ class TraderProxy:
                 logger.warning(f"TraderProxy [{self.account_id}] 子进程强制停止")
 
         except Exception as e:
-            logger.error(f"TraderProxy [{self.account_id}] 清理子进程失败: {e}")
+            logger.exception(f"TraderProxy [{self.account_id}] 清理子进程失败: {e}")
         finally:
             self.process = None
             # 清理PID文件
@@ -637,7 +637,7 @@ class TraderProxy:
             return None
 
         except Exception as e:
-            logger.error(f"TraderProxy [{self.account_id}] 下单请求失败: {e}")
+            logger.exception(f"TraderProxy [{self.account_id}] 下单请求失败: {e}")
             return None
 
     async def send_cancel_request(self, order_id: str) -> bool:
@@ -663,7 +663,7 @@ class TraderProxy:
             return bool(response)
 
         except Exception as e:
-            logger.error(f"TraderProxy [{self.account_id}] 撤单请求失败: {e}")
+            logger.exception(f"TraderProxy [{self.account_id}] 撤单请求失败: {e}")
             return False
 
     async def subscribe(self, request_data):
@@ -682,7 +682,7 @@ class TraderProxy:
             return bool(response)
 
         except Exception as e:
-            logger.error(f"TraderProxy [{self.account_id}] 订阅请求失败: {e}")
+            logger.exception(f"TraderProxy [{self.account_id}] 订阅请求失败: {e}")
             return False
 
     # ==================== 网关控制接口 ====================

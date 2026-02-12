@@ -249,7 +249,7 @@ class ConfigLoader:
                 self.app_config.accounts.append(account)
                 logger.info(f"已加载账户配置: {account_id} (enabled: {account.enabled})")
             except Exception as e:
-                logger.error(f"加载账户配置文件 {account_file.name} 失败: {e}")
+                logger.exception(f"加载账户配置文件 {account_file.name} 失败: {e}")
 
         # 根据account_ids字段排序（如果有配置顺序）
         if self.app_config.account_ids:

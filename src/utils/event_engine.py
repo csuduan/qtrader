@@ -140,7 +140,7 @@ class EventEngine:
                 else:
                     logger.warning(f"[{self._name}] 事件循环未运行，无法处理异步处理器")
             except Exception as e:
-                logger.error(f"[{self._name}] 调度异步处理器失败: {e}")
+                logger.exception(f"[{self._name}] 调度异步处理器失败: {e}")
         else:
             # 同步处理器：直接调用
             handler(event)
