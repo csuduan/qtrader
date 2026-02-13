@@ -251,6 +251,18 @@ class BaseGateway(ABC):
         Returns:
             Dict[str, ContractData]: 合约字典 {symbol: ContractData}
         """
+    @abstractmethod
+    def std_symbol(self,symbol: str) -> Optional[str]:
+        """
+        查询合约信息
+
+        Args:
+            symbol: 合约代码,兼容 "SHFE.RB2505","SHFE.RB2605","rb2605","RB2605" 格式
+
+        Returns:
+            symbol:标准化后的合约代码，如 "rb2505.SHFE"
+        """
+    
 
     @abstractmethod
     def get_quotes(self) -> dict[str, TickData]:
@@ -261,6 +273,7 @@ class BaseGateway(ABC):
             dict[str, QuoteData]: 行情字典 {symbol: QuoteData}
         """
         pass
+    
 
     @abstractmethod
     def get_kline(self, symbol: str, interval: str) -> Optional[pd.DataFrame]:

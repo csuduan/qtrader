@@ -86,8 +86,7 @@ class Exchange(str, Enum):
     # 股票交易所
     SSE = "SSE"
     SZSE = "SZSE"
-    # 特殊
-    LOCAL = "LOCAL"
+    # 其他交易所
     NONE = ""
 
 

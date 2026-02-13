@@ -152,7 +152,7 @@ def close_database() -> None:
 
 
 @contextmanager
-def session_scope():
+def session_scope() -> Generator[Session, None, None]:
     """提供事务范围的上下文管理器"""
     session = get_session()
     if session is None:

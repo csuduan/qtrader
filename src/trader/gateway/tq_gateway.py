@@ -42,7 +42,7 @@ from src.models.po import ContractPo
 from src.trader.gateway.base_gateway import BaseGateway
 from src.utils.async_event_engine import AsyncEventEngine
 from src.utils.config_loader import GatewayConfig
-from src.utils.database import get_database
+from src.utils.database import session_scope
 from src.utils.logger import get_logger
 from src.app_context import get_app_context
 
@@ -85,8 +85,9 @@ class TqGateway(BaseGateway):
         # 自定义换仓
         self._klines: Dict[str, DataFrame] = {}
         self._pending_orders: Dict[str, Order] = {}
-        # 合约符号映射(原始symbol -> 统一symbol)
+        # 大写合约，key为原始symbol，value为exchange
         self._upper_symbols: Dict[str, str] = {}
+        #合约信息，key为标准化后的symbol，value为ContractData
         self._contracts: Dict[str, ContractData] = {}
 
         # 历史订阅的合约符号列表
@@ -166,6 +167,106 @@ class TqGateway(BaseGateway):
         except Exception as e:
             logger.error(f"TqSdk断开连接失败: {e}", exc_info=True)
             return False
+            
+    def _tq_run(self):
+        """
+        TqSdk主线程（独立线程中运行）
+
+        职责：
+        1. 连接API
+        2. 检测数据变化
+        3. 将变化数据推送到同步队列
+        """
+        try:
+            #开始连接
+            self._running = True
+
+            # 创建认证
+            tianqin_config: Any = self.config.tianqin if self.config.tianqin else None
+            username = getattr(tianqin_config, "username", "") if tianqin_config else ""
+            password = getattr(tianqin_config, "password", "") if tianqin_config else ""
+            if username and password:
+                self.auth = TqAuth(username, password)
+            else:
+                self.auth = None
+
+            # 根据账户类型创建账户对象
+            broker_type = self.config.broker.type if self.config.broker else "sim"
+            if broker_type == "kq":
+                account = TqKq()
+            elif broker_type == "real":
+                account = TqAccount(
+                    broker_id=self.config.broker.broker_name if self.config.broker else "",
+                    account_id=self.config.broker.user_id if self.config.broker else "",
+                    password=self.config.broker.password if self.config.broker else "",
+                )
+            elif broker_type == "rohon":
+                account = TqRohon(
+                    front_broker=self.config.broker.broker_name if self.config.broker else "",
+                    account_id=self.config.broker.user_id if self.config.broker else "",
+                    password=self.config.broker.password if self.config.broker else "",
+                    app_id=self.config.broker.app_id if self.config.broker else "",
+                    auth_code=self.config.broker.auth_code if self.config.broker else "",
+                    front_url=self.config.broker.url if self.config.broker else "",
+                )
+            else:  # sim
+                account = TqSim()
+
+            # 创建TqApi
+            self.api = TqApi( account, auth=self.auth, web_gui=False)
+            assert self.api is not None  # 确保类型检查器知道 api 不是 None
+
+            # 获取账户和持仓、成交、委托单初始数据
+            self._account = self.api.get_account()
+            self._positions = self.api.get_position()
+            self._orders = self.api.get_order()
+            self._trades = self.api.get_trade()
+
+            # 发送初始数据
+            self.connected = True
+            self._push_account(self._convert_account(self._account))
+
+            # 加载合约列表：先从数据库加载今天的，如果没有则从API查询
+            #if len(self._contracts) <= 0:
+            self._query_and_save_contracts(datetime.now().strftime("%Y-%m-%d"))
+
+            self.trading_day = self.get_trading_day()
+            logger.info(f"TqSdk连接成功,交易日: {self.trading_day}")
+
+            # 订阅历史合约
+            self.subscribe(list(self.hist_subs))
+            # 初始化持仓合约的行情订阅
+            pos_symbols = [symbol for symbol in self._positions if len(symbol) <= 12]
+            self.subscribe(pos_symbols)
+
+            # 订阅kline
+            for symbol, interval in self.kline_subs:
+                self.subscribe_bars(symbol, interval)
+
+            logger.info("TqSdk开始轮询...")
+            while self._running:
+                if self.api is None:
+                    break
+
+                try:
+                    has_data = self.api.wait_update(deadline=time.time() + 3)
+
+                    if has_data:
+                        self._collect_and_push_updates()
+
+                except Exception as e:
+                    logger.error(f"轮询线程异常: {e}")
+                    time.sleep(1)
+            self.connected = False
+            self._push_account(self._convert_account(self._account))
+            logger.info("TqSdk轮询线程已退出")
+
+        except Exception as e:
+            logger.exception(f"轮询线程致命错误: {e}")
+        finally:
+            if self.api:
+                self.api.close()
+                self.api = None
 
     def get_trading_day(self) -> Optional[str]:
         """获取当前交易日"""
@@ -191,16 +292,16 @@ class TqGateway(BaseGateway):
         try:
             if isinstance(symbol, str):
                 symbol = [symbol]
+            symbols = [self.std_symbol(s) for s  in symbol]
 
             # 添加到订阅列表中
             if not self.connected:
                 return True
             
-            self.hist_subs.update(symbol)
+            self.hist_subs.update(symbols)
 
             # 格式化合约代码
-            std_symbols = [self._format_symbol(s) for s  in symbol]
-            subscribe_symbols = [s for s in std_symbols if s and s not in self._quotes]
+            subscribe_symbols = [s for s in symbols if s and s not in self._quotes]
             if len(subscribe_symbols) == 0:
                 return True
 
@@ -216,6 +317,7 @@ class TqGateway(BaseGateway):
 
     def subscribe_bars(self, symbol: str, interval: str) -> bool:
         """订阅K线数据"""
+        symbol = self.std_symbol(symbol)
         if (symbol, interval) not in self.kline_subs:
             self.kline_subs.append((symbol, interval))
 
@@ -227,7 +329,7 @@ class TqGateway(BaseGateway):
         if self.api is None:
             return False
         kline = self.api.get_kline_serial(  # type: ignore[union-attr]
-            symbol=self._format_symbol(symbol), duration_seconds=seconds, data_length=data_length
+            symbol=symbol, duration_seconds=seconds, data_length=data_length
         )
         self._klines[(symbol, interval)] = kline  # type: ignore[assignment, index]
         logger.info(f"订阅K线数据: {symbol} {interval}")
@@ -244,18 +346,14 @@ class TqGateway(BaseGateway):
             if self.api is None:
                 raise Exception("TqSdk未连接")
 
-            formatted_symbol = self._format_symbol(req.symbol)
-            if not formatted_symbol:
-                logger.error(f"无效的合约代码: {req.symbol}")
-                raise Exception(f"无效的合约代码: {req.symbol}")
-
+            symbol = self.std_symbol(req.symbol)
             # 获取行情信息(市价单使用对手价)
             price = req.price
             if price is None or price == 0:
-                quote = self._quotes.get(formatted_symbol)
+                quote = self._quotes.get(symbol)
                 if not quote or math.isnan(quote.last_price):
-                    logger.error(f"未获取到行情信息: {formatted_symbol}")
-                    raise Exception(f"未获取到行情信息: {formatted_symbol}")
+                    logger.error(f"未获取到行情信息: {symbol}")
+                    raise Exception(f"未获取到行情信息: {symbol}")
 
                 # 使用对手价
                 if req.direction == Direction.BUY:
@@ -265,7 +363,7 @@ class TqGateway(BaseGateway):
 
 
             order = self.api.insert_order(
-                symbol=formatted_symbol,
+                symbol=symbol,
                 direction=req.direction.value,
                 offset=req.offset.value,
                 volume=req.volume,
@@ -316,12 +414,7 @@ class TqGateway(BaseGateway):
             合约信息字典，如果没有则返回None
         """
         try:
-            db = get_database()
-            if not db:
-                logger.warning("数据库未初始化，无法加载合约信息")
-                return None
-
-            with db.get_session() as session:
+            with session_scope() as session:
                 contract_pos = (
                     session.query(ContractPo)
                     .filter(ContractPo.update_date == update_date)
@@ -350,7 +443,7 @@ class TqGateway(BaseGateway):
                         option_type=po.option_type,
                     )
                     self._contracts[contract.symbol] = contract
-                    self._upper_symbols[contract.symbol.rsplit(".")[1].upper()] = contract.symbol
+                    self._upper_symbols[contract.symbol.rsplit(".")[1].upper()] = contract.exchange.value
                     loaded_count += 1
 
                 logger.info(f"从数据库加载了 {loaded_count} 个合约信息 (更新日期: {update_date})")
@@ -377,17 +470,6 @@ class TqGateway(BaseGateway):
             symbol_infos = self.api.query_symbol_info(quotes)
             logger.info(f"从API查询到 {len(symbol_infos)} 个合约")
 
-            db = get_database()
-            if not db:
-                logger.warning("数据库未初始化，无法保存合约信息")
-            else:
-                # 确保表已创建
-                try:
-                    db.create_tables()
-                    logger.info("确保合约信息表已创建")
-                except Exception as e:
-                    logger.warning(f"创建表时出现错误（可能是表已存在）: {e}")
-
             contracts_to_save = []
 
             for index, item in symbol_infos.iterrows():
@@ -409,42 +491,38 @@ class TqGateway(BaseGateway):
                     option_type=None,
                 )
                 self._contracts[contract.symbol] = contract
-                self._upper_symbols[contract.symbol.rsplit(".")[1].upper()] = contract.symbol
+                self._upper_symbols[contract.symbol.rsplit(".")[1].upper()] = contract.exchange.value
 
                 # 准备保存到数据库的数据
-                if db:
-                    contract_po = ContractPo(
-                        symbol=instrument_id,
-                        exchange_id=item.exchange_id,
-                        instrument_name=item.instrument_name,
-                        product_type="FUTURES",
-                        volume_multiple=item.volume_multiple,
-                        price_tick=item.price_tick,
-                        min_volume=1,
-                        option_strike=None,
-                        option_underlying=None,
-                        option_type=None,
-                        update_date=update_date,
-                    )
-                    contracts_to_save.append(contract_po)
+                contract_po = ContractPo(
+                    symbol=instrument_id,
+                    exchange_id=item.exchange_id,
+                    instrument_name=item.instrument_name,
+                    product_type="FUTURES",
+                    volume_multiple=item.volume_multiple,
+                    price_tick=item.price_tick,
+                    min_volume=1,
+                    option_strike=None,
+                    option_underlying=None,
+                    option_type=None,
+                    update_date=update_date,
+                )
+                contracts_to_save.append(contract_po)
 
             logger.info(f"从API加载了 {len(self._contracts)} 个合约信息，准备保存 {len(contracts_to_save)} 个到数据库")
 
             # 批量保存到数据库
-            # if db and contracts_to_save:
-            #     try:
-            #         with db.get_session() as session:
-            #             # 先删除今天之前的数据
-            #             deleted_count = session.query(ContractPo).filter(
-            #                 ContractPo.update_date < update_date
-            #             ).delete(synchronize_session=False)
-            #             logger.info(f"删除了 {deleted_count} 条旧合约信息")
-            #             # 批量插入新数据
-            #             session.add_all(contracts_to_save)
-            #             session.commit()
-            #             logger.info(f"成功保存 {len(contracts_to_save)} 个合约信息到数据库")
-            #     except Exception as e:
-            #         logger.error(f"保存合约信息到数据库失败: {e}", exc_info=True)
+            if len(contracts_to_save)>0:
+                try:
+                    with  session_scope() as session:
+                        # 先删除历史数据
+                        deleted_count = session.query(ContractPo).delete(synchronize_session=False)
+                        logger.info(f"删除了 {deleted_count} 条旧合约信息")
+                        # 批量插入新数据
+                        session.add_all(contracts_to_save)
+                        logger.info(f"成功保存 {len(contracts_to_save)} 个合约信息到数据库")
+                except Exception as e:
+                    logger.exception(f"保存合约信息到数据库失败: {e}")
 
             logger.info(f"成功从API加载 {len(self._contracts)} 个合约信息")
 
@@ -453,33 +531,7 @@ class TqGateway(BaseGateway):
 
     def get_contracts(self) -> Dict[str, ContractData]:
         """查询合约（兼容）"""
-        try:
-            if not self.connected or not self.api:
-                logger.error("TqSdk未连接")
-                return {}
-
-            if not self._contracts:
-                if self.api is None:
-                    return {}
-                quotes = self.api.query_quotes(ins_class=["FUTURE"], expired=False)
-                for symbol in quotes:
-                    self._contracts[symbol] = ContractData(
-                        symbol=symbol.split(".")[1] if "." in symbol else symbol,
-                        exchange=self._parse_exchange(symbol),
-                        name=symbol,
-                        product_type=ProductType.FUTURES,
-                        multiple=1,
-                        pricetick=0.01,
-                        min_volume=1,
-                        option_strike=None,
-                        option_underlying=None,
-                        option_type=None,
-                    )
-
-            return self._contracts
-        except Exception as e:
-            logger.error(f"查询合约失败: {e}")
-            return {}
+        return self._contracts or {}
 
     def get_account(self) -> Optional[AccountData]:
         """获取账户数据(兼容)"""
@@ -797,105 +849,7 @@ class TqGateway(BaseGateway):
         self._push_to_queue("contract", contract_data)
      
 
-    def _tq_run(self):
-        """
-        TqSdk主线程（独立线程中运行）
-
-        职责：
-        1. 连接API
-        2. 检测数据变化
-        3. 将变化数据推送到同步队列
-        """
-        try:
-            #开始连接
-            self._running = True
-
-            # 创建认证
-            tianqin_config: Any = self.config.tianqin if self.config.tianqin else None
-            username = getattr(tianqin_config, "username", "") if tianqin_config else ""
-            password = getattr(tianqin_config, "password", "") if tianqin_config else ""
-            if username and password:
-                self.auth = TqAuth(username, password)
-            else:
-                self.auth = None
-
-            # 根据账户类型创建账户对象
-            broker_type = self.config.broker.type if self.config.broker else "sim"
-            if broker_type == "kq":
-                account = TqKq()
-            elif broker_type == "real":
-                account = TqAccount(
-                    broker_id=self.config.broker.broker_name if self.config.broker else "",
-                    account_id=self.config.broker.user_id if self.config.broker else "",
-                    password=self.config.broker.password if self.config.broker else "",
-                )
-            elif broker_type == "rohon":
-                account = TqRohon(
-                    front_broker=self.config.broker.broker_name if self.config.broker else "",
-                    account_id=self.config.broker.user_id if self.config.broker else "",
-                    password=self.config.broker.password if self.config.broker else "",
-                    app_id=self.config.broker.app_id if self.config.broker else "",
-                    auth_code=self.config.broker.auth_code if self.config.broker else "",
-                    front_url=self.config.broker.url if self.config.broker else "",
-                )
-            else:  # sim
-                account = TqSim()
-
-            # 创建TqApi
-            self.api = TqApi( account, auth=self.auth, web_gui=False)
-            assert self.api is not None  # 确保类型检查器知道 api 不是 None
-
-            # 获取账户和持仓、成交、委托单初始数据
-            self._account = self.api.get_account()
-            self._positions = self.api.get_position()
-            self._orders = self.api.get_order()
-            self._trades = self.api.get_trade()
-
-            # 发送初始数据
-            self.connected = True
-            self._push_account(self._convert_account(self._account))
-
-            # 加载合约列表：先从数据库加载今天的，如果没有则从API查询
-            #if len(self._contracts) <= 0:
-            self._query_and_save_contracts(datetime.now().strftime("%Y-%m-%d"))
-
-            self.trading_day = self.get_trading_day()
-            logger.info(f"TqSdk连接成功,交易日: {self.trading_day}")
-
-            # 订阅历史合约
-            self.subscribe(list(self.hist_subs))
-            # 初始化持仓合约的行情订阅
-            pos_symbols = [symbol for symbol in self._positions if len(symbol) <= 12]
-            self.subscribe(pos_symbols)
-
-            # 订阅kline
-            for symbol, interval in self.kline_subs:
-                self.subscribe_bars(symbol, interval)
-
-            logger.info("TqSdk开始轮询...")
-            while self._running:
-                if self.api is None:
-                    break
-
-                try:
-                    has_data = self.api.wait_update(deadline=time.time() + 3)
-
-                    if has_data:
-                        self._collect_and_push_updates()
-
-                except Exception as e:
-                    logger.error(f"轮询线程异常: {e}")
-                    time.sleep(1)
-            self.connected = False
-            self._push_account(self._convert_account(self._account))
-            logger.info("TqSdk轮询线程已退出")
-
-        except Exception as e:
-            logger.exception(f"轮询线程致命错误: {e}")
-        finally:
-            if self.api:
-                self.api.close()
-                self.api = None
+    
 
     async def _event_dispatcher(self):
         """
@@ -948,16 +902,42 @@ class TqGateway(BaseGateway):
             "contract": EventTypes.CONTRACT_UPDATE,
         }
         return mapping.get(gateway_event)
+ 
+    def std_symbol(self,symbol: str) -> Optional[str]:
+        """
+        查询合约信息
+        Args:
+            symbol: 合约代码,兼容 "SHFE.RB2505","SHFE.RB2605","rb2605","RB2605" 格式
 
-    def _format_symbol(self, symbol: str) -> Optional[str]:
-        """格式化合约代码"""
+        Returns:
+            symbol:标准化后的合约代码，如 "SHFE.rb2505"
+        """
         if not symbol:
-            return None
-        upper_symbol = symbol.upper()
-        for part in upper_symbol.rsplit("."):
-            if part in self._upper_symbols:
-                return self._upper_symbols[part]
-        logger.warning(f"未找到匹配的合约符号: {symbol}")
+            raise ValueError(f"未找到匹配的合约符号: {symbol}")
+        exchange_id = ""
+        instrument_id = ""
+        parts = symbol.split(".")
+        if len(parts) == 2:
+            if parts[0] in Exchange.__members__:
+                exchange_id = parts[0]
+                instrument_id = parts[1]
+            else:
+                exchange_id = parts[1]
+                instrument_id = parts[0]
+        else:
+            upper_symbol = symbol.upper()
+            if upper_symbol in self._upper_symbols:
+                exchange_id = self._upper_symbols[upper_symbol]
+                instrument_id = upper_symbol
+            else:
+                logger.warning(f"未找到匹配的合约符号: {symbol}")
+                raise ValueError(f"未找到匹配的合约符号: {symbol}")
+            
+        #大小写规范化
+        if exchange_id in ["CFFEX","CZCE"]:
+            return f"{exchange_id}.{instrument_id.upper()}"
+        else:
+            return f"{exchange_id}.{instrument_id.lower()}"
 
     def _parse_exchange(self, exchange_code: str) -> Exchange:
         """解析交易所代码"""

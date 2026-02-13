@@ -17,6 +17,7 @@ from src.models.object import (
     AccountData,
     CancelRequest,
     Direction,
+    Exchange,
     Offset,
     OrderData,
     OrderRequest,
@@ -636,3 +637,15 @@ class TradingEngine:
             self._order_cmds.pop(cmd_id, None)
         if finished_cmds:
             logger.info(f"清理已完成指令: {len(finished_cmds)}个")
+
+    def std_symbol(self, symbol: str) -> str:
+        """
+        标准化合约代码
+
+        Args:
+            symbol: 完整合约代码，兼容 "SHFE.rb2505","rb2505","rb2505.SHFE" 格式
+
+        Returns:
+            标准化后的合约代码，如 "rb2505.SHFE"
+        """
+        return self.gateway.std_symbol(symbol)

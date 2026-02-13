@@ -51,20 +51,7 @@ def datetime_to_nanos(dt: datetime) -> int:
     return int(dt.timestamp() * 1_000_000_000)
 
 
-def parse_symbol(symbol: str) -> tuple[str, str]:
-    """
-    解析合约代码
 
-    Args:
-        symbol: 完整合约代码，如 "SHFE.rb2505"
-
-    Returns:
-        (exchange_id, instrument_id) 元组
-    """
-    parts = symbol.split(".", 1)
-    if len(parts) == 2:
-        return parts[0], parts[1]
-    return "", symbol
 
 
 def _get_float_param(config: dict, keys: list, default: float) -> float:
@@ -124,3 +111,18 @@ def _parse_time(time_str: str) -> time:
     except Exception as e:
         logger.warning(f"时间解析失败: {time_str}, {e}")
         return time(0, 0, 0)
+
+def parse_symbol(symbol: str) -> tuple[str, str]:
+    """
+    解析合约代码
+
+    Args:
+        symbol: 完整合约代码，如 "SHFE.rb2505"
+
+    Returns:
+        (exchange_id, instrument_id) 元组
+    """
+    parts = symbol.split(".", 1)
+    if len(parts) == 2:
+        return parts[0], parts[1]
+    return "", symbol
