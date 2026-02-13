@@ -22,7 +22,7 @@ from src.models.po import RotationInstructionPo
 from src.models.po import SwitchPosImportPo as OrderFile
 from src.trader.trading_engine import TradingEngine
 from src.trader.order_cmd import OrderCmd, SplitStrategyType
-from src.utils.config_loader import AppConfig, TraderConfig
+from src.utils.config_loader import AppConfig,AccountConfig
 from src.utils.database import session_scope
 from src.utils.helpers import parse_symbol
 from src.utils.logger import get_logger
@@ -64,7 +64,7 @@ class OrderInstruction:
 class SwitchPosManager:
     """换仓管理器，负责换仓逻辑"""
 
-    def __init__(self, config: Any, trading_engine: TradingEngine):
+    def __init__(self, config: AccountConfig, trading_engine: TradingEngine):
         """
         初始化持仓管理器
 
@@ -72,16 +72,84 @@ class SwitchPosManager:
             config: 应用配置（AppConfig 或 AccountConfig）
             trading_engine: 交易引擎实例
         """
-        self.config: TraderConfig = config
-        self.trading_engine = trading_engine
+        self.config: AccountConfig = config
+        self.trading_engine: TradingEngine = trading_engine
         self.switchPos_files_dir = config.paths.switchPos_files
         self.working = False
         self.running_instructions: Optional[List[RotationInstructionPo]] = None
         self.is_manual = False
+        self.all_instructions = []
 
     def start(self):
         """启动换仓管理器"""
+        # 加载所有换仓指令
+        self.load_rotation_instructions()
         pass
+    
+    def get_today_instructions(self) -> List[RotationInstructionPo]:
+        """获取今日换仓指令"""
+        today = datetime.now().strftime("%Y%m%d")
+        return [x for x in self.all_instructions if x.trading_date == today]
+    
+    def update_instruction(self, data: dict):
+        """更新换仓指令"""
+        instruction_id = data.get("instruction_id")
+        if not instruction_id:
+            raise ValueError("缺少指令ID")
+        
+        instruction = next((x for x in self.all_instructions if x.id == instruction_id), None)
+        if not instruction:
+            raise ValueError("指令不存在")
+        
+        if data.get("enabled") is not None:
+            instruction.enabled = data["enabled"]
+        if data.get("status") is not None:
+            instruction.status = data["status"]
+        if data.get("filled_volume") is not None:
+            instruction.filled_volume = data["filled_volume"]   
+        instruction.updated_at = datetime.now()
+
+        # 更新数据库
+        with session_scope() as session:
+            session.merge(instruction)
+        
+        return instruction
+    
+    def delete_instruction(self, ids: List[str]):
+        """删除换仓指令"""
+        self.all_instructions = [x for x in self.all_instructions if x.id not in ids]
+        # 更新数据库
+        with session_scope() as session:
+            session.query(RotationInstructionPo).filter(RotationInstructionPo.id.in_(ids)).update(
+                {"is_deleted": True}, synchronize_session=False
+            )
+
+    def load_rotation_instructions(self):
+        """加载所有换仓指令"""
+        try:
+            # 从数据库加载今日换仓指令
+            with session_scope() as session:
+                today = datetime.now().strftime("%Y%m%d")
+                instructions = (
+                    session.query(RotationInstructionPo)
+                    .filter(
+                        RotationInstructionPo.trading_date == today,
+                        RotationInstructionPo.is_deleted == False,
+                    )
+                    .all()
+                )
+                self.all_instructions = instructions
+
+            # 订阅所有指令中的合约
+            symbols = list(set([instruction.symbol for instruction in self.all_instructions]))
+            self.trading_engine.subscribe_symbol(symbols)
+        except Exception as e:
+            logger.error(f"获取所有指令列表时出错: {e}")
+        logger.info(f"加载换仓指令完成，共 {len(self.all_instructions)} 条")
+
+        
+
+
 
     def import_csv(self, csv_text: str, filename: str, mode: str = "replace"):
         """
@@ -112,128 +180,109 @@ class SwitchPosManager:
             else:
                 raise ValueError(f"文件名格式错误，无法提取交易日: {filename}")
 
-        with session_scope() as session:
-            for line_num, line in enumerate(lines[1:], start=2):
-                try:
-                    values = line.strip().split(",")
-                    if len(values) < 6:
-                        logger.warning(f"第{line_num}行数据不完整，跳过: {line}")
-                        failed_count += 1
-                        continue
-
-                    account_id = values[0].strip()
-                    strategy_id = values[1].strip()
-                    instrument_str = values[2].strip()
-                    offset_str = values[3].strip()
-                    direction_str = values[4].strip()
-                    volume_str = values[5].strip()
-                    order_time_str = values[6].strip() if len(values) > 6 else None
-
-                    if not account_id or not strategy_id or not instrument_str:
-                        logger.warning(f"第{line_num}行缺少必要字段，跳过")
-                        failed_count += 1
-                        continue
-
-                    instrument_str = instrument_str.replace(" ", "")
-
-                    if "." not in instrument_str:
-                        logger.warning(f"第{line_num}行合约格式错误: {instrument_str}")
-                        failed_count += 1
-                        continue
-                    symbol = instrument_str
-
-                    offset_map = {"Open": "OPEN", "Close": "CLOSE", "开仓": "OPEN", "平仓": "CLOSE"}
-                    direction_map = {"Buy": "BUY", "Sell": "SELL", "买入": "BUY", "卖出": "SELL"}
-
-                    offset = offset_map.get(offset_str, offset_str.upper())
-                    direction = direction_map.get(direction_str, direction_str.upper())
-
-                    try:
-                        volume = int(volume_str)
-                    except ValueError:
-                        logger.warning(f"第{line_num}行手数格式错误: {volume_str}")
-                        failed_count += 1
-                        continue
-
-                    if volume <= 0:
-                        logger.warning(f"第{line_num}行手数必须大于0")
-                        failed_count += 1
-                        continue
-
-                    if mode == "replace" and trading_date:
-                        # 替换模式下，将相同交易日的旧记录设为已删除
-                        session.query(RotationInstructionPo).filter_by(
-                            trading_date=trading_date
-                        ).update({"is_deleted": True})
-
-                    instruction = RotationInstructionPo(
-                        account_id=account_id,
-                        strategy_id=strategy_id,
-                        symbol=symbol,
-                        offset=offset,
-                        direction=direction,
-                        volume=volume,
-                        filled_volume=0,
-                        price=0,
-                        order_time=order_time_str,
-                        trading_date=trading_date,
-                        enabled=True,
-                        status="PENDING",
-                        attempt_count=0,
-                        remaining_attempts=0,
-                        remaining_volume=volume,
-                        current_order_id=None,
-                        order_placed_time=None,
-                        last_attempt_time=None,
-                        error_message=None,
-                        source=filename,
-                        is_deleted=False,
-                        created_at=datetime.now(),
-                        updated_at=datetime.now(),
-                    )
-
-                    session.add(instruction)
-                    imported_count += 1
-
-                except Exception as e:
-                    logger.error(f"第{line_num}行解析失败: {e}, 内容: {line}")
+        add_instruction = []
+        for line_num, line in enumerate(lines[1:], start=2):
+            try:
+                values = line.strip().split(",")
+                if len(values) < 6:
+                    logger.warning(f"第{line_num}行数据不完整，跳过: {line}")
                     failed_count += 1
-                    errors.append({"row": line_num, "error": str(e), "content": line})
                     continue
 
-            logger.info(f"CSV导入完成，成功: {imported_count}, 失败: {failed_count}")
+                account_id = values[0].strip()
+                strategy_id = values[1].strip()
+                instrument_str = values[2].strip()
+                offset_str = values[3].strip()
+                direction_str = values[4].strip()
+                volume_str = values[5].strip()
+                order_time_str = values[6].strip() if len(values) > 6 else None
 
-        # 对导入的合约进行订阅
-        self.subscribe_today_symbols()
+                if not account_id or not strategy_id or not instrument_str:
+                    logger.warning(f"第{line_num}行缺少必要字段，跳过")
+                    failed_count += 1
+                    continue
 
+                if self.config.account_id != account_id:
+                    logger.warning(f"第{line_num}行账户ID {account_id} 与配置账户ID {self.config.account_id} 不一致，跳过")
+                    failed_count += 1
+                    continue
+
+                instrument_str = instrument_str.replace(" ", "")
+
+                if "." not in instrument_str:
+                    logger.warning(f"第{line_num}行合约格式错误: {instrument_str}")
+                    failed_count += 1
+                    continue
+                symbol = instrument_str
+
+                offset_map = {"Open": "OPEN", "Close": "CLOSE", "开仓": "OPEN", "平仓": "CLOSE"}
+                direction_map = {"Buy": "BUY", "Sell": "SELL", "买入": "BUY", "卖出": "SELL"}
+
+                offset = offset_map.get(offset_str, offset_str.upper())
+                direction = direction_map.get(direction_str, direction_str.upper())
+
+                try:
+                    volume = int(volume_str)
+                except ValueError:
+                    logger.warning(f"第{line_num}行手数格式错误: {volume_str}")
+                    failed_count += 1
+                    continue
+
+                if volume <= 0:
+                    logger.warning(f"第{line_num}行手数必须大于0")
+                    failed_count += 1
+                    continue
+
+                instruction = RotationInstructionPo(
+                    account_id=account_id,
+                    strategy_id=strategy_id,
+                    symbol=symbol,
+                    offset=offset,
+                    direction=direction,
+                    volume=volume,
+                    filled_volume=0,
+                    price=0,
+                    order_time=order_time_str,
+                    trading_date=trading_date,
+                    enabled=True,
+                    status="PENDING",
+                    attempt_count=0,
+                    remaining_attempts=0,
+                    remaining_volume=volume,
+                    current_order_id=None,
+                    order_placed_time=None,
+                    last_attempt_time=None,
+                    error_message=None,
+                    source=filename,
+                    is_deleted=False,
+                    created_at=datetime.now(),
+                    updated_at=datetime.now(),
+                )
+                add_instruction.append(instruction)
+                imported_count += 1
+
+            except Exception as e:
+                logger.exception(f"第{line_num}行解析失败: {e}, 内容: {line}")
+                failed_count += 1
+                errors.append({"row": line_num, "error": str(e), "content": line})
+                continue
+        
+        if mode == "replace":
+            with session_scope() as session:
+                # 先删除已存在的记录
+                session.query(RotationInstructionPo).filter_by(
+                    trading_date=trading_date
+                ).update({"is_deleted": True})
+                session.bulk_save_objects(add_instruction)
+        else:
+            with session_scope() as session:
+                session.bulk_save_objects(add_instruction)
+        
+        #重新加载数据
+        self.load_rotation_instructions()
+        logger.info(f"CSV导入完成，成功: {imported_count}, 失败: {failed_count}")
         data = {"imported": imported_count, "failed": failed_count, "errors": errors[:10]}
         return data
-
-    def subscribe_today_symbols(self) -> None:
-        """订阅今日换仓记录中的所有合约"""
-        try:
-            with session_scope() as session:
-                today = datetime.now().strftime("%Y%m%d")
-                instructions = (
-                    session.query(RotationInstructionPo)
-                    .filter(
-                        RotationInstructionPo.trading_date == today,
-                        RotationInstructionPo.is_deleted == False,
-                        RotationInstructionPo.enabled == True,
-                    )
-                    .all()
-                )
-
-                if not instructions:
-                    logger.info("今日无换仓记录，无需订阅合约")
-                    return
-
-                symbols = [instruction.symbol for instruction in instructions]
-                self.trading_engine.subscribe_symbol(symbols)
-                logger.info(f"换仓管理器订阅换仓合约完成")
-
-        except Exception as e:
-            logger.error(f"订阅今日换仓合约时出错: {e}")
 
     def scan_and_process_orders(self) -> None:
         """扫描并处理交易指令文件"""
@@ -288,17 +337,16 @@ class SwitchPosManager:
         self.is_manual = is_manual
         logger.info(f"开始换仓, 手动: {is_manual}")
 
-        all_instructions = self._get_all_instructions()
-        self.running_instructions = all_instructions
-        if not all_instructions:
+        todo_instructions = [x for x in self.get_today_instructions() if x.status not in ("COMPLETED") and x.enabled]
+        if not todo_instructions:
             logger.info("今日无换仓指令")
             self.working = False
             return
-        logger.info(f"获取到 {len(all_instructions)} 条可执行换仓指令")
+        logger.info(f"获取到 {len(todo_instructions)} 条可执行换仓指令")
 
         try:
             # 重置所有指令状态
-            for instruction in all_instructions:
+            for instruction in todo_instructions:
                 if instruction.filled_volume >= instruction.volume:
                     instruction.status = "COMPLETED"
 
@@ -308,7 +356,7 @@ class SwitchPosManager:
                     instruction.current_order_id = None
 
             # 为每个指令创建OrderCmd
-            for instruction in all_instructions:
+            for instruction in todo_instructions:
                 if instruction.status != "PENDING":
                     continue
 
@@ -340,12 +388,12 @@ class SwitchPosManager:
 
             # 监控OrderCmd执行状态
             #self._monitor_order_commands(all_instructions)
-            await asyncio.to_thread(self._monitor_order_commands, all_instructions)
+            await self._monitor_order_commands(todo_instructions)
 
         except Exception as e:
             logger.exception(f"换仓执行时出错: {e}")
         finally:
-            self._update_instructions(all_instructions)
+            self._update_instructions(todo_instructions)
             self.working = False
             logger.info("换仓任务结束")
 
@@ -356,7 +404,7 @@ class SwitchPosManager:
 
         pass
 
-    def _monitor_order_commands(
+    async def _monitor_order_commands(
         self,
         instructions: List[RotationInstructionPo],
     ) -> None:
@@ -400,9 +448,6 @@ class SwitchPosManager:
                 if cmd["is_active"]:
                     # 指令仍在运行
                     all_finished = False
-                    # 更新已成交手数
-                    # instruction.filled_volume = cmd["filled_volume"]
-                    # instruction.remaining_volume = cmd["remaining_volume"]
 
                 else:
                     # 指令已结束
@@ -425,10 +470,10 @@ class SwitchPosManager:
                 logger.info("所有报单指令已完成")
                 break
 
-            time.sleep(check_interval)
+            await asyncio.sleep(check_interval)
 
         # 清理已完成的OrderCmd
-        self.trading_engine.cleanup_finished_order_cmds()
+        # self.trading_engine.cleanup_finished_order_cmds()
 
     def _update_instructions(self, instructions: List[RotationInstructionPo]) -> None:
         """
@@ -481,30 +526,7 @@ class SwitchPosManager:
 
         return True
 
-    def _get_all_instructions(self) -> List[RotationInstructionPo]:
-        """
-        获取所有指令列表
-
-        Returns:
-            List[RotationInstructionPo]: 所有指令列表
-        """
-        try:
-            with session_scope() as session:
-                today = datetime.now().strftime("%Y%m%d")
-                instructions = (
-                    session.query(RotationInstructionPo)
-                    .filter(
-                        RotationInstructionPo.status != "COMPLETED",
-                        RotationInstructionPo.trading_date == today,
-                        RotationInstructionPo.is_deleted == False,
-                        RotationInstructionPo.enabled == True,
-                    )
-                    .all()
-                )
-                return instructions
-        except Exception as e:
-            logger.error(f"获取所有指令列表时出错: {e}")
-            return []
+    
 
     def _update_instruction(self, instruction: RotationInstructionPo) -> None:
         """
@@ -518,101 +540,3 @@ class SwitchPosManager:
                 session.merge(instruction)
         except Exception as e:
             logger.error(f"更新指令状态时出错: {e}")
-
-
-    def _load_all_instructions(self) -> List[OrderInstruction]:
-        """
-        加载所有交易指令
-
-        Returns:
-            List[OrderInstruction]: 订单指令列表
-        """
-        instructions = []
-
-        try:
-            csv_files = list(Path(self.switchPos_files_dir).glob("*.csv"))
-
-            for csv_file in csv_files:
-                instructions.extend(self._parse_csv_file(csv_file))
-
-            return instructions
-
-        except Exception as e:
-            logger.error(f"加载交易指令时出错: {e}")
-            return []
-
-    def _parse_csv_file(self, file_path: Path) -> List[OrderInstruction]:
-        """
-        解析CSV订单文件
-
-        Args:
-            file_path: 文件路径
-
-        Returns:
-            List[OrderInstruction]: 订单指令列表
-        """
-        instructions = []
-
-        try:
-            with open(file_path, "r", encoding="gbk") as f:
-                reader = csv.DictReader(f)
-
-                required_columns = [
-                    "实盘账户",
-                    "合约代码",
-                    "交易所代码",
-                    "开平类型",
-                    "买卖方向",
-                    "手数",
-                    "价格",
-                ]
-                for col in required_columns:
-                    if col not in reader.fieldnames or []:
-                        logger.error(f"CSV文件缺少必需的列: {col}")
-                        return []
-
-                for row in reader:
-                    try:
-                        symbol = row["实盘账户"].strip()
-                        exchange_id = row["交易所代码"].strip()
-                        offset = row["开平类型"].strip().upper()
-                        direction = row["买卖方向"].strip().upper()
-                        volume = int(row["手数"])
-                        price_str = row["价格"].strip()
-                        order_time = row.get("报单时间", "").strip() or None
-
-                        if offset not in ("OPEN", "CLOSE", "CLOSETODAY"):
-                            continue
-
-                        if direction not in ("BUY", "SELL"):
-                            continue
-
-                        if volume <= 0:
-                            continue
-
-                        price = 0
-                        if price_str and price_str != "0":
-                            try:
-                                price = float(price_str)
-                            except ValueError:
-                                price = 0
-
-                        instruction = OrderInstruction(
-                            symbol=symbol,
-                            exchange_id=exchange_id,
-                            offset=offset,
-                            direction=direction,
-                            volume=volume,
-                            price=price,
-                            order_time=order_time,
-                        )
-                        instructions.append(instruction)
-
-                    except Exception as e:
-                        logger.warning(f"解析行失败: {e}，跳过")
-
-            return instructions
-
-        except Exception as e:
-            logger.error(f"读取CSV文件失败: {e}")
-            return []

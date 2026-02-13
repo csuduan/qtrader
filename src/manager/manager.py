@@ -86,18 +86,12 @@ class TradingManager:
             logger.error(f"未找到账号 [{account_id}] 的配置")
             return False
 
-        # 立即创建Trader Proxy并添加到traders字典（禁用的账户也会创建）
-        socket_dir_abs = Path(self.socket_config.socket_dir).expanduser().resolve()
-        socket_path = str(socket_dir_abs / f"qtrader_{account_id}.sock")
-
         trader = TraderProxy(
-            account_config=account_config,
-            socket_path=socket_path,
-            heartbeat_timeout=self.socket_config.heartbeat_timeout,
+            account_config=account_config
         )
         self.traders[account_id] = trader
         logger.info(
-            f"Trader Proxy [{account_id}] 初始化完成（enabled: {account_config.enabled}, auto_start: {account_config.auto_start}）"
+            f"Trader Proxy [{account_id}] 初始化完成（enabled: {account_config.enabled}）"
         )
         return True
 

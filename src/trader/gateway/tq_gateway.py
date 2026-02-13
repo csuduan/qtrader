@@ -90,7 +90,7 @@ class TqGateway(BaseGateway):
         self._contracts: Dict[str, ContractData] = {}
 
         # 历史订阅的合约符号列表
-        self.hist_subs: List[str] = []
+        self.hist_subs: set[str] = set()
         self.kline_subs: List[tuple[str, str]] = []
 
         # 订单引用计数
@@ -110,7 +110,7 @@ class TqGateway(BaseGateway):
         self._event_engine: Optional[AsyncEventEngine] = ctx.get_event_engine()
 
         if self.config.subscribe_symbols:
-            self.hist_subs.extend(self.config.subscribe_symbols)
+            self.hist_subs.update(self.config.subscribe_symbols)
 
     # ==================== 连接管理 ====================
     async def connect(self) -> bool:
@@ -193,16 +193,15 @@ class TqGateway(BaseGateway):
                 symbol = [symbol]
 
             # 添加到订阅列表中
-            self.hist_subs.extend(symbol)
             if not self.connected:
                 return True
+            
+            self.hist_subs.update(symbol)
 
             # 格式化合约代码
-            std_symbols = [self._format_symbol(sym) for sym in self.hist_subs]
+            std_symbols = [self._format_symbol(s) for s  in symbol]
             subscribe_symbols = [s for s in std_symbols if s and s not in self._quotes]
             if len(subscribe_symbols) == 0:
-                return True
-            if self.api is None:
                 return True
 
             for s in subscribe_symbols:
@@ -863,10 +862,11 @@ class TqGateway(BaseGateway):
             self.trading_day = self.get_trading_day()
             logger.info(f"TqSdk连接成功,交易日: {self.trading_day}")
 
-            # 初始化持仓合约的行情订阅
-            pos_symbols = [symbol for symbol in self._positions if symbol not in self._quotes]
-            self.hist_subs.extend(pos_symbols)
+            # 订阅历史合约
             self.subscribe(list(self.hist_subs))
+            # 初始化持仓合约的行情订阅
+            pos_symbols = [symbol for symbol in self._positions if len(symbol) <= 12]
+            self.subscribe(pos_symbols)
 
             # 订阅kline
             for symbol, interval in self.kline_subs:

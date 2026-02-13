@@ -50,8 +50,7 @@ async def main_async(args):
         sys.exit(1)
 
     # 检查是否已有进程运行
-    socket_dir = config.socket.socket_dir
-    socket_dir_abs = Path(socket_dir).expanduser().resolve()
+    socket_dir_abs = Path(config.paths.socket_dir).expanduser().resolve()
     pid_file = socket_dir_abs / f"qtrader_{account_id}.pid"
 
     if pid_file.exists():

@@ -84,7 +84,7 @@ class TradingEngine:
         # 报单指令执行器
         self._order_cmd_executor: Optional[OrderCmdExecutor] = None
 
-        logger.info(f"交易引擎初始化完成，账户类型: {config.account_type}")  # type: ignore[attr-defined]
+        logger.info(f"交易引擎初始化完成")  # type: ignore[attr-defined]
 
         # Gateway初始化
         self._init_gateway()

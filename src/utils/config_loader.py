@@ -67,6 +67,7 @@ class RiskControlConfig(BaseModel):
 class PathsConfig(BaseModel):
     """目录配置"""
 
+    socket_dir: str = "./data/socks"
     switchPos_files: str = "./data/orders"
     logs: str = "./data/logs"
     database: str = "./data/trading.db"
@@ -155,7 +156,6 @@ class AccountConfig(BaseModel):
     account_id: Optional[str] = None
     account_type: str | None = "kq"
     enabled: bool | None = True
-    auto_start: bool | None = False
     alert_wechat: bool = False
 
     gateway: Optional[GatewayConfig] = None

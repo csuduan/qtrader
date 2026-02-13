@@ -49,7 +49,6 @@ class TraderProxy:
     def __init__(
         self,
         account_config: AccountConfig,
-        socket_path: str,
         heartbeat_timeout: int = 30,
     ):
         """
@@ -63,7 +62,6 @@ class TraderProxy:
         """
         self.account_id = account_config.account_id
         self.account_config = account_config
-        self.socket_path = socket_path
         self.heartbeat_timeout = heartbeat_timeout
         self._running = False
 
@@ -77,7 +75,9 @@ class TraderProxy:
         # ==================== 进程管理 ====================
         self._created_process: bool = False
         self.process: Optional[asyncio.subprocess.Process] = None
-        self.pid_file = str(Path(socket_path).parent / f"qtrader_{self.account_id}.pid")
+        socket_dir_abs = Path(self.account_config.paths.socket_dir).expanduser().resolve()
+        self.socket_path = str(socket_dir_abs / f"qtrader_{self.account_id}.sock")
+        self.pid_file = str(socket_dir_abs / f"qtrader_{self.account_id}.pid")
 
         # ==================== 连接管理 ====================
         self.socket_client: Optional[SocketClient] = None
@@ -199,6 +199,8 @@ class TraderProxy:
         self.start_time = datetime.now()
         if self.account_id is None:
             raise ValueError("account_id is required for SocketClient")
+        
+        
         self.socket_client = SocketClient(
             self.socket_path, self.account_id, self._on_msg_callback
         )

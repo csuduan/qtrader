@@ -1028,108 +1028,61 @@ class Trader:
     @request("get_rotation_instructions")
     async def _req_get_rotation_instructions(self, data: dict) -> dict:
         """处理获取换仓指令列表请求"""
-        from datetime import datetime
-
-        from src.models.po import RotationInstructionPo
-        from src.utils.database import get_database
-
-        db = get_database()
-        limit = data.get("limit", 100)
-        offset = data.get("offset", 0)
-        status_filter = data.get("status")
-        enabled_filter = data.get("enabled")
-
-        # 获取今天的日期，格式为YYYYMMDD
-        today = datetime.now().strftime("%Y%m%d")
-
-        with db.get_session() as session:
-            query = session.query(RotationInstructionPo).filter(
-                RotationInstructionPo.is_deleted == False
-            )
-
-            # 只查询交易日大于等于今天的记录
-            # 如果trading_date为NULL，也包含在内（可能是未设置的记录）
-            query = query.filter(
-                (RotationInstructionPo.trading_date >= today) |
-                (RotationInstructionPo.trading_date == None)
-            )
-
-            if status_filter:
-                query = query.filter(RotationInstructionPo.status == status_filter)
-            if enabled_filter is not None:
-                query = query.filter(RotationInstructionPo.enabled == bool(enabled_filter))
-
-            total = query.count()
-            instructions = (
-                query.order_by(RotationInstructionPo.created_at.desc())
-                .offset(offset)
-                .limit(limit)
-                .all()
-            )
-
-            rotation_status = {"working": False, "is_manual": False}
-            if self.switchPos_manager:
-                rotation_status = {
-                    "working": self.switchPos_manager.working,
-                    "is_manual": self.switchPos_manager.is_manual,
-                }
-
-            return {
-                "instructions": [
-                    {
-                        "id": ins.id,
-                        "account_id": ins.account_id,
-                        "strategy_id": ins.strategy_id,
-                        "symbol": ins.symbol,
-                        "offset": ins.offset,
-                        "direction": ins.direction,
-                        "volume": ins.volume,
-                        "filled_volume": ins.filled_volume,
-                        "price": ins.price,
-                        "order_time": ins.order_time,
-                        "trading_date": ins.trading_date,
-                        "enabled": ins.enabled,
-                        "status": ins.status,
-                        "attempt_count": ins.attempt_count,
-                        "remaining_attempts": ins.remaining_attempts,
-                        "remaining_volume": ins.remaining_volume,
-                        "current_order_id": ins.current_order_id,
-                        "order_placed_time": (
-                            ins.order_placed_time.isoformat() if ins.order_placed_time else None
-                        ),
-                        "last_attempt_time": (
-                            ins.last_attempt_time.isoformat() if ins.last_attempt_time else None
-                        ),
-                        "error_message": ins.error_message,
-                        "source": ins.source,
-                        "created_at": ins.created_at.isoformat() if ins.created_at else None,
-                        "updated_at": ins.updated_at.isoformat() if ins.updated_at else None,
-                    }
-                    for ins in instructions
-                ],
-                "rotation_status": rotation_status,
-                "total": total,
-                "limit": limit,
-                "offset": offset,
+        instructions = self.switchPos_manager.get_today_instructions()
+        rotation_status = {"working": False, "is_manual": False}
+        if self.switchPos_manager:
+            rotation_status = {
+                "working": self.switchPos_manager.working,
+                "is_manual": self.switchPos_manager.is_manual,
             }
+
+        return {
+            "instructions": [
+                {
+                    "id": ins.id,
+                    "account_id": ins.account_id,
+                    "strategy_id": ins.strategy_id,
+                    "symbol": ins.symbol,
+                    "offset": ins.offset,
+                    "direction": ins.direction,
+                    "volume": ins.volume,
+                    "filled_volume": ins.filled_volume,
+                    "price": ins.price,
+                    "order_time": ins.order_time,
+                    "trading_date": ins.trading_date,
+                    "enabled": ins.enabled,
+                    "status": ins.status,
+                    "attempt_count": ins.attempt_count,
+                    "remaining_attempts": ins.remaining_attempts,
+                    "remaining_volume": ins.remaining_volume,
+                    "current_order_id": ins.current_order_id,
+                    "order_placed_time": (
+                        ins.order_placed_time.isoformat() if ins.order_placed_time else None
+                    ),
+                    "last_attempt_time": (
+                        ins.last_attempt_time.isoformat() if ins.last_attempt_time else None
+                    ),
+                    "error_message": ins.error_message,
+                    "source": ins.source,
+                    "created_at": ins.created_at.isoformat() if ins.created_at else None,
+                    "updated_at": ins.updated_at.isoformat() if ins.updated_at else None,
+                }
+                for ins in instructions
+            ],
+            "rotation_status": rotation_status
+        }
 
     @request("get_rotation_instruction")
     async def _req_get_rotation_instruction(self, data: dict) -> Optional[dict]:
         """处理获取指定换仓指令请求"""
-        from src.models.po import RotationInstructionPo
-        from src.utils.database import get_database
 
-        db = get_database()
         instruction_id = data.get("instruction_id")
+        instructions = self.switchPos_manager.get_today_instructions()
+        instruction = next((x for x in instructions if x.id == instruction_id), None)
+        if not instruction:
+            return None
 
-        with db.get_session() as session:
-            instruction = (
-                session.query(RotationInstructionPo)
-                .filter_by(id=instruction_id, is_deleted=False)
-                .first()
-            )
-            if instruction:
-                return {
+        return {
                     "id": instruction.id,
                     "account_id": instruction.account_id,
                     "strategy_id": instruction.strategy_id,
@@ -1167,174 +1120,17 @@ class Trader:
                         instruction.updated_at.isoformat() if instruction.updated_at else None
                     ),
                 }
-        return None
-
-    @request("create_rotation_instruction")
-    async def _req_create_rotation_instruction(self, data: dict) -> Optional[dict]:
-        """处理创建换仓指令请求"""
-        from datetime import datetime
-
-        from src.models.po import RotationInstructionPo
-        from src.utils.database import get_database
-
-        db = get_database()
-
-        trading_date = data.get("trading_date")
-        if not trading_date:
-            trading_date = datetime.now().strftime("%Y%m%d")
-
-        instruction = RotationInstructionPo(
-            account_id=data.get("account_id", self.account_id),
-            strategy_id=data.get("strategy_id"),
-            symbol=data.get("symbol"),
-            offset=data.get("offset"),
-            direction=data.get("direction"),
-            volume=data.get("volume"),
-            filled_volume=0,
-            price=data.get("price", 0),
-            order_time=data.get("order_time"),
-            trading_date=trading_date,
-            enabled=data.get("enabled", True),
-            status="PENDING",
-            attempt_count=0,
-            remaining_attempts=0,
-            remaining_volume=data.get("volume"),
-            current_order_id=None,
-            order_placed_time=None,
-            last_attempt_time=None,
-            error_message=None,
-            source="手动添加",
-            created_at=datetime.now(),
-            updated_at=datetime.now(),
-        )
-
-        with db.get_session() as session:
-            session.add(instruction)
-            session.commit()
-            session.refresh(instruction)
-
-            return {
-                "id": instruction.id,
-                "account_id": instruction.account_id,
-                "strategy_id": instruction.strategy_id,
-                "symbol": instruction.symbol,
-                "offset": instruction.offset,
-                "direction": instruction.direction,
-                "volume": instruction.volume,
-                "filled_volume": instruction.filled_volume,
-                "price": instruction.price,
-                "order_time": instruction.order_time,
-                "trading_date": instruction.trading_date,
-                "enabled": instruction.enabled,
-                "status": instruction.status,
-                "created_at": (
-                    instruction.created_at.isoformat() if instruction.created_at else None
-                ),
-            }
 
     @request("update_rotation_instruction")
     async def _req_update_rotation_instruction(self, data: dict) -> Optional[dict]:
         """处理更新换仓指令请求"""
-        from datetime import datetime
-
-        from src.models.po import RotationInstructionPo
-        from src.utils.database import get_database
-
-        db = get_database()
         instruction_id = data.get("instruction_id")
+        if not instruction_id:
+            return False
 
-        with db.get_session() as session:
-            instruction = (
-                session.query(RotationInstructionPo)
-                .filter_by(id=instruction_id, is_deleted=False)
-                .first()
-            )
+        instruction = self.switchPos_manager.update_instruction(data)
+        return instruction
 
-            if not instruction:
-                return None
-
-            if data.get("enabled") is not None:
-                instruction.enabled = data["enabled"]
-            if data.get("status") is not None:
-                instruction.status = data["status"]
-            if data.get("filled_volume") is not None:
-                instruction.filled_volume = data["filled_volume"]
-
-            instruction.updated_at = datetime.now()
-
-            session.add(instruction)
-            session.commit()
-            session.refresh(instruction)
-
-            return {
-                "id": instruction.id,
-                "account_id": instruction.account_id,
-                "strategy_id": instruction.strategy_id,
-                "symbol": instruction.symbol,
-                "offset": instruction.offset,
-                "direction": instruction.direction,
-                "volume": instruction.volume,
-                "filled_volume": instruction.filled_volume,
-                "price": instruction.price,
-                "order_time": instruction.order_time,
-                "trading_date": instruction.trading_date,
-                "enabled": instruction.enabled,
-                "status": instruction.status,
-                "created_at": (
-                    instruction.created_at.isoformat() if instruction.created_at else None
-                ),
-                "updated_at": (
-                    instruction.updated_at.isoformat() if instruction.updated_at else None
-                ),
-            }
-
-    @request("delete_rotation_instruction")
-    async def _req_delete_rotation_instruction(self, data: dict) -> bool:
-        """处理删除换仓指令请求"""
-        from datetime import datetime
-
-        from src.models.po import RotationInstructionPo
-        from src.utils.database import get_database
-
-        db = get_database()
-        instruction_id = data.get("instruction_id")
-
-        with db.get_session() as session:
-            instruction = (
-                session.query(RotationInstructionPo)
-                .filter_by(id=instruction_id, is_deleted=False)
-                .first()
-            )
-
-            if not instruction:
-                return False
-
-            instruction.is_deleted = True
-            instruction.updated_at = datetime.now()
-
-            session.add(instruction)
-            session.commit()
-
-        return True
-
-    @request("clear_rotation_instructions")
-    async def _req_clear_rotation_instructions(self, data: dict) -> bool:
-        """处理清除已完成换仓指令请求"""
-        from datetime import datetime
-
-        from src.models.po import RotationInstructionPo
-        from src.utils.database import get_database
-
-        db = get_database()
-
-        with db.get_session() as session:
-            session.query(RotationInstructionPo).filter(
-                RotationInstructionPo.is_deleted == False,
-                RotationInstructionPo.status == "COMPLETED",
-            ).update({"is_deleted": True, "updated_at": datetime.now()}, synchronize_session=False)
-            session.commit()
-
-        return True
 
     @request("import_rotation_instructions")
     async def _req_import_rotation_instructions(self, data: dict) -> dict:
@@ -1362,86 +1158,16 @@ class Trader:
                 logger.info(f"Trader [{self.account_id}] 换仓任务执行完成")
             except Exception as e:
                 logger.error(f"Trader [{self.account_id}] 后台换仓任务执行失败: {e}")
-        
-        await asyncio.create_task(execute())
+     
+        asyncio.create_task(execute())
         return True
-
-
-    @request("batch_execute_instructions")
-    async def _req_batch_execute_instructions(self, data: dict) -> dict:
-        """处理批量执行换仓指令请求"""
-        from datetime import datetime
-
-        from src.models.po import RotationInstructionPo
-        from src.utils.database import get_database
-
-        db = get_database()
-        ids = data.get("ids", [])
-
-        with db.get_session() as session:
-            instructions = (
-                session.query(RotationInstructionPo)
-                .filter(
-                    RotationInstructionPo.id.in_(ids), RotationInstructionPo.is_deleted == False
-                )
-                .all()
-            )
-
-            if not instructions:
-                return {"success": 0, "failed": 0, "total": 0}
-
-            success_count = 0
-            failed_count = 0
-
-            for instruction in instructions:
-                if not instruction.enabled:
-                    failed_count += 1
-                    continue
-
-                if instruction.status == "COMPLETED":
-                    failed_count += 1
-                    continue
-
-                try:
-                    instruction.status = "EXECUTING"
-                    instruction.last_attempt_time = datetime.now()
-                    instruction.attempt_count += 1
-                    instruction.updated_at = datetime.now()
-
-                    session.add(instruction)
-                    success_count += 1
-
-                except Exception as e:
-                    logger.error(f"Trader [{self.account_id}] 执行指令失败: {e}")
-                    failed_count += 1
-
-            session.commit()
-
-        return {"success": success_count, "failed": failed_count, "total": len(instructions)}
 
     @request("batch_delete_instructions")
     async def _req_batch_delete_instructions(self, data: dict) -> dict:
         """处理批量删除换仓指令请求"""
-        from datetime import datetime
-
-        from src.models.po import RotationInstructionPo
-        from src.utils.database import get_database
-
-        db = get_database()
         ids = data.get("ids", [])
-
-        with db.get_session() as session:
-            deleted_count = (
-                session.query(RotationInstructionPo)
-                .filter(RotationInstructionPo.id.in_(ids))
-                .update(
-                    {"is_deleted": True, "updated_at": datetime.now()}, synchronize_session=False
-                )
-            )
-
-            session.commit()
-
-        return {"deleted": deleted_count}
+        self.switchPos_manager.delete_instruction(ids)
+        return {"deleted": len(ids)}
 
     # ========== 系统参数请求处理 ==========
 

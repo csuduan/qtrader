@@ -18,10 +18,6 @@
                 <el-icon><Delete /></el-icon>
                 删除选中
               </el-button>
-              <el-button @click="handleClear" :disabled="rotationStatus.working">
-                <el-icon><Delete /></el-icon>
-                清除已完成
-              </el-button>
               <el-button @click="showImportDialog = true" :disabled="rotationStatus.working">
                 <el-icon><Upload /></el-icon>
                 导入CSV
@@ -454,26 +450,6 @@ async function handleToggleEnable(row: RotationInstruction) {
   } catch (error: any) {
     ElMessage.error(`操作失败: ${error.message}`)
     row.enabled = !row.enabled
-  }
-}
-
-async function handleClear() {
-  if (!store.selectedAccountId) {
-    ElMessage.error('请先选择账户')
-    return
-  }
-  try {
-    await ElMessageBox.confirm('确定要清除所有已完成的指令吗？', '确认清除', {
-      type: 'warning'
-    })
-
-    await rotationApi.clearRotationInstructions(store.selectedAccountId, 'COMPLETED')
-    ElMessage.success('清除成功')
-    await loadData()
-  } catch (error: any) {
-    if (error !== 'cancel') {
-      ElMessage.error(`清除失败: ${error.message}`)
-    }
   }
 }
 

@@ -1,7 +1,6 @@
 # 配置文件（包含敏感信息）
-config/account-*.yaml
-config/!account-sample.yaml
-
+config/*
+config/!*-sample.yaml
 
 
 # Python

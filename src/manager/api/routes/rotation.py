@@ -176,8 +176,6 @@ async def update_rotation_instruction(
         result = await trading_manager.update_rotation_instruction(
             account_id, instruction_id, update_data
         )
-        if result is None:
-            return error_response(code=404, message="换仓指令不存在")
         return success_response(data=result, message="更新成功")
     except Exception as e:
         logger.error(f"更新换仓指令失败: {e}")
