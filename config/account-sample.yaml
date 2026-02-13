@@ -1,0 +1,151 @@
+account_id: "xxx"
+account_type: "kq"
+alert_wechat: false
+
+
+# 目录配置
+paths:
+  switchPos_files: "/opt/data/qtrader/xxx/switch_pos"
+  logs: "/opt/data/qtrader/xxx/logs"
+  database: "/opt/data/qtrader/xxx/db/q-trader-xxx.db"
+  params: "/opt/data/qtrader/xxx/params"
+
+gateway:
+  type: "TQSDK"
+  tianqin:
+    username: "xxx"
+    password: "xxx"
+  broker:
+    type: "sim"
+    broker_name: "H徽商期货"
+    user_id: "xxx"
+    password: "xxx"
+  subscribe_symbols:
+    - "IC2603"
+    - "IM2603"
+    - "RB2605"
+    - "RB2603"
+
+# 交易控制
+trading:
+  auto_trade: true
+  paused: false
+  # 风控参数
+  risk_control:
+    max_daily_orders: 10000
+    max_daily_cancels: 5000
+    max_order_volume: 50
+    max_split_volume: 5
+    order_timeout: 5
+
+# 定时任务配置
+scheduler:
+  jobs:
+    # 连接任务
+    - job_id: pre_market_connect
+      job_name: 盘前连接网关
+      job_group: 交易
+      job_description: 开盘前自动连接交易
+      cron_expression: "50 8,20 * * *"
+      enabled: true
+      job_method: _pre_market_connect
+
+    # 断开连接任务
+    - job_id: post_market_disconnect
+      job_name: 盘后断开网关
+      job_group: 交易
+      job_description: 收盘后断开交易连接
+      cron_expression: "35 2,15 * * *"
+      enabled: true
+      job_method: _post_market_disconnect
+
+
+    # 换仓任务
+    - job_id: auto_rotation
+      job_name: 自动换仓
+      job_group: 换仓
+      job_description: 自动执行换仓
+      cron_expression: "5,8,35,38 9,21 * * *"
+      enabled: true
+      job_method: execute_position_rotation
+
+    # 换仓结果检查任务（合并）
+    - job_id: rotation_check
+      job_name: 换仓结果检查
+      job_group: 换仓
+      job_description: 每天检查换仓结果
+      cron_expression: "10,40 9,21 * * *"
+      job_method: _check_rotation_result
+      enabled: true
+
+    # 换仓文件扫描任务
+    - job_id: scan_orders
+      job_name: 扫描换仓文件
+      job_group: 换仓
+      job_description: 扫描换仓文件
+      cron_expression: "*/10 * * * * *"
+      job_method: _scan_orders
+      enabled: true
+
+    # 导出任务
+    - job_id: post_market_export
+      job_name: 收盘后处理
+      job_group: 交易
+      job_description: 收盘后处理
+      cron_expression: "35 15 * * *"
+      enabled: true
+      job_method: _post_market_export
+
+
+    # 策略任务
+    - job_id: strategy_reset
+      job_name: 策略每日重置
+      job_group: 策略
+      job_description: 每日20:55重置所有策略状态
+      cron_expression: "0 55 20 * * *"
+      job_method: _reset_strategies
+      enabled: true
+
+
+
+# 策略配置文件
+strategies:
+  # 上午IM策略
+  StrRsiInDay-AM-IM01:
+    enabled: true
+    type: rsi_strategy
+    symbol: "IM2603"
+    exchange: "CFFEX"
+    volume: 3
+    bar: "M1"
+    params_file: "param_rsi_DQ.csv"
+
+  # 下午IM策略
+  StrRsiInDay-PM-IM01:
+    enabled: true
+    type: rsi_strategy
+    symbol: "IM2603"
+    exchange: "CFFEX"
+    volume: 1
+    bar: "M1"
+    params_file: "param_rsi_DQ.csv"
+
+  # 上午IC策略
+  StrRsiInDay-AM-IC01:
+    enabled: true
+    type: rsi_strategy
+    symbol: "IC2603"
+    exchange: "CFFEX"
+    volume: 1
+    bar: "M1"
+    params_file: "param_rsi_DQ.csv"
+
+  # 下午IC策略
+  StrRsiInDay-PM-IC01:
+    enabled: true
+    type: rsi_strategy
+    symbol: "IC2603"
+    exchange: "CFFEX"
+    volume: 1
+    bar: "M1"
+    params_file: "param_rsi_DQ.csv"
