@@ -542,7 +542,7 @@ class TqGateway(BaseGateway):
     def get_positions(self) -> Dict[str, PositionData]:
         """获取持仓数据(兼容,返回原始格式)"""
         return {
-            symbol: self._convert_position(position) for symbol, position in self._positions.items()
+            symbol: self._convert_position(position) for symbol, position in self._positions.items() if len(symbol)<=12
         }
 
     def get_orders(self) -> Dict[str, OrderData]:
