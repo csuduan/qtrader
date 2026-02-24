@@ -135,29 +135,7 @@ class JobManager:
                     pos_short = pos.pos_short
 
                     # 如果多空都有值，拆分成两条记录
-                    if pos_long > 0 and pos_short > 0:
-                        # 多头记录
-                        row_long = {
-                            "账户": self.config.account_id,
-                            "交易日期": today,
-                            "合约代码": symbol,
-                            "方向": "多",
-                            "今仓": pos_long,
-                            "昨仓": 0,
-                        }
-                        writer.writerow(row_long)
-
-                        # 空头记录
-                        row_short = {
-                            "账户": self.config.account_id,
-                            "交易日期": today,
-                            "合约代码": symbol,
-                            "方向": "空",
-                            "今仓": pos_short,
-                            "昨仓": 0,
-                        }
-                        writer.writerow(row_short)
-                    elif pos_long > 0:
+                    if pos_long > 0:
                         # 只有多头
                         row = {
                             "账户": self.config.account_id,

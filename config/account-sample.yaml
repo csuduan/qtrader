@@ -9,6 +9,7 @@ paths:
   logs: "/opt/data/qtrader/xxx/logs"
   database: "/opt/data/qtrader/xxx/db/q-trader-xxx.db"
   params: "/opt/data/qtrader/xxx/params"
+  export: "/opt/data/qtrader/xxx/export"
 
 gateway:
   type: "TQSDK"
