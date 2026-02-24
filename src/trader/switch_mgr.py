@@ -142,6 +142,7 @@ class SwitchPosManager:
 
             # 订阅所有指令中的合约
             symbols = list(set([instruction.symbol for instruction in self.all_instructions]))
+            logger.info(f"换仓指令合约列表: {symbols}")
             self.trading_engine.subscribe_symbol(symbols)
         except Exception as e:
             logger.error(f"获取所有指令列表时出错: {e}")

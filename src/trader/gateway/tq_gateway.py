@@ -292,17 +292,16 @@ class TqGateway(BaseGateway):
         try:
             if isinstance(symbol, str):
                 symbol = [symbol]
-            symbols = [self.std_symbol(s) for s  in symbol]
 
+            symbols = [self.std_symbol(s) for s  in symbol]
             # 添加到订阅列表中
+            self.hist_subs.update(symbols)
             if not self.connected:
                 return True
-            
-            self.hist_subs.update(symbols)
 
-            # 格式化合约代码
             subscribe_symbols = [s for s in symbols if s and s not in self._quotes]
             if len(subscribe_symbols) == 0:
+                logger.info(f"无合约需要订阅")
                 return True
 
             for s in subscribe_symbols:
