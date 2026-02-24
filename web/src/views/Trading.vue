@@ -293,7 +293,7 @@
             <template #empty>
               <el-empty description="暂无合约信息" />
             </template>
-            <el-table-column prop="symbol" label="合约代码" width="120" fixed />
+            <el-table-column prop="symbol" label="合约代码" width="120" fixed sortable />
             <el-table-column prop="name" label="合约名称" width="200" show-overflow-tooltip />
             <el-table-column prop="exchange_id" label="交易所" width="100">
               <template #default="{ row }">
@@ -318,7 +318,7 @@
                 {{ row.option_underlying || '-' }}
               </template>
             </el-table-column>
-            <el-table-column prop="update_date" label="更新日期" width="110" />
+            <el-table-column prop="update_date" label="更新日期" width="110" sortable />
           </el-table>
         </el-card>
       </el-tab-pane>
