@@ -138,7 +138,7 @@ class JobManager:
                     if pos_long > 0 and pos_short > 0:
                         # 多头记录
                         row_long = {
-                            "账户ID": self.config.account_id,
+                            "账户": self.config.account_id,
                             "交易日期": today,
                             "合约代码": symbol,
                             "方向": "多",
@@ -149,7 +149,7 @@ class JobManager:
 
                         # 空头记录
                         row_short = {
-                            "账户ID": self.config.account_id,
+                            "账户": self.config.account_id,
                             "交易日期": today,
                             "合约代码": symbol,
                             "方向": "空",
