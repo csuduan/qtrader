@@ -27,16 +27,18 @@
                 v-loading="loading"
                 table-layout="fixed"
                 height="calc(100vh - 320px)"
+                row-key="symbol"
+                :default-sort="{ prop: 'datetime', order: 'descending' }"
               >
                 <template #empty>
                   <el-empty description="暂无订阅行情" />
                 </template>
-                <el-table-column prop="symbol" label="合约" width="80" >
+                <el-table-column prop="symbol" label="合约" width="80" :sortable="true">
                    <template #default="{ row }">
                     {{ row.symbol}}
                   </template>
                 </el-table-column>
-              
+
                 <el-table-column prop="last_price" label="最新价" width="90">
                   <template #default="{ row }">
                     {{ formatNumber(row.last_price) }}
@@ -52,7 +54,7 @@
                     {{ formatNumber(row.ask_price1) }}
                   </template>
                 </el-table-column>
-                <el-table-column prop="datetime" label="时间" width="85">
+                <el-table-column prop="datetime" label="时间" width="85" :sortable="true">
                   <template #default="{ row }">
                     {{ formatTime(row.datetime) }}
                   </template>
@@ -293,7 +295,7 @@
             <template #empty>
               <el-empty description="暂无合约信息" />
             </template>
-            <el-table-column prop="symbol" label="合约代码" width="120" fixed sortable />
+            <el-table-column prop="symbol" label="合约代码" width="120" fixed />
             <el-table-column prop="name" label="合约名称" width="200" show-overflow-tooltip />
             <el-table-column prop="exchange_id" label="交易所" width="100">
               <template #default="{ row }">
@@ -318,7 +320,7 @@
                 {{ row.option_underlying || '-' }}
               </template>
             </el-table-column>
-            <el-table-column prop="update_date" label="更新日期" width="110" sortable />
+            <el-table-column prop="update_date" label="更新日期" width="110" />
           </el-table>
         </el-card>
       </el-tab-pane>
