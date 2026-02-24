@@ -28,7 +28,7 @@
                 table-layout="fixed"
                 height="calc(100vh - 320px)"
                 row-key="symbol"
-                :default-sort="{ prop: 'datetime', order: 'descending' }"
+                :default-sort="{ prop: 'symbol', order: 'ascending' }"
               >
                 <template #empty>
                   <el-empty description="暂无订阅行情" />
