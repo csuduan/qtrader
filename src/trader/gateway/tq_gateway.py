@@ -311,7 +311,7 @@ class TqGateway(BaseGateway):
 
             return True
         except Exception as e:
-            logger.exception(f"订阅行情失败: {e}")
+            logger.exception(f"订阅行情失败:{symbol} {e}")
             return False
 
     def subscribe_bars(self, symbol: str, interval: str) -> bool:
@@ -351,7 +351,7 @@ class TqGateway(BaseGateway):
             if price is None or price == 0:
                 quote = self._quotes.get(symbol)
                 if not quote or math.isnan(quote.last_price):
-                    logger.error(f"未获取到行情信息: {symbol}")
+                    logger.error(f"未获取到行情信息: {symbol},{quote}")
                     raise Exception(f"未获取到行情信息: {symbol}")
 
                 # 使用对手价

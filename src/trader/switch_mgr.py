@@ -192,7 +192,7 @@ class SwitchPosManager:
 
                 account_id = values[0].strip()
                 strategy_id = values[1].strip()
-                instrument_str = values[2].strip()
+                instrument_str = self.trading_engine.std_symbol(values[2].strip().split(".")[0])               
                 offset_str = values[3].strip()
                 direction_str = values[4].strip()
                 volume_str = values[5].strip()
