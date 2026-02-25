@@ -403,6 +403,7 @@ class OrderRequest(BaseModel):
     volume: int = Field(..., ge=1, description="数量")
     price: Optional[float] = Field(None, description="价格（None=市价）")
     price_type: OrderType = Field(default=OrderType.LIMIT, description="订单类型")
+    slip: Optional[int] = Field(0, description="滑点")
 
 
 class CancelRequest(BaseModel):

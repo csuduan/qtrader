@@ -346,6 +346,11 @@ class TqGateway(BaseGateway):
                 raise Exception("TqSdk未连接")
 
             symbol = self.std_symbol(req.symbol)
+            tick_price = 0
+            if req.slip >0 :
+                contract = self._contracts.get(req.symbol)
+                if contract :
+                    tick_price = contract.pricetick * req.slip
             # 获取行情信息(市价单使用对手价)
             price = req.price
             if price is None or price == 0:
@@ -356,9 +361,9 @@ class TqGateway(BaseGateway):
 
                 # 使用对手价
                 if req.direction == Direction.BUY:
-                    price = quote.ask_price1
+                    price = quote.ask_price1 + tick_price
                 else:
-                    price = quote.bid_price1
+                    price = quote.bid_price1 - tick_price
 
 
             order = self.api.insert_order(

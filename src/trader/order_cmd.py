@@ -157,6 +157,8 @@ class OrderCmd:
         order_timeout: int = 10,
         # 来源标识
         source: str = "",
+        # 滑点
+        slip: int  =0,
         on_change: Optional[Callable[[Any], None]] = None,
     ):
         self.cmd_id = uuid.uuid4().hex
@@ -171,6 +173,7 @@ class OrderCmd:
         self.source = source  # 来源标识，格式："策略-{strategy_id}" 或 "换仓-{strategy_id}"
         self.on_change = on_change  # 状态变化回调
         self.volume = volume  # 目标手数
+        self.slip = slip  # 滑点
 
         # 状态
         self.status = OrderCmdStatus.PENDING
@@ -321,6 +324,7 @@ class OrderCmd:
             offset=split_order.offset or self.offset,
             volume=volume,
             price=self.price,
+            slip=self.slip,
         )
         return req
 

@@ -246,6 +246,7 @@ class OrderCmdExecutor:
                     offset=req.offset,
                     volume=req.volume,
                     price=req.price or 0,
+                    slip = req.slip or 0
                 )
                 if order:
                     cmd.add_order(order)

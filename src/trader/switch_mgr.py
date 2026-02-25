@@ -374,9 +374,10 @@ class SwitchPosManager:
                     volume=instruction.remaining_volume,
                     price=price,
                     max_volume_per_order=self.config.trading.risk_control.max_split_volume,
-                    order_interval=0.5,
-                    total_timeout=self.config.trading.risk_control.order_timeout * 10,  # 总超时为单笔超时的10倍
-                    order_timeout=self.config.trading.risk_control.order_timeout,
+                    order_interval=1,
+                    total_timeout=180,  # 总超时为单笔超时的10倍
+                    order_timeout=10,
+                    slip=1,
                     source=f"换仓:{instruction.symbol}",
                     on_change=self._on_cmd_changed,
                 )

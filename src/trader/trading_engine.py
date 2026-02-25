@@ -299,6 +299,7 @@ class TradingEngine:
         offset: Union[str, Offset],
         volume: int,
         price: float = 0,
+        slip: int =0
     ) -> Optional[OrderData]:
         """
         下单
@@ -309,6 +310,7 @@ class TradingEngine:
             offset: 开平 (OPEN/CLOSE/CLOSETODAY)
             volume: 手数
             price: 0-市价，>0限价
+            slip: 滑点，默认0
 
         Returns:
             Optional[OrderData]: 委托单数据，失败返回None
@@ -342,6 +344,7 @@ class TradingEngine:
             offset=offset,
             volume=volume,
             price=price if price > 0 else None,
+            slip = slip
         )
 
         order_data =  self.gateway.send_order(req)
