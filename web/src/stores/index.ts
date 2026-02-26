@@ -35,21 +35,18 @@ export const useStore = defineStore('main', () => {
 
   // ==================== 计算属性 ====================
 
-  // 是否为多账号模式
+  // 是否为多账号模式（始终使用多账户模式，即使只有一个账户）
   const isMultiAccountMode = computed(() => {
-    return accounts.value.length > 1
+    return accounts.value.length >= 1
   })
 
-  // 当前账户（多账号模式下使用选中的账户）
+  // 当前账户（使用选中的账户）
   const currentAccount = computed(() => {
-    if (isMultiAccountMode.value) {
-      if (selectedAccountId.value) {
-        return accounts.value.find(acc => acc.account_id === selectedAccountId.value) || null
-      }
-      // 如果没有选中，返回第一个
-      return accounts.value[0] || null
+    if (selectedAccountId.value) {
+      return accounts.value.find(acc => acc.account_id === selectedAccountId.value) || null
     }
-    return account.value
+    // 如果没有选中，返回第一个
+    return accounts.value[0] || null
   })
 
   // 活动订单
@@ -225,10 +222,6 @@ export const useStore = defineStore('main', () => {
    * 更新账户信息
    */
   function updateAccount(data: Account) {
-    // 如果是当前选中的账户，更新主账户
-    if (isMultiAccountMode.value && data.account_id === selectedAccountId.value) {
-      account.value = { ...account.value, ...data }
-    }
     // 更新账户列表中的对应账户，保留未更新的字段
     const index = accounts.value.findIndex(acc => acc.account_id === data.account_id)
     if (index > -1) {

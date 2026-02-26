@@ -377,8 +377,8 @@ async function updateRiskControl() {
 async function loadTasks() {
   loadingTasks.value = true
   try {
-    // 多账号模式：传递当前选中的账户ID
-    const accountId = store.isMultiAccountMode ? (store.selectedAccountId || undefined) : undefined
+    // 使用当前选中的账户ID
+    const accountId = store.selectedAccountId || undefined
     const result = await systemApi.getScheduledTasks(accountId)
     tasks.value = result.tasks
   } catch (error: any) {

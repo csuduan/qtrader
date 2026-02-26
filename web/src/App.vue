@@ -50,8 +50,8 @@
       <!-- 顶部栏 -->
       <el-header v-if="!$route.meta.hideHeader" class="header">
         <div class="header-left">
-          <!-- 多账号模式：账户选择器 -->
-          <template v-if="store.isMultiAccountMode">
+          <!-- 账户选择器 -->
+          <template v-if="store.accounts.length > 0">
             <el-dropdown @command="handleSwitchAccount" trigger="click">
               <div class="account-selector">
                 <span class="account-name">{{ currentAccountName }}</span>
@@ -126,21 +126,12 @@
               {{ store.currentAccount?.trade_paused ? '暂停交易' : '可交易' }}
             </el-tag>
           </template>
-
-          <!-- 单账号模式：账户信息 -->
-          <template v-else-if="store.account">
-            <span>账户: {{ store.account.account_id }}</span>
-            <el-divider direction="vertical" />
-            <span>可用: ¥{{ formatNumber(store.account.available) }}</span>
-            <el-divider direction="vertical" />
-            <span>浮动盈亏: <span :class="store.account.float_profit >= 0 ? 'profit' : 'loss'">¥{{ formatNumber(store.account.float_profit) }}</span></span>
-          </template>
         </div>
         <div class="header-right">
-          <span>总资产: ¥{{ formatNumber(store.isMultiAccountMode ? (store.currentAccount?.balance || 0) : (store.account?.balance || 0)) }}</span>
+          <span>总资产: ¥{{ formatNumber(store.currentAccount?.balance || 0) }}</span>
           <el-divider direction="vertical" />
-          <span :class="(store.isMultiAccountMode ? (store.currentAccount?.float_profit || 0) : (store.account?.float_profit || 0)) >= 0 ? 'profit' : 'loss'">
-            总盈亏: ¥{{ formatNumber(store.isMultiAccountMode ? (store.currentAccount?.float_profit || 0) : (store.account?.float_profit || 0)) }}
+          <span :class="(store.currentAccount?.float_profit || 0) >= 0 ? 'profit' : 'loss'">
+            总盈亏: ¥{{ formatNumber(store.currentAccount?.float_profit || 0) }}
           </span>
         </div>
       </el-header>
@@ -185,10 +176,7 @@ const sortedAccounts = computed(() => {
 
 // 当前账户名称
 const currentAccountName = computed(() => {
-  if (store.isMultiAccountMode) {
-    return store.currentAccount?.account_id || '请选择账户'
-  }
-  return store.account?.account_id || ''
+  return store.currentAccount?.account_id || '请选择账户'
 })
 
 // 获取当前账户的状态圆点样式

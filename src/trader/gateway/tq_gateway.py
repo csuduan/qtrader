@@ -577,8 +577,8 @@ class TqGateway(BaseGateway):
             if not self.connected or not self.api:
                 logger.warning("TqSdk未连接")
                 return None
-
-            kline_data = self._klines.get((symbol, interval))  # type: ignore[call-overload]
+            std_symbol = self.std_symbol(symbol)
+            kline_data = self._klines.get((std_symbol, interval))  # type: ignore[call-overload]
             if kline_data is None:
                 return None
             kline = kline_data.copy()
@@ -757,7 +757,7 @@ class TqGateway(BaseGateway):
             update: K线更新时间（纳秒时间戳，TqSdk格式）
         """
         bar = BarData(
-            symbol=symbol,
+            symbol=symbol.split(".")[1],
             interval=interval,
             datetime=datetime.fromtimestamp(data["datetime"] / 1e9),
             open_price=float(data["open"]),
