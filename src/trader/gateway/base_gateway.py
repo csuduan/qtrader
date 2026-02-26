@@ -4,47 +4,36 @@ Gateway适配器基类
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
-
+from typing import  Optional, Union
 import pandas as pd
+from datetime import datetime
 
 from src.models.object import (
     AccountData,
-    BarData,
     CancelRequest,
     ContractData,
     OrderData,
     OrderRequest,
-    OrderStatus,
     PositionData,
-    SubscribeRequest,
     TickData,
     TradeData,
+    Exchange,
+    Interval,
+    ProductType
 )
 from src.utils.logger import get_logger
-
 logger = get_logger(__name__)
-
-# 支持异步和同步回调
-AsyncTickCallback = Callable[[TickData], None] | Callable[[TickData], Awaitable[None]]
-AsyncBarCallback = Callable[[BarData], None] | Callable[[BarData], Awaitable[None]]
-AsyncOrderCallback = Callable[[OrderData], None] | Callable[[OrderData], Awaitable[None]]
-AsyncTradeCallback = Callable[[TradeData], None] | Callable[[TradeData], Awaitable[None]]
-AsyncPositionCallback = Callable[[PositionData], None] | Callable[[PositionData], Awaitable[None]]
-AsyncAccountCallback = Callable[[AccountData], None] | Callable[[AccountData], Awaitable[None]]
-AsyncContractCallback = Callable[[ContractData], None] | Callable[[ContractData], Awaitable[None]]
 
 
 class BaseGateway(ABC):
     """
-    Gateway抽象基类（异步版本）
+    Gateway抽象基类
 
     职责：
     1. 连接/断开交易接口
     2. 订阅/取消订阅行情
     3. 下单/撤单
     4. 数据格式转换（Gateway特定格式 → 统一模型）
-    5. 通过回调向上层推送数据
 
     设计原则：
     - 不处理业务逻辑（如风控、策略）
@@ -52,67 +41,130 @@ class BaseGateway(ABC):
     - 不直接访问数据库
     - 所有公共接口改为异步
     """
-
     # Gateway名称
     gateway_name: str = "BaseGateway"
 
-    # 支持的交易所列表
-    exchanges: list = []
 
     def __init__(self):
         """初始化Gateway"""
         self.connected: bool = False
         self.trading_day: Optional[str] = None
-
-        # 回调函数（由上层注册，支持异步）
-        self.on_tick_callback: Optional[AsyncTickCallback] = None
-        self.on_bar_callback: Optional[AsyncBarCallback] = None
-        self.on_order_callback: Optional[AsyncOrderCallback] = None
-        self.on_trade_callback: Optional[AsyncTradeCallback] = None
-        self.on_position_callback: Optional[AsyncPositionCallback] = None
-        self.on_account_callback: Optional[AsyncAccountCallback] = None
-        self.on_contract_callback: Optional[AsyncContractCallback] = None
-
-        # 策略专用回调
-        self.on_tick_strategy: Optional[AsyncTickCallback] = None
-        self.on_bar_strategy: Optional[AsyncBarCallback] = None
-
+        self.contracts: Dict[str, ContractData] = {}
+        # 合约更新日期，用于判断是否需要重新查询
+        self._contracts_update_date: Optional[str] = None
         logger.info(f"{self.gateway_name} Gateway 初始化完成")
 
-    # ==================== 回调注册 ====================
 
-    def register_callbacks(self, **callbacks):
+    def std_symbol(self, symbol: str) -> Optional[str]:
         """
-        注册回调函数
+        标准化合约代码
+        将各种格式的合约代码转换为统一格式 "symbol"
 
         Args:
-            on_tick: tick行情回调（支持异步）
-            on_bar: bar行情回调（支持异步）
-            on_order: 订单状态回调（支持异步）
-            on_trade: 成交回调（支持异步）
-            on_position: 持仓回调（支持异步）
-            on_account: 账户回调（支持异步）
-            on_contract: 合约回调（支持异步）
+            symbol: 合约代码，支持以下格式：
+                - "SHFE.rb2505" (exchange.symbol)
+                - "rb2505.SHFE" (symbol.exchange)
+                - "rb2505" 或 "RB2505" (仅合约代码)
+
+        Returns:
+            标准化后的合约代码 "rb2505"，找不到时返回 None
         """
-        self.on_tick_callback = callbacks.get("on_tick")
-        self.on_bar_callback = callbacks.get("on_bar")
-        self.on_order_callback = callbacks.get("on_order")
-        self.on_trade_callback = callbacks.get("on_trade")
-        self.on_position_callback = callbacks.get("on_position")
-        self.on_account_callback = callbacks.get("on_account")
-        self.on_contract_callback = callbacks.get("on_contract")
+        if not symbol:
+            return None
 
-        logger.info(f"{self.gateway_name} 回调注册完成")
+        symbol = symbol.strip()
 
-    def register_strategy_callbacks(
-        self, on_tick: AsyncTickCallback, on_bar: AsyncBarCallback
-    ):
-        """注册策略专用回调"""
-        self.on_tick_strategy = on_tick
-        self.on_bar_strategy = on_bar
-        logger.info(f"{self.gateway_name} 策略回调注册完成")
+        # 已经是标准格式 "symbol.exchange"
+        if "." in symbol:
+            parts = symbol.split(".")
+            if len(parts) == 2:
+                first, second = parts
+                std_symbol=None
+                exchange = None
+                # 判断哪个是交易所
+                if first.upper() in Exchange.__members__:
+                    # 格式: "SHFE.rb2505" -> "rb2505.SHFE"
+                    std_symbol=second
+                    exchange = first.upper()
+                elif second.upper() in Exchange.__members__:
+                    # 格式: "rb2505.SHFE" -> 保持不变
+                    std_symbol=first
+                    exchange = second.upper()
+                else:
+                    # 无法识别交易所，尝试从合约缓存中查找
+                    logger.warning(f"无法识别交易所: {symbol}")
+                    return None
+                if exchange in ["CZCE","CFFEX"]:
+                    std_symbol=std_symbol.upper()
+                else:
+                    std_symbol=std_symbol.lower()
+                return std_symbol
+        else:
+            # 尝试从合约缓存中查找
+            symbol_lower = symbol.lower()
+            symbol_upper = symbol.upper()
+            # 直接匹配
+            contract: ContractData = self.contracts.get(symbol_upper) or self.contracts.get(symbol_lower)
+            if not contract:
+                logger.warning(f"无法识别交易所: {symbol}")
+                return None
+            return contract.symbol
+    
+    def load_contracts(self) -> Optional[dict[str, ContractData]]:
+        """
+        从数据库加载指定更新日期的合约信息
 
-    # ==================== 连接管理 ====================
+        Args:
+            update_date: 更新日期 (YYYY-MM-DD)
+        Returns:
+            合约信息字典，如果没有则返回None
+        """
+        from src.utils.database import session_scope
+        from src.models.po import ContractPo
+
+        update_date = datetime.now().strftime("%Y-%m-%d")
+        try:
+            with session_scope() as session:
+                contract_pos = (
+                    session.query(ContractPo)
+                    .filter(ContractPo.update_date == update_date)
+                    .all()
+                )
+
+                if not contract_pos:
+                    logger.info(f"数据库中没有更新日期为 {update_date} 的合约信息")
+                    return None
+
+                loaded_count = 0
+                for po in contract_pos:
+                    symbol=po.symbol.split(".")[1] if "." in po.symbol else po.symbol
+                    exchange = Exchange.from_str(po.exchange_id)
+                    if exchange == Exchange.NONE:
+                        continue
+                    contract = ContractData(
+                        symbol=symbol,
+                        exchange=exchange,
+                        name=po.instrument_name or po.symbol,
+                        product_type=ProductType.FUTURES,
+                        multiple=po.volume_multiple,
+                        pricetick=float(po.price_tick),
+                        min_volume=po.min_volume,
+                        option_strike=float(po.option_strike) if po.option_strike else None,
+                        option_underlying=po.option_underlying,
+                        option_type=po.option_type,
+                    )
+                    self.contracts[contract.symbol] = contract
+                    #self._upper_symbols[contract.symbol.rsplit(".")[1].upper()] = contract.exchange.value
+                    loaded_count += 1
+
+                # 记录合约更新日期
+                self._contracts_update_date = update_date
+                logger.info(f"从数据库加载了 {loaded_count} 个合约信息 (更新日期: {update_date})")
+                return self.contracts
+        except Exception as e:
+            logger.error(f"从数据库加载合约信息失败: {e}")
+            return None
+
 
     @abstractmethod
     async def connect(self) -> bool:
@@ -144,15 +196,14 @@ class BaseGateway(ABC):
         """
         pass
 
-    # ==================== 行情订阅 ====================
 
     @abstractmethod
-    def subscribe(self, symbol: Union[str, List[str]]) -> bool:
+    def subscribe(self, symbols: list[str]) -> bool:
         """
-        订阅行情（异步）
+        订阅行情
 
         Args:
-            symbol: 订阅合约
+            symbols: 订阅合约列表
 
         Returns:
             bool: 订阅是否成功
@@ -173,12 +224,10 @@ class BaseGateway(ABC):
         """
         pass
 
-    # ==================== 交易接口 ====================
-
     @abstractmethod
     def send_order(self, req: OrderRequest) -> Optional[OrderData]:
         """
-        下单（异步）
+        下单
 
         Args:
             req: 下单请求
@@ -244,25 +293,13 @@ class BaseGateway(ABC):
         pass
 
     @abstractmethod
-    def get_contracts(self) -> Dict[str, ContractData]:
+    def get_contracts(self) -> dict[str, ContractData]:
         """
         查询所有合约信息
 
         Returns:
             Dict[str, ContractData]: 合约字典 {symbol: ContractData}
-        """
-    @abstractmethod
-    def std_symbol(self,symbol: str) -> Optional[str]:
-        """
-        查询合约信息
-
-        Args:
-            symbol: 合约代码,兼容 "SHFE.RB2505","SHFE.RB2605","rb2605","RB2605" 格式
-
-        Returns:
-            symbol:标准化后的合约代码，如 "rb2505.SHFE"
-        """
-    
+        """  
 
     @abstractmethod
     def get_quotes(self) -> dict[str, TickData]:

@@ -185,7 +185,7 @@ class TestTqGatewayInitialization:
         assert gateway._quotes == {}
         assert gateway._klines == {}
         assert gateway._pending_orders == {}
-        assert gateway._contracts == {}
+        assert gateway.contracts == {}
 
     def test_initialization_connection_status(self, gateway: TqGateway):
         """测试连接状态初始为 False"""
@@ -815,7 +815,7 @@ class TestTqGatewayGetContracts:
             exchange="SHFE",
             name="螺纹钢2505",
         )
-        gateway._contracts = {"rb2505": mock_contract}
+        gateway.contracts = {"rb2505": mock_contract}
         gateway.connected = True  # 需要连接状态
         gateway.api = MagicMock()  # 需要API实例
 

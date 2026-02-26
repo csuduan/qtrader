@@ -412,7 +412,7 @@
     <el-dialog v-model="showSubscribeDialog" title="订阅行情" width="400px">
       <el-form :model="subscribeForm" label-width="100px">
         <el-form-item label="合约代码">
-          <el-input v-model="subscribeForm.symbol" placeholder="如: SHFE.rb2505 或 rb2505" />
+          <el-input v-model="subscribeForm.symbol" placeholder="如: rb2505" />
         </el-form-item>
       </el-form>
       <template #footer>

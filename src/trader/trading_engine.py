@@ -138,6 +138,9 @@ class TradingEngine:
         account.user_id = user_id or "--"
         account.risk_status = self.risk_control.get_status()
         account.trade_paused = self.paused
+        account.broker_name = self.config.gateway.broker.broker_name or "--"
+        account.broker_type = self.config.gateway.broker.type or "--"
+        account.currency = "CNY"
         return account
 
     @property
@@ -210,15 +213,6 @@ class TradingEngine:
             self.event_engine.start()
             ctx.set(ctx.KEY_EVENT_ENGINE, self.event_engine)
 
-        # 注册回调（Gateway → EventEngine）
-        self.gateway.register_callbacks(
-            on_tick=self._on_tick,
-            on_bar=self._on_bar,
-            on_order=self._on_order,
-            on_trade=self._on_trade,
-            on_position=self._on_position,
-            on_account=self._on_account,
-        )
 
     def _load_risk_control_config(self):
         """
@@ -338,6 +332,7 @@ class TradingEngine:
         if isinstance(offset, str):
             offset = Offset(offset)
 
+        symbol = self.std_symbol(symbol)
         req = OrderRequest(
             symbol=symbol,
             direction=direction,
@@ -479,6 +474,8 @@ class TradingEngine:
             bool: 订阅是否成功
         """
         if self.gateway:
+            if isinstance(symbol, str):
+                symbol = [symbol]
             return self.gateway.subscribe(symbol)
         return True
 
@@ -517,37 +514,7 @@ class TradingEngine:
         except Exception as e:
             logger.error(f"发送报单指令更新事件失败: {e}")
 
-    async def _on_tick(self, tick):
-        """Gateway tick回调 → EventEngine（异步版本）"""
-        if self.event_engine:
-            await self.event_engine.put_async(EventTypes.TICK_UPDATE, tick)
-
-    async def _on_bar(self, bar):
-        """Gateway bar回调 → EventEngine（异步版本）"""
-        if self.event_engine:
-            await self.event_engine.put_async(EventTypes.KLINE_UPDATE, bar)
-
-    async def _on_order(self, order: OrderData):
-        """Gateway order回调 → EventEngine（异步版本）"""
-        if self.event_engine:
-            await self.event_engine.put_async(EventTypes.ORDER_UPDATE, order)
-        if order.status == OrderStatus.REJECTED and self.config.alert_wechat:
-            send_wechat(f"账户[{self.account_id}]告警：{order.status_msg}")
-
-    async def _on_trade(self, trade):
-        """Gateway trade回调 → EventEngine（异步版本）"""
-        if self.event_engine:
-            await self.event_engine.put_async(EventTypes.TRADE_UPDATE, trade)
-
-    async def _on_position(self, position):
-        """Gateway position回调 → EventEngine（异步版本）"""
-        if self.event_engine:
-            await self.event_engine.put_async(EventTypes.POSITION_UPDATE, position)
-
-    async def _on_account(self, account):
-        """Gateway account回调 → EventEngine（异步版本）"""
-        if self.event_engine:
-            await self.event_engine.put_async(EventTypes.ACCOUNT_UPDATE, account)
+    
 
     def insert_order_cmd(self, cmd: OrderCmd) -> Optional[str]:
         """
@@ -571,6 +538,7 @@ class TradingEngine:
             指令ID
         """
         # 保存引用
+        cmd.symbol = self.std_symbol(cmd.symbol)
         self._order_cmds[cmd.cmd_id] = cmd
         # 注册到执行器（注册即启动）
         if self._order_cmd_executor:

@@ -126,12 +126,13 @@
               {{ store.currentAccount?.trade_paused ? '暂停交易' : '可交易' }}
             </el-tag>
           </template>
+
         </div>
         <div class="header-right">
           <span>总资产: ¥{{ formatNumber(store.currentAccount?.balance || 0) }}</span>
           <el-divider direction="vertical" />
-          <span :class="(store.currentAccount?.float_profit || 0) >= 0 ? 'profit' : 'loss'">
-            总盈亏: ¥{{ formatNumber(store.currentAccount?.float_profit || 0) }}
+          <span :class="(store.currentAccount?.today_profit || 0) >= 0 ? 'profit' : 'loss'">
+            今日盈亏: ¥{{ formatNumber(store.currentAccount?.today_profit || 0) }}
           </span>
         </div>
       </el-header>

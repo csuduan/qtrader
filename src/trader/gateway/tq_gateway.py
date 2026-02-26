@@ -34,7 +34,6 @@ from src.models.object import (
     OrderType,
     PositionData,
     ProductType,
-    SubscribeRequest,
     TickData,
     TradeData,
 )
@@ -67,7 +66,7 @@ class TqGateway(BaseGateway):
     def __init__(self, config: GatewayConfig):
         super().__init__()
         self._running = False
-        self.connected = False
+        self.is_ready: bool = False
         self.config = config
         self.account_id = self.config.account_id
         logger.info(f"TqGateway初始化, account_id: {self.account_id}, id: {id(self)}")
@@ -88,7 +87,7 @@ class TqGateway(BaseGateway):
         # 大写合约，key为原始symbol，value为exchange
         self._upper_symbols: Dict[str, str] = {}
         #合约信息，key为标准化后的symbol，value为ContractData
-        self._contracts: Dict[str, ContractData] = {}
+        #self.contracts: Dict[str, ContractData] = {}
 
         # 历史订阅的合约符号列表
         self.hist_subs: set[str] = set()
@@ -96,8 +95,6 @@ class TqGateway(BaseGateway):
 
         # 订单引用计数
         self._order_ref = 0
-
-
 
         # 线程优化相关变量
         # 线程同步队列（线程安全）
@@ -109,6 +106,9 @@ class TqGateway(BaseGateway):
 
         # AsyncEventEngine引用（直接发送事件）
         self._event_engine: Optional[AsyncEventEngine] = ctx.get_event_engine()
+
+        # 先尝试从数据库加载合约信息
+        self._load_contracts_from_db()
 
         if self.config.subscribe_symbols:
             self.hist_subs.update(self.config.subscribe_symbols)
@@ -123,11 +123,7 @@ class TqGateway(BaseGateway):
                 logger.warning("TqSdk已启动，无需重复启动")
                 return True
 
-            # 先尝试从数据库加载今天的合约信息
-            today = datetime.now().strftime("%Y-%m-%d")
-            result = self._load_contracts_from_db(today)
-            if result is not None:
-                logger.info(f"从数据库加载了 {len(self._contracts)} 个合约信息")
+
 
             # 启动tq主线程
             self._tq_thead = threading.Thread(target=self._tq_run, name=f"TqSdk_Thread", daemon=True)
@@ -152,6 +148,7 @@ class TqGateway(BaseGateway):
             # 停止轮询
             self._running = False
             self.connected = False
+            self.is_ready = False
             self._push_account(self._convert_account(self._account))
 
             # 取消事件分发协程
@@ -240,6 +237,8 @@ class TqGateway(BaseGateway):
             self._query_and_save_contracts(datetime.now().strftime("%Y-%m-%d"))
 
             self.trading_day = self.get_trading_day()
+            self.is_ready = True
+
             logger.info(f"TqSdk连接成功,交易日: {self.trading_day}")
 
             # 重新订阅历史合约
@@ -297,38 +296,40 @@ class TqGateway(BaseGateway):
         return trading_day.strftime("%Y%m%d")
 
 
-    def subscribe(self, symbol: Union[str, List[str]]) -> bool:
+    def subscribe(self, symbols: List[str]) -> bool:
         """订阅行情"""
         try:
-            if isinstance(symbol, str):
-                symbol = [symbol]
-
-            symbols = [self.std_symbol(s) for s  in symbol]
             # 添加到订阅列表中
             self.hist_subs.update(symbols)
-            if not self.connected:
+            if not self.connected or not self.is_ready:
                 return True
 
-            subscribe_symbols = [s for s in symbols if s and s not in self._quotes]
+            std_symbols = [self.std_symbol(s) for s  in symbols]
+            subscribe_symbols = [s for s in std_symbols if s and s not in self._quotes]
             if len(subscribe_symbols) == 0:
                 logger.info(f"无合约需要订阅")
                 return True
 
             for s in subscribe_symbols:
-                quote = self.api.get_quote(s)
-                self._quotes[s] = quote
+                contract:ContractData = self.contracts.get(s)
+                if not contract:
+                    logger.error(f"未获取到合约信息: {s}")
+                    continue
+                symbol = contract.exchange.value+"."+contract.symbol
+                quote = self.api.get_quote(symbol)
+                self._quotes[symbol] = quote
             logger.info(f"订阅行情: {subscribe_symbols}")
 
             return True
         except Exception as e:
-            logger.exception(f"订阅行情失败:{symbol} {e}")
+            logger.exception(f"订阅行情失败:{symbols} {e}")
             return False
 
     def subscribe_bars(self, symbol: str, interval: str) -> bool:
         """订阅K线数据"""
-        symbol = self.std_symbol(symbol)
-        if (symbol, interval) not in self.kline_subs:
-            self.kline_subs.append((symbol, interval))
+        std_symbol = self.std_symbol(symbol)
+        if (std_symbol, interval) not in self.kline_subs:
+            self.kline_subs.append((std_symbol, interval))
 
         if not self.connected:
             return False
@@ -337,11 +338,15 @@ class TqGateway(BaseGateway):
         data_length = 240 * 3
         if self.api is None:
             return False
+        contract:ContractData = self.contracts.get(std_symbol)
+        if not contract:
+            logger.error(f"未获取到合约信息: {std_symbol}")
+            return False
         kline = self.api.get_kline_serial(  # type: ignore[union-attr]
-            symbol=symbol, duration_seconds=seconds, data_length=data_length
+            symbol=contract.exchange.value+"."+contract.symbol, duration_seconds=seconds, data_length=data_length
         )
-        self._klines[(symbol, interval)] = kline  # type: ignore[assignment, index]
-        logger.info(f"订阅K线数据: {symbol} {interval}")
+        self._klines[(std_symbol, interval)] = kline  # type: ignore[assignment, index]
+        logger.info(f"订阅K线数据: {std_symbol} {interval}")
         return True
 
     def send_order(self, req: OrderRequest) -> Optional[OrderData]:
@@ -349,18 +354,21 @@ class TqGateway(BaseGateway):
         try:
             if not self.connected:
                 logger.error("TqSdk未连接")
-                return None
+                raise Exception("TqSdk未连接")
             
             # 调用TqSdk下单
             if self.api is None:
                 raise Exception("TqSdk未连接")
 
-            symbol = self.std_symbol(req.symbol)
+            contract:ContractData = self.contracts.get(req.symbol)
+            if not contract:
+                logger.error(f"未获取到合约信息: {req.symbol}")
+                raise Exception(f"未获取到合约信息: {req.symbol}")
+
+            symbol = contract.exchange.value+"."+req.symbol
             tick_price = 0
             if req.slip >0 :
-                contract = self._contracts.get(req.symbol)
-                if contract :
-                    tick_price = contract.pricetick * req.slip
+                tick_price = contract.pricetick * req.slip
             # 获取行情信息(市价单使用对手价)
             price = req.price
             if price is None or price == 0:
@@ -417,7 +425,7 @@ class TqGateway(BaseGateway):
             raise e
 
 
-    def _load_contracts_from_db(self, update_date: str) -> Optional[Dict[str, ContractData]]:
+    def _load_contracts_from_db(self) -> Optional[Dict[str, ContractData]]:
         """
         从数据库加载指定更新日期的合约信息
 
@@ -427,6 +435,7 @@ class TqGateway(BaseGateway):
         Returns:
             合约信息字典，如果没有则返回None
         """
+        update_date = datetime.now().strftime("%Y-%m-%d")
         try:
             with session_scope() as session:
                 contract_pos = (
@@ -441,11 +450,12 @@ class TqGateway(BaseGateway):
 
                 loaded_count = 0
                 for po in contract_pos:
+                    symbol=po.symbol.split(".")[1] if "." in po.symbol else po.symbol
                     exchange = exchange_map.get(po.exchange_id, Exchange.NONE)
                     if exchange == Exchange.NONE:
                         continue
                     contract = ContractData(
-                        symbol=po.symbol,
+                        symbol=symbol,
                         exchange=exchange,
                         name=po.instrument_name or po.symbol,
                         product_type=ProductType.FUTURES,
@@ -456,12 +466,12 @@ class TqGateway(BaseGateway):
                         option_underlying=po.option_underlying,
                         option_type=po.option_type,
                     )
-                    self._contracts[contract.symbol] = contract
-                    self._upper_symbols[contract.symbol.rsplit(".")[1].upper()] = contract.exchange.value
+                    self.contracts[contract.symbol] = contract
+                    #self._upper_symbols[contract.symbol.rsplit(".")[1].upper()] = contract.exchange.value
                     loaded_count += 1
 
                 logger.info(f"从数据库加载了 {loaded_count} 个合约信息 (更新日期: {update_date})")
-                return self._contracts
+                return self.contracts
         except Exception as e:
             logger.error(f"从数据库加载合约信息失败: {e}")
             return None
@@ -487,13 +497,13 @@ class TqGateway(BaseGateway):
             contracts_to_save = []
 
             for index, item in symbol_infos.iterrows():
-                instrument_id = item.instrument_id
+                symbol = item.instrument_id.split(".")[1] if "." in item.instrument_id else item.instrument_id
                 if item.exchange_id not in exchange_map:
                     continue
 
                 exchange = exchange_map[item.exchange_id]
                 contract = ContractData(
-                    symbol=instrument_id,
+                    symbol=symbol,
                     exchange=exchange,
                     name=item.instrument_name,
                     product_type=ProductType.FUTURES,
@@ -504,12 +514,12 @@ class TqGateway(BaseGateway):
                     option_underlying=None,
                     option_type=None,
                 )
-                self._contracts[contract.symbol] = contract
-                self._upper_symbols[contract.symbol.rsplit(".")[1].upper()] = contract.exchange.value
+                self.contracts[contract.symbol] = contract
+                #self._upper_symbols[contract.symbol.rsplit(".")[1].upper()] = contract.exchange.value
 
                 # 准备保存到数据库的数据
                 contract_po = ContractPo(
-                    symbol=instrument_id,
+                    symbol=symbol,
                     exchange_id=item.exchange_id,
                     instrument_name=item.instrument_name,
                     product_type="FUTURES",
@@ -523,7 +533,7 @@ class TqGateway(BaseGateway):
                 )
                 contracts_to_save.append(contract_po)
 
-            logger.info(f"从API加载了 {len(self._contracts)} 个合约信息，准备保存 {len(contracts_to_save)} 个到数据库")
+            logger.info(f"从API加载了 {len(self.contracts)} 个合约信息，准备保存 {len(contracts_to_save)} 个到数据库")
 
             # 批量保存到数据库
             if len(contracts_to_save)>0:
@@ -538,14 +548,14 @@ class TqGateway(BaseGateway):
                 except Exception as e:
                     logger.exception(f"保存合约信息到数据库失败: {e}")
 
-            logger.info(f"成功从API加载 {len(self._contracts)} 个合约信息")
+            logger.info(f"成功从API加载 {len(self.contracts)} 个合约信息")
 
         except Exception as e:
             logger.error(f"从API查询合约信息失败: {e}", exc_info=True)
 
     def get_contracts(self) -> Dict[str, ContractData]:
         """查询合约（兼容）"""
-        return self._contracts or {}
+        return self.contracts or {}
 
     def get_account(self) -> Optional[AccountData]:
         """获取账户数据(兼容)"""
@@ -577,8 +587,8 @@ class TqGateway(BaseGateway):
             if not self.connected or not self.api:
                 logger.warning("TqSdk未连接")
                 return None
-            std_symbol = self.std_symbol(symbol)
-            kline_data = self._klines.get((std_symbol, interval))  # type: ignore[call-overload]
+            #std_symbol = self.std_symbol(symbol)
+            kline_data = self._klines.get((symbol, interval))  # type: ignore[call-overload]
             if kline_data is None:
                 return None
             kline = kline_data.copy()
@@ -611,11 +621,6 @@ class TqGateway(BaseGateway):
             risk_ratio=account.risk_ratio or 0,
             update_time=datetime.now(),
             frozen=0,
-            float_profit=account.position_profit or 0,
-            broker_name=(
-                getattr(self.config.broker, "broker_name", "--") if self.config.broker else "--"
-            ),
-            broker_type=getattr(self.config.broker, "type", "") if self.config.broker else "",
             currency="CNY",
             user_id="",
             gateway_connected=self.connected,
@@ -635,12 +640,14 @@ class TqGateway(BaseGateway):
             pos_short_yd=int(pos.pos_short_his),
             pos_long_td=int(pos.pos_long_today),
             pos_short_td=int(pos.pos_short_today),
-            open_price_long=float(pos.open_price_long) or 0,
-            open_price_short=float(pos.open_price_short) or 0,
-            float_profit_long=float(pos.float_profit_long) or 0,
-            float_profit_short=float(pos.float_profit_short) or 0,
+            hold_price_long=float(pos.position_price_long) or 0,
+            hold_price_short=float(pos.position_price_short) or 0,
+            hold_cost_long=float(pos.position_cost_long) or 0,
+            hold_cost_short=float(pos.position_cost_short) or 0,
             hold_profit_long=float(pos.position_profit_long) or 0,
             hold_profit_short=float(pos.position_profit_short) or 0,
+            close_profit_long= 0,
+            close_profit_short= 0,
             margin_long=float(pos.margin_long) or 0,
             margin_short=float(pos.margin_short) or 0,
         )
@@ -917,42 +924,6 @@ class TqGateway(BaseGateway):
             "contract": EventTypes.CONTRACT_UPDATE,
         }
         return mapping.get(gateway_event)
- 
-    def std_symbol(self,symbol: str) -> Optional[str]:
-        """
-        查询合约信息
-        Args:
-            symbol: 合约代码,兼容 "SHFE.RB2505","SHFE.RB2605","rb2605","RB2605" 格式
-
-        Returns:
-            symbol:标准化后的合约代码，如 "SHFE.rb2505"
-        """
-        if not symbol:
-            raise ValueError(f"未找到匹配的合约符号: {symbol}")
-        exchange_id = ""
-        instrument_id = ""
-        parts = symbol.split(".")
-        if len(parts) == 2:
-            if parts[0] in Exchange.__members__:
-                exchange_id = parts[0]
-                instrument_id = parts[1]
-            else:
-                exchange_id = parts[1]
-                instrument_id = parts[0]
-        else:
-            upper_symbol = symbol.upper()
-            if upper_symbol in self._upper_symbols:
-                exchange_id = self._upper_symbols[upper_symbol]
-                instrument_id = upper_symbol
-            else:
-                logger.warning(f"未找到匹配的合约符号: {symbol}")
-                raise ValueError(f"未找到匹配的合约符号: {symbol}")
-            
-        #大小写规范化
-        if exchange_id in ["CFFEX","CZCE"]:
-            return f"{exchange_id}.{instrument_id.upper()}"
-        else:
-            return f"{exchange_id}.{instrument_id.lower()}"
 
     def _parse_exchange(self, exchange_code: str) -> Exchange:
         """解析交易所代码"""

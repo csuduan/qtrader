@@ -251,7 +251,7 @@ export const useStore = defineStore('main', () => {
    */
   function updatePosition(data: Position) {
     const index = positions.value.findIndex(pos =>
-      pos.account_id === data.account_id && pos.instrument_id === data.instrument_id
+      pos.account_id === data.account_id && pos.symbol === data.symbol
     )
     if (index > -1) {
       positions.value[index] = data

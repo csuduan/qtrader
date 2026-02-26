@@ -54,18 +54,15 @@ async def get_positions(
                     exchange_id=(
                         pos.exchange.value if hasattr(pos.exchange, "value") else str(pos.exchange)
                     ),
-                    instrument_id=pos.symbol,
-                    symbol=(
-                        f"{pos.exchange.value}.{pos.symbol}"
-                        if hasattr(pos.exchange, "value")
-                        else pos.symbol
-                    ),
+                    symbol=pos.symbol,
                     pos_long=pos.pos_long,
                     pos_short=pos.pos_short,
-                    open_price_long=pos.open_price_long,
-                    open_price_short=pos.open_price_short,
-                    float_profit_long=pos.float_profit_long,
-                    float_profit_short=pos.float_profit_short,
+                    hold_price_long=pos.hold_price_long,
+                    hold_price_short=pos.hold_price_short,
+                    hold_profit_long=pos.hold_profit_long,
+                    hold_profit_short=pos.hold_profit_short,
+                    close_profit_long=pos.close_profit_long,
+                    close_profit_short=pos.close_profit_short,
                     margin_long=pos.margin_long,
                     margin_short=pos.margin_short,
                     updated_at=datetime.now(),

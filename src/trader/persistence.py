@@ -86,7 +86,6 @@ class Persistence:
                 account_po.balance = Decimal(data.balance)  # type: ignore[assignment]
                 account_po.available = Decimal(str(data.available))  # type: ignore[assignment]
                 account_po.margin = Decimal(str(data.margin))  # type: ignore[assignment]
-                account_po.float_profit = Decimal(str(data.float_profit or 0))  # type: ignore[assignment]
                 account_po.position_profit = Decimal(str(data.hold_profit or 0))  # type: ignore[assignment]
                 account_po.close_profit = Decimal(str(data.close_profit or 0))  # type: ignore[assignment]
                 account_po.risk_ratio = Decimal(str(data.risk_ratio or 0))  # type: ignore[assignment]
@@ -131,11 +130,7 @@ class Persistence:
 
                 position_po.pos_long = data.pos_long  # type: ignore[assignment]
                 position_po.pos_short = data.pos_short  # type: ignore[assignment]
-                position_po.open_price_long = Decimal(str(data.open_price_long))  # type: ignore[assignment]
-                position_po.open_price_short = Decimal(str(data.open_price_short))  # type: ignore[assignment]
                 # 处理None值：如果为None则使用0
-                float_profit_long = data.float_profit_long or 0
-                float_profit_short = data.float_profit_short or 0
                 margin_long = data.margin_long or 0
                 margin_short = data.margin_short or 0
                 position_po.float_profit = Decimal(str(float_profit_long + float_profit_short))  # type: ignore[assignment]

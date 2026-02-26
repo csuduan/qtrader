@@ -22,6 +22,7 @@ export interface Account {
   float_profit: number
   position_profit: number
   close_profit: number
+  today_profit: number
   risk_ratio: number
   updated_at: string
   user_id?: string | null
@@ -37,7 +38,7 @@ export interface Position {
   id: number
   account_id: string
   exchange_id: string
-  instrument_id: string
+  symbol: string
   pos_long: number
   pos_short: number
   open_price_long: number

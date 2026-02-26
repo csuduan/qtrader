@@ -253,7 +253,7 @@
     <el-dialog v-model="addOrderCmdDialogVisible" title="新增报单指令" width="500px">
       <el-form :model="orderCmdForm" label-width="100px" :rules="orderCmdFormRules" ref="orderCmdFormRef">
         <el-form-item label="合约代码" prop="symbol">
-          <el-input v-model="orderCmdForm.symbol" placeholder="如: CFFEX.IM2603" />
+          <el-input v-model="orderCmdForm.symbol" placeholder="如: IM2603" />
         </el-form-item>
         <el-form-item label="操作类型" prop="offset">
           <el-select v-model="orderCmdForm.offset" placeholder="请选择">
@@ -538,9 +538,9 @@ async function handleSaveSignal() {
 function showAddOrderCmdDialog() {
   // 预填充合约代码
   if (strategy.value?.params?.symbol) {
-    orderCmdForm.value.symbol = `${strategy.value.params.exchange || 'CFFEX'}.${strategy.value.params.symbol}`
+    orderCmdForm.value.symbol = `${strategy.value.params.symbol}`
   } else if (strategy.value?.config?.symbol) {
-    orderCmdForm.value.symbol = `${strategy.value.config.exchange || 'CFFEX'}.${strategy.value.config.symbol}`
+    orderCmdForm.value.symbol = `${strategy.value.config.symbol}`
   }
   // 重置表单
   orderCmdForm.value.direction = 'BUY'

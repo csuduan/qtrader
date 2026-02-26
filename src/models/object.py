@@ -62,6 +62,7 @@ class ProductType(str, Enum):
     SPOT = "SPOT"
     INDEX = "INDEX"
     ETF = "ETF"
+    SPREAD = "SPREAD"
 
 
 class OrderType(str, Enum):
@@ -89,12 +90,20 @@ class Exchange(str, Enum):
     # 其他交易所
     NONE = ""
 
+    @classmethod
+    def from_str(cls, value: str) -> "Exchange":
+        """从字符串创建枚举实例"""
+        try:
+            return cls(value)
+        except ValueError:
+            return cls.NONE
+
 
 class Interval(str, Enum):
     """K线周期"""
 
     TICK = "tick"
-    MINUTE = "M1m"
+    MINUTE = "M1"
     MINUTE_5 = "M5"
     MINUTE_15 = "M15"
     MINUTE_30 = "M30"
@@ -130,6 +139,27 @@ class TickData(BaseModel):
     bid_volume1: Optional[float] = Field(None, description="买一量")
     ask_price1: Optional[float] = Field(None, description="卖一价")
     ask_volume1: Optional[float] = Field(None, description="卖一量")
+
+    # 五档行情扩展
+    bid_price2: Optional[float] = Field(None, description="买二价")
+    bid_volume2: Optional[float] = Field(None, description="买二量")
+    ask_price2: Optional[float] = Field(None, description="卖二价")
+    ask_volume2: Optional[float] = Field(None, description="卖二量")
+
+    bid_price3: Optional[float] = Field(None, description="买三价")
+    bid_volume3: Optional[float] = Field(None, description="买三量")
+    ask_price3: Optional[float] = Field(None, description="卖三价")
+    ask_volume3: Optional[float] = Field(None, description="卖三量")
+
+    bid_price4: Optional[float] = Field(None, description="买四价")
+    bid_volume4: Optional[float] = Field(None, description="买四量")
+    ask_price4: Optional[float] = Field(None, description="卖四价")
+    ask_volume4: Optional[float] = Field(None, description="卖四量")
+
+    bid_price5: Optional[float] = Field(None, description="买五价")
+    bid_volume5: Optional[float] = Field(None, description="买五量")
+    ask_price5: Optional[float] = Field(None, description="卖五价")
+    ask_volume5: Optional[float] = Field(None, description="卖五量")
 
     # 日内数据
     open_price: Optional[float] = Field(None, description="开盘价")
@@ -282,6 +312,7 @@ class PositionData(BaseModel):
     # 必需字段
     symbol: str = Field(..., description="合约代码")
     exchange: Exchange = Field(..., description="交易所")
+    multiple: int = Field(1, description="合约乘数")
 
     pos: int = Field(..., description="净持仓数量")
     pos_long: int = Field(..., description="多头持仓数量")
@@ -292,17 +323,20 @@ class PositionData(BaseModel):
     pos_long_td: Optional[int] = Field(None, description="今仓多头持仓数量")
     pos_short_td: Optional[int] = Field(None, description="今仓空头持仓数量")
 
-    open_price_long: Optional[float] = Field(None, description="多头持仓均价")
-    open_price_short: Optional[float] = Field(None, description="空头持仓均价")
+    #成本
+    hold_price_long: Optional[float] = Field(0, description="多头持仓均价")
+    hold_price_short: Optional[float] = Field(0, description="空头持仓均价")
+    hold_cost_long: Optional[float] = Field(0, description="多头持仓成本")
+    hold_cost_short: Optional[float] = Field(0, description="空头持仓成本")
+    #盈亏
+    hold_profit_long: Optional[float] = Field(0, description="多头持仓盈亏(盯日)")
+    hold_profit_short: Optional[float] = Field(0, description="空头持仓盈亏(盯日)")
+    close_profit_long: Optional[float] = Field(0, description="多头平仓盈亏(盯日)")
+    close_profit_short: Optional[float] = Field(0, description="空头平仓盈亏(盯日)")
 
-    float_profit_long: Optional[float] = Field(None, description="多头持仓浮动盈亏")
-    float_profit_short: Optional[float] = Field(None, description="空头持仓浮动盈亏")
 
-    hold_profit_long: Optional[float] = Field(None, description="多头持仓持仓盈亏(相对昨结)")
-    hold_profit_short: Optional[float] = Field(None, description="空头持仓持仓盈亏(相对昨结)")
-
-    margin_long: Optional[float] = Field(None, description="多头持仓保证金占用")
-    margin_short: Optional[float] = Field(None, description="空头持仓保证金占用")
+    margin_long: Optional[float] = Field(0, description="多头持仓保证金占用")
+    margin_short: Optional[float] = Field(0, description="空头持仓保证金占用")
 
     # 账号标识（多账号支持）
     account_id: Optional[str] = Field(None, description="账户ID")
@@ -328,8 +362,8 @@ class AccountData(BaseModel):
     margin: Optional[float] = Field(None, description="保证金占用")
 
     pre_balance: Optional[float] = Field(None, description="昨结余额")
-    hold_profit: Optional[float] = Field(None, description="持仓盈亏")
-    close_profit: Optional[float] = Field(None, description="平仓盈亏")
+    hold_profit: Optional[float] = Field(None, description="持仓盈亏(盯日)")
+    close_profit: Optional[float] = Field(None, description="平仓盈亏(盯日)")
     float_profit: Optional[float] = Field(None, description="浮动盈亏")
 
     risk_ratio: Optional[float] = Field(None, description="风险度")
@@ -368,6 +402,7 @@ class ContractData(BaseModel):
     pricetick: Optional[float] = Field(None, description="最小价格变动")
 
     min_volume: Optional[int] = Field(None, description="最小下单量")
+    expire_date: Optional[str] = Field(None, description="到期日期")
 
     # 期权相关
     option_strike: Optional[float] = Field(None, description="期权行权价")

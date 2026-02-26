@@ -26,11 +26,6 @@
           <span class="available">¥{{ formatNumber(store.currentAccount.available) }}</span>
         </el-descriptions-item>
     
-        <el-descriptions-item label="浮动盈亏">
-          <span :class="store.currentAccount.float_profit >= 0 ? 'profit' : 'loss'">
-            ¥{{ formatNumber(store.currentAccount.float_profit) }}
-          </span>
-        </el-descriptions-item>
         <el-descriptions-item label="持仓盈亏">
           <span :class="store.currentAccount.position_profit >= 0 ? 'profit' : 'loss'">
             ¥{{ formatNumber(store.currentAccount.position_profit) }}
@@ -88,14 +83,14 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="多头开仓价" width="110">
+        <el-table-column label="多头均价" width="110">
           <template #default="{ row }">
-            {{ row.pos_long > 0 ? formatNumber(row.open_price_long) : '-' }}
+            {{ row.pos_long > 0 ? formatNumber(row.hold_price_long) : '-' }}
           </template>
         </el-table-column>
-        <el-table-column label="空头开仓价" width="110">
+        <el-table-column label="空头均价" width="110">
           <template #default="{ row }">
-            {{ row.pos_short > 0 ? formatNumber(row.open_price_short) : '-' }}
+            {{ row.pos_short > 0 ? formatNumber(row.hold_price_short) : '-' }}
           </template>
         </el-table-column>
         <el-table-column label="保证金" width="110">
@@ -103,10 +98,17 @@
             ¥{{ formatNumber((row.margin_long || 0) + (row.margin_short || 0)) }}
           </template>
         </el-table-column>
-        <el-table-column label="浮动盈亏" width="130">
+        <el-table-column label="持仓盈亏" width="130">
           <template #default="{ row }">
-            <span :class="(row.float_profit_long || 0) + (row.float_profit_short || 0) >= 0 ? 'profit' : 'loss'">
-              ¥{{ formatNumber((row.float_profit_long || 0) + (row.float_profit_short || 0)) }}
+            <span :class="(row.hold_profit_long || 0) + (row.hold_profit_short || 0) >= 0 ? 'profit' : 'loss'">
+              ¥{{ formatNumber((row.hold_profit_long || 0) + (row.hold_profit_short || 0)) }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="平仓盈亏" width="130">
+          <template #default="{ row }">
+            <span :class="(row.close_profit_long || 0) + (row.close_profit_short || 0) >= 0 ? 'profit' : 'loss'">
+              ¥{{ formatNumber((row.close_profit_long || 0) + (row.close_profit_short || 0)) }}
             </span>
           </template>
         </el-table-column>
@@ -230,7 +232,7 @@ function handleClosePosition(position: Position, direction: 'BUY' | 'SELL') {
   const volume = direction === 'SELL' ? position.pos_long : position.pos_short
   if (volume <= 0) return
 
-  closeForm.symbol = position.instrument_id
+  closeForm.symbol = position.symbol
   closeForm.exchange_id = position.exchange_id
   closeForm.direction = direction
   closeForm.offset = 'CLOSE'
@@ -278,9 +280,10 @@ function formatDateTime(datetime: string | number): string {
 
 function getBrokerTypeName(type: string | null): string {
   const typeMap: Record<string, string> = {
-    'real': '实盘',
+    'tq': '天勤',
     'sim': '模拟',
-    'kq': '快期'
+    'kq': '快期',
+    'ctp': 'CTP',
   }
   return typeMap[type || ''] || type || ''
 }

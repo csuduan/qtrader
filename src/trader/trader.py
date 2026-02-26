@@ -432,7 +432,7 @@ class Trader:
             return order_id
 
         except Exception as e:
-            logger.error(f"Trader [{self.account_id}] 下单失败: {e}")
+            logger.exception(f"Trader [{self.account_id}] 下单失败: {e}")
             return None
 
     @request("cancel_req")

@@ -177,6 +177,7 @@ class BarGenerator:
             if tick.turnover:
                 current_bar["turnover"] += tick.turnover
             current_bar["open_interest"] = tick.open_interest or 0
+            current_bar["update_time"] = tick.datetime
 
         return None
 

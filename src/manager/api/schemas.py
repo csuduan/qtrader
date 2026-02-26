@@ -19,9 +19,9 @@ class AccountRes(BaseModel):
     balance: float
     available: float
     margin: float
-    float_profit: float
     position_profit: float
     close_profit: float
+    today_profit: float
     risk_ratio: float
     updated_at: datetime
     user_id: Optional[str] = None
@@ -40,18 +40,19 @@ class PositionRes(BaseModel):
     id: int
     account_id: str
     exchange_id: Optional[str] = None
-    instrument_id: Optional[str] = None
-    symbol: str
+    symbol: Optional[str] = None
     pos_long: int
     pos_short: int
     pos_long_yd: Optional[int] = None
     pos_short_yd: Optional[int] = None
     pos_long_td: Optional[int] = None
     pos_short_td: Optional[int] = None
-    open_price_long: Optional[float] = None
-    open_price_short: Optional[float] = None
-    float_profit_long: Optional[float] = None
-    float_profit_short: Optional[float] = None
+    hold_price_long: Optional[float] = None
+    hold_price_short: Optional[float] = None
+    hold_profit_long: Optional[float] = None
+    hold_profit_short: Optional[float] = None
+    close_profit_long: Optional[float] = None
+    close_profit_short: Optional[float] = None
     margin_long: Optional[float] = None
     margin_short: Optional[float] = None
     updated_at: datetime

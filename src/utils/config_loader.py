@@ -40,6 +40,8 @@ class BrokerConfig(BaseModel):
     app_id: str = ""
     auth_code: str = ""
     url: str = ""
+    td_address: str = ""
+    md_address: str = ""
 
 
 class RiskControlConfig(BaseModel):
@@ -148,7 +150,8 @@ class GatewayConfig(BaseModel):
     type: str = "TQSDK"
     tianqin: Optional[TianqinConfig] = None
     broker: Optional[BrokerConfig] = None
-    subscribe_symbols: Optional[List[str]] = None
+    subscribe_symbols: List[str] = []
+    subscribe_bars: List[str] = []
 
 
 class AccountConfig(BaseModel):

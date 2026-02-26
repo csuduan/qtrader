@@ -208,12 +208,7 @@ class SwitchPosManager:
                     failed_count += 1
                     continue
 
-                instrument_str = instrument_str.replace(" ", "")
-
-                if "." not in instrument_str:
-                    logger.warning(f"第{line_num}行合约格式错误: {instrument_str}")
-                    failed_count += 1
-                    continue
+                instrument_str = instrument_str.strip()
                 symbol = instrument_str
 
                 offset_map = {"Open": "OPEN", "Close": "CLOSE", "开仓": "OPEN", "平仓": "CLOSE"}

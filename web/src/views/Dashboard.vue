@@ -83,9 +83,9 @@
                 <div class="account-stat-value">¥{{ formatNumber(acc.available) }}</div>
               </div>
               <div class="account-stat">
-                <div class="account-stat-label">浮动盈亏</div>
-                <div class="account-stat-value" :class="(acc.float_profit || 0) >= 0 ? 'profit' : 'loss'">
-                  ¥{{ formatNumber(acc.float_profit || 0) }}
+                <div class="account-stat-label">今日盈亏</div>
+                <div class="account-stat-value" :class="(acc.today_profit || 0) >= 0 ? 'profit' : 'loss'">
+                  ¥{{ formatNumber(acc.today_profit || 0) }}
                 </div>
               </div>
             </div>
@@ -144,9 +144,9 @@
             <el-row :gutter="20">
               <el-col :span="12">
                 <div class="stat-item">
-                  <div class="stat-label">浮动盈亏</div>
-                  <div class="stat-value" :class="(store.currentAccount.float_profit || 0) >= 0 ? 'profit' : 'loss'">
-                    ¥{{ formatNumber(store.currentAccount.float_profit || 0) }}
+                  <div class="stat-label">持仓盈亏</div>
+                  <div class="stat-value" :class="(store.currentAccount.position_profit || 0) >= 0 ? 'profit' : 'loss'">
+                    ¥{{ formatNumber(store.currentAccount.position_profit || 0) }}
                   </div>
                 </div>
               </el-col>
