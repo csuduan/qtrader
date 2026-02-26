@@ -46,7 +46,7 @@ class RsiParam(BaseParam):
     trade_end_time: time = Field(default=time(13, 25, 0), title="交易结束时间")
     # 外部信号过滤
     dir_thr: float = Field(default=0.0, title="方向阈值")  # 信号方向阈值
-    use_signal: bool = Field(default=True, title="使用外部信号")  # 是否使用外部信号
+    used_signal: int = Field(default=0, title="外部信号")  # 外部信号
 
 
 class RsiStrategy(BaseStrategy):
@@ -300,10 +300,10 @@ class RsiStrategy(BaseStrategy):
         Returns:
             bool: 是否通过过滤
         """
-        if not self.param or not self.param.use_signal:
+        if not self.param :
             return True
 
-        ext_signal = self.param.use_signal
+        ext_signal = self.param.used_signal
         dir_thr = self.param.dir_thr
 
         # 根据阈值确定外部方向
