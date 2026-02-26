@@ -304,30 +304,30 @@ class RsiStrategy(BaseStrategy):
             return True
 
         ext_signal = self.param.used_signal
-        dir_thr = self.param.dir_thr
+        # dir_thr = self.param.dir_thr
 
-        # 根据阈值确定外部方向
-        if ext_signal >= dir_thr:
-            ext_dir = 1
-        elif ext_signal <= -dir_thr:
-            ext_dir = -1
-        else:
-            ext_dir = 0
+        # # 根据阈值确定外部方向
+        # if ext_signal >= dir_thr:
+        #     ext_dir = 1
+        # elif ext_signal <= -dir_thr:
+        #     ext_dir = -1
+        # else:
+        #     ext_dir = 0
 
-        # 检查是否匹配
-        if ext_dir == 0:
-            # 信号方向为0，当天不交易
-            logger.debug(f"策略 [{self.strategy_id}] 外部信号为0，不交易")
-            return False
+        # # 检查是否匹配
+        # if ext_dir == 0:
+        #     # 信号方向为0，当天不交易
+        #     logger.debug(f"策略 [{self.strategy_id}] 外部信号为0，不交易")
+        #     return False
 
-        if ext_dir != side:
-            # 方向不匹配
-            logger.debug(
-                f"策略 [{self.strategy_id}] 方向不匹配: RSI方向={side}, 外部方向={ext_dir}"
-            )
-            return False
+        # if ext_dir != side:
+        #     # 方向不匹配
+        #     logger.debug(
+        #         f"策略 [{self.strategy_id}] 方向不匹配: RSI方向={side}, 外部方向={ext_dir}"
+        #     )
+        #     return False
 
-        return True
+        return ext_signal!=0 and ext_signal==side
 
     def _check_exit_conditions(self, current_price: float, signal: Signal) -> str:
         """
