@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Set, Union
 
 from pandas import DataFrame
-from tqsdk import TqAccount, TqApi, TqAuth, TqKq, TqRohon, TqSim, data_extension
+from tqsdk import TqAccount, TqApi, TqAuth, TqKq, TqRohon, TqSim, data_extension,TqCtp
 from tqsdk.objs import Account, Order, Position, Quote, Trade
 
 
@@ -200,9 +200,18 @@ class TqGateway(BaseGateway):
                     account_id=self.config.broker.user_id if self.config.broker else "",
                     password=self.config.broker.password if self.config.broker else "",
                 )
+            elif broker_type == "ctp":
+                account = TqCtp(
+                    front_broker=self.config.broker.broker_id if self.config.broker else "",
+                    account_id=self.config.broker.user_id if self.config.broker else "",
+                    password=self.config.broker.password if self.config.broker else "",
+                    app_id=self.config.broker.app_id if self.config.broker else "",
+                    auth_code=self.config.broker.auth_code if self.config.broker else "",
+                    front_url=self.config.broker.url if self.config.broker else "",
+                )
             elif broker_type == "rohon":
                 account = TqRohon(
-                    front_broker=self.config.broker.broker_name if self.config.broker else "",
+                    front_broker=self.config.broker.broker_id if self.config.broker else "",
                     account_id=self.config.broker.user_id if self.config.broker else "",
                     password=self.config.broker.password if self.config.broker else "",
                     app_id=self.config.broker.app_id if self.config.broker else "",
@@ -652,6 +661,7 @@ class TqGateway(BaseGateway):
             "失败",
             "不",
             "超过",
+            "没有"
         ]
         status_msg = order.get("last_msg", "")
         status = OrderStatus.PENDING

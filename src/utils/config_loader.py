@@ -32,10 +32,11 @@ class TianqinConfig(BaseModel):
 class BrokerConfig(BaseModel):
     """CTP经纪商配置"""
 
-    type: str = "kq"  # kq、sim、real
+    type: str = "kq"  # kq、sim、real、ctp等
     broker_name: str = ""
     user_id: str = ""
     password: str = ""
+    broker_id: str = ""
     app_id: str = ""
     auth_code: str = ""
     url: str = ""
