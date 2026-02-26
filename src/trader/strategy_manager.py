@@ -527,9 +527,6 @@ class StrategyManager:
         except Exception as e:
             logger.exception(f"回播所有策略失败: {e}")
             return {"success": False, "message": f"回播失败: {str(e)}", "replayed_count": 0}
-        finally:
-            # 3. 恢复交易
-            self.trading_engine.resume()
     
     def load_hist_bars(self,symbol, interval, start: datetime,end: datetime) ->List[BarData]:
         # 通过网关获取K线数据
