@@ -233,7 +233,8 @@ class TqGateway(BaseGateway):
             self.trading_day = self.get_trading_day()
             logger.info(f"TqSdk连接成功,交易日: {self.trading_day}")
 
-            # 订阅历史合约
+            # 重新订阅历史合约
+            self._quotes.clear()
             self.subscribe(list(self.hist_subs))
             # 初始化持仓合约的行情订阅
             pos_symbols = [symbol for symbol in self._positions if len(symbol) <= 12]
