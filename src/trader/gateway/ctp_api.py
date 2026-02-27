@@ -55,7 +55,7 @@ STATUS_CTP2VT = {
     tdapi.THOST_FTDC_OST_NoTradeQueueing: OrderStatus.PENDING,
     tdapi.THOST_FTDC_OST_PartTradedQueueing: OrderStatus.PENDING,
     tdapi.THOST_FTDC_OST_AllTraded: OrderStatus.FINISHED,
-    tdapi.THOST_FTDC_OST_Canceled: OrderStatus.REJECTED,
+    tdapi.THOST_FTDC_OST_Canceled: OrderStatus.FINISHED,
 }
 
 
@@ -992,9 +992,9 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
                     min_volume=1,
                     expire_date=pInstrument.ExpireDate,
                 )
-                if contract.expire_date and contract.expire_date >= datetime.now().strftime(
+                if len(contract.symbol) <= 6 and contract.expire_date and contract.expire_date >= datetime.now().strftime(
                     "%Y%m%d"
-                ):
+                ) :
                     self.gateway.add_contract(contract)
 
         if bIsLast:
@@ -1002,6 +1002,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
             # 更新合约缓存日期
             self.gateway._contracts_update_date = datetime.now().strftime("%Y-%m-%d")
             self.semaphore.release()
+            self._save_contracts()
             logger.info(f"CTP 合约查询成功，共 {len(self.gateway.contracts)} 条")
 
     def OnRspQryTrade(
@@ -1126,3 +1127,39 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
         temp_dir = Path.home() / ".qtrader" / "temp" / f"ctp_{subdir}"
         temp_dir.mkdir(parents=True, exist_ok=True)
         return temp_dir
+    
+    def _save_contracts(self) -> None:
+        from src.utils.database import session_scope
+        from src.models.po import ContractPo
+
+        """保存合约信息到文件"""
+        update_date = self.gateway._contracts_update_date
+        contracts_to_save = []
+        for item in self.gateway.contracts.values():
+            symbol = item.symbol
+            contract_po = ContractPo(
+                    symbol=symbol,
+                    exchange_id=item.exchange.value,
+                    instrument_name=item.name,
+                    product_type="FUTURES",
+                    volume_multiple=item.multiple,
+                    price_tick=item.pricetick,
+                    min_volume=1,
+                    option_strike=None,
+                    option_underlying=None,
+                    option_type=None,
+                    update_date=update_date,
+                )
+            contracts_to_save.append(contract_po)
+        if len(contracts_to_save) > 0:
+            try:
+
+                with session_scope() as session:
+                    # 先删除历史数据
+                    deleted_count = session.query(ContractPo).delete(synchronize_session=False)
+                    logger.info(f"删除了 {deleted_count} 条旧合约信息")
+                    # 批量插入新数据
+                    session.add_all(contracts_to_save)
+                    logger.info(f"成功保存 {len(contracts_to_save)} 个合约信息到数据库")
+            except Exception as e:
+                logger.exception(f"保存合约信息到数据库失败: {e}")
