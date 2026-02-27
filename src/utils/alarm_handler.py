@@ -103,7 +103,7 @@ class AlarmHandler:
             # 避免处理自己产生的错误日志（防止无限循环）
             # 检查消息来源
             try:
-                record = message.record if hasattr(message, 'record') else message
+                record = message.record if hasattr(message, "record") else message
             except:
                 record = message
 
@@ -154,7 +154,7 @@ class AlarmHandler:
                     log_message = record.get("message", "")
                 else:
                     # loguru 使用 _message 属性存储原始消息
-                    log_message = str(record) if hasattr(record, '__str__') else ""
+                    log_message = str(record) if hasattr(record, "__str__") else ""
             except:
                 log_message = str(record) if record else ""
 
@@ -173,6 +173,7 @@ class AlarmHandler:
         except Exception as e:
             # 避免告警处理器自身出错导致日志系统异常
             import traceback
+
             print(f"告警处理器异常: {e}")
             traceback.print_exc()
 

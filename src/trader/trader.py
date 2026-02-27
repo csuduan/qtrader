@@ -11,10 +11,10 @@ from typing import Any, Callable, Dict, Optional
 from src.app_context import AppContext, get_app_context
 from src.trader.alarm_handler import TraderAlarmHandler
 from src.trader.job_mgr import JobManager
+from src.trader.strategy import BaseParam, BaseStrategy
 from src.trader.strategy_manager import StrategyManager
-from src.trader.trading_engine import TradingEngine
-from src.trader.strategy import BaseStrategy,BaseParam
 from src.trader.switch_mgr import SwitchPosManager
+from src.trader.trading_engine import TradingEngine
 from src.utils.async_event_engine import AsyncEventEngine
 from src.utils.config_loader import TraderConfig
 from src.utils.event_engine import EventTypes
@@ -125,9 +125,7 @@ class Trader:
             logger.info(f"Trader [{self.account_id}] 未配置任务调度器")
 
         # 启动策略管理器
-        self.strategy_manager = StrategyManager(
-                self.account_config.strategies, self.trading_engine
-            )
+        self.strategy_manager = StrategyManager(self.account_config.strategies, self.trading_engine)
         ctx.register(AppContext.KEY_STRATEGY_MANAGER, self.strategy_manager)
         await self.strategy_manager.start()
 
@@ -329,7 +327,6 @@ class Trader:
         """停止Trader"""
         self._running = False
         logger.info(f"Trader [{self.account_id}] 停止中...")
-
 
         # 停止任务调度器
         if self.task_scheduler:
@@ -874,6 +871,7 @@ class Trader:
 
         try:
             from src.trader.strategy_manager import load_strategy_params
+
             # 从配置文件重新加载参数
             new_params = load_strategy_params(strategy.config, strategy_id)
             if new_params:
@@ -985,7 +983,9 @@ class Trader:
             )
 
             await strategy.send_order_cmd(order_cmd)
-            logger.info(f"策略 [{strategy_id}] 已发送报单指令: {order_cmd.symbol} {order_cmd.direction} {order_cmd.offset} {order_cmd.volume}手")
+            logger.info(
+                f"策略 [{strategy_id}] 已发送报单指令: {order_cmd.symbol} {order_cmd.direction} {order_cmd.offset} {order_cmd.volume}手"
+            )
             return {"success": True, "cmd_id": order_cmd.cmd_id}
         except Exception as e:
             logger.exception(f"发送策略报单指令失败: {e}")
@@ -1069,7 +1069,7 @@ class Trader:
                 }
                 for ins in instructions
             ],
-            "rotation_status": rotation_status
+            "rotation_status": rotation_status,
         }
 
     @request("get_rotation_instruction")
@@ -1083,43 +1083,35 @@ class Trader:
             return None
 
         return {
-                    "id": instruction.id,
-                    "account_id": instruction.account_id,
-                    "strategy_id": instruction.strategy_id,
-                    "symbol": instruction.symbol,
-                    "exchange_id": instruction.exchange_id,
-                    "offset": instruction.offset,
-                    "direction": instruction.direction,
-                    "volume": instruction.volume,
-                    "filled_volume": instruction.filled_volume,
-                    "price": instruction.price,
-                    "order_time": instruction.order_time,
-                    "trading_date": instruction.trading_date,
-                    "enabled": instruction.enabled,
-                    "status": instruction.status,
-                    "attempt_count": instruction.attempt_count,
-                    "remaining_attempts": instruction.remaining_attempts,
-                    "remaining_volume": instruction.remaining_volume,
-                    "current_order_id": instruction.current_order_id,
-                    "order_placed_time": (
-                        instruction.order_placed_time.isoformat()
-                        if instruction.order_placed_time
-                        else None
-                    ),
-                    "last_attempt_time": (
-                        instruction.last_attempt_time.isoformat()
-                        if instruction.last_attempt_time
-                        else None
-                    ),
-                    "error_message": instruction.error_message,
-                    "source": instruction.source,
-                    "created_at": (
-                        instruction.created_at.isoformat() if instruction.created_at else None
-                    ),
-                    "updated_at": (
-                        instruction.updated_at.isoformat() if instruction.updated_at else None
-                    ),
-                }
+            "id": instruction.id,
+            "account_id": instruction.account_id,
+            "strategy_id": instruction.strategy_id,
+            "symbol": instruction.symbol,
+            "exchange_id": instruction.exchange_id,
+            "offset": instruction.offset,
+            "direction": instruction.direction,
+            "volume": instruction.volume,
+            "filled_volume": instruction.filled_volume,
+            "price": instruction.price,
+            "order_time": instruction.order_time,
+            "trading_date": instruction.trading_date,
+            "enabled": instruction.enabled,
+            "status": instruction.status,
+            "attempt_count": instruction.attempt_count,
+            "remaining_attempts": instruction.remaining_attempts,
+            "remaining_volume": instruction.remaining_volume,
+            "current_order_id": instruction.current_order_id,
+            "order_placed_time": (
+                instruction.order_placed_time.isoformat() if instruction.order_placed_time else None
+            ),
+            "last_attempt_time": (
+                instruction.last_attempt_time.isoformat() if instruction.last_attempt_time else None
+            ),
+            "error_message": instruction.error_message,
+            "source": instruction.source,
+            "created_at": (instruction.created_at.isoformat() if instruction.created_at else None),
+            "updated_at": (instruction.updated_at.isoformat() if instruction.updated_at else None),
+        }
 
     @request("update_rotation_instruction")
     async def _req_update_rotation_instruction(self, data: dict) -> Optional[dict]:
@@ -1130,7 +1122,6 @@ class Trader:
 
         instruction = self.switchPos_manager.update_instruction(data)
         return instruction
-
 
     @request("import_rotation_instructions")
     async def _req_import_rotation_instructions(self, data: dict) -> dict:
@@ -1158,7 +1149,7 @@ class Trader:
                 logger.info(f"Trader [{self.account_id}] 换仓任务执行完成")
             except Exception as e:
                 logger.error(f"Trader [{self.account_id}] 后台换仓任务执行失败: {e}")
-     
+
         asyncio.create_task(execute())
         return True
 

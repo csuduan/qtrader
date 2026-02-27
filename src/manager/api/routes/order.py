@@ -45,18 +45,16 @@ async def get_orders(
         if status:
             if status == "REJECTED":
                 orders_list = [
-                    order
-                    for order in orders_list
-                    if order.status == OrderStatus.REJECTED
+                    order for order in orders_list if order.status == OrderStatus.REJECTED
                 ]
             elif status == "FINISHED":
                 orders_list = [
-                    order
-                    for order in orders_list
-                    if order.status == OrderStatus.FINISHED
+                    order for order in orders_list if order.status == OrderStatus.FINISHED
                 ]
             else:
-                orders_list = [order for order in orders_list if order.status == OrderStatus.PENDING]
+                orders_list = [
+                    order for order in orders_list if order.status == OrderStatus.PENDING
+                ]
 
         total_count = len(orders_list)
         end_index = offset + limit

@@ -51,9 +51,6 @@ def datetime_to_nanos(dt: datetime) -> int:
     return int(dt.timestamp() * 1_000_000_000)
 
 
-
-
-
 def _get_float_param(config: dict, keys: list, default: float) -> float:
     """获取浮点数参数（支持多个key）"""
     for key in keys:
@@ -111,6 +108,7 @@ def _parse_time(time_str: str) -> time:
     except Exception as e:
         logger.warning(f"时间解析失败: {time_str}, {e}")
         return time(0, 0, 0)
+
 
 def parse_symbol(symbol: str) -> tuple[str, str]:
     """

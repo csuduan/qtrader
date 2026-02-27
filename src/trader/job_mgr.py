@@ -10,12 +10,12 @@ from pathlib import Path
 from typing import Optional
 
 from src.models.po import AlarmPo as AlarmModel
-from src.trader.trading_engine import TradingEngine
+from src.trader.strategy_manager import StrategyManager
 from src.trader.switch_mgr import SwitchPosManager
+from src.trader.trading_engine import TradingEngine
 from src.utils.config_loader import TraderConfig
 from src.utils.database import get_session
 from src.utils.logger import get_logger
-from src.trader.strategy_manager import StrategyManager
 
 logger = get_logger(__name__)
 
@@ -97,13 +97,12 @@ class JobManager:
     async def post_market_export(self) -> None:
         """盘后导出持仓"""
         logger.info("开始执行盘后导出持仓任务")
-        try:       
-            #_run_async()
+        try:
+            # _run_async()
             await asyncio.to_thread(self._export_positions_to_csv)
             logger.info("盘后导出持仓任务完成")
         except Exception as e:
             logger.exception(f"盘后导出持仓任务执行失败: {e}")
-
 
     def _export_positions_to_csv(self) -> None:
         """导出持仓到CSV文件"""
@@ -264,17 +263,19 @@ class JobManager:
             for inst in instructions:
                 # 判断是否未完成：状态不是 FINISHED 或者还有剩余手数
                 if inst.status != "FINISHED" or inst.remaining_volume > 0:
-                    unfinished.append({
-                        "id": inst.id,
-                        "strategy_id": inst.strategy_id,
-                        "symbol": inst.symbol,
-                        "direction": inst.direction,
-                        "offset": inst.offset,
-                        "volume": inst.volume,
-                        "filled_volume": inst.filled_volume,
-                        "remaining_volume": inst.remaining_volume,
-                        "status": inst.status,
-                    })
+                    unfinished.append(
+                        {
+                            "id": inst.id,
+                            "strategy_id": inst.strategy_id,
+                            "symbol": inst.symbol,
+                            "direction": inst.direction,
+                            "offset": inst.offset,
+                            "volume": inst.volume,
+                            "filled_volume": inst.filled_volume,
+                            "remaining_volume": inst.remaining_volume,
+                            "status": inst.status,
+                        }
+                    )
 
             if unfinished:
                 # 发送告警
@@ -293,11 +294,13 @@ class JobManager:
 
             now = datetime.now()
             unfinished_count = len(unfinished)
-            unfinished_detail = "; ".join([
-                f"{u['strategy_id']}/{u['symbol']}/{u['direction']}/{u['offset']}"
-                f"(剩余{u['remaining_volume']}手)"
-                for u in unfinished
-            ])
+            unfinished_detail = "; ".join(
+                [
+                    f"{u['strategy_id']}/{u['symbol']}/{u['direction']}/{u['offset']}"
+                    f"(剩余{u['remaining_volume']}手)"
+                    for u in unfinished
+                ]
+            )
 
             alarm_data = AlarmData(
                 account_id=self.config.account_id,
@@ -336,8 +339,7 @@ class JobManager:
             # 1. 交易接口连接检查
             if not self.trading_engine.connected:
                 await self._send_opening_alarm(
-                    "交易接口未连接",
-                    "开盘前交易接口未连接，请检查网络或配置"
+                    "交易接口未连接", "开盘前交易接口未连接，请检查网络或配置"
                 )
                 logger.warning("开盘检查：交易接口未连接")
             else:
@@ -352,8 +354,7 @@ class JobManager:
                 missing_files = await self._check_param_files()
                 if missing_files:
                     await self._send_opening_alarm(
-                        "参数文件缺失",
-                        f"以下策略参数文件不存在: {', '.join(missing_files)}"
+                        "参数文件缺失", f"以下策略参数文件不存在: {', '.join(missing_files)}"
                     )
                     logger.warning(f"开盘检查：参数文件缺失 - {missing_files}")
 
@@ -376,8 +377,9 @@ class JobManager:
                 return
 
             try:
-                from src.models.po import SwitchPosImportPo
                 from datetime import date
+
+                from src.models.po import SwitchPosImportPo
 
                 today = date.today()
                 today_str = now.strftime("%Y-%m-%d")
@@ -391,8 +393,7 @@ class JobManager:
 
                 if count == 0:
                     await self._send_opening_alarm(
-                        "换仓文件未导入",
-                        f"今日({today_str})未检测到换仓文件导入记录"
+                        "换仓文件未导入", f"今日({today_str})未检测到换仓文件导入记录"
                     )
                     logger.warning("开盘检查：今日无换仓文件导入记录")
                 else:
@@ -522,8 +523,9 @@ class JobManager:
                 return
 
             try:
-                from src.models.po import StrategyPositionPo
                 from datetime import date
+
+                from src.models.po import StrategyPositionPo
 
                 today = date.today()
                 trading_date_str = today.strftime("%Y-%m-%d")

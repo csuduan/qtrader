@@ -210,7 +210,7 @@ class StrategyRes(BaseModel):
     inited: bool = False
     config: dict | None = None
     base_params: List = []  # 基础参数定义
-    ext_params: List = []   # 扩展参数定义
+    ext_params: List = []  # 扩展参数定义
     # 信号信息（从策略的get_signal()获取）
     signal: dict | None = None
     # 持仓信息（区分多头和空头）

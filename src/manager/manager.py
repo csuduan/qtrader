@@ -8,16 +8,16 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from src.app_context import AppContext, get_app_context
 from src.manager.trader_proxy import TraderProxy
 from src.models.object import AccountData, Direction, Offset, OrderData, OrderRequest
-from src.utils.config_loader import AccountConfig, DatabaseConfig, SocketConfig,AppConfig
+from src.utils.config_loader import AccountConfig, AppConfig, DatabaseConfig, SocketConfig
 from src.utils.logger import get_logger
 from src.utils.scheduler import TaskScheduler
-from src.app_context import get_app_context, AppContext
-ctx:AppContext = get_app_context()
+
+ctx: AppContext = get_app_context()
 
 logger = get_logger(__name__)
-
 
 
 class TradingManager:
@@ -66,7 +66,7 @@ class TradingManager:
         self._health_check_task: Optional[asyncio.Task] = None
 
         # Scheduler（将在 start() 中初始化）
-        self._scheduler = None
+        self._scheduler: Optional[TaskScheduler] = None
 
         logger.info("交易管理器初始化完成")
 
@@ -86,13 +86,9 @@ class TradingManager:
             logger.error(f"未找到账号 [{account_id}] 的配置")
             return False
 
-        trader = TraderProxy(
-            account_config=account_config
-        )
+        trader = TraderProxy(account_config=account_config)
         self.traders[account_id] = trader
-        logger.info(
-            f"Trader Proxy [{account_id}] 初始化完成（enabled: {account_config.enabled}）"
-        )
+        logger.info(f"Trader Proxy [{account_id}] 初始化完成（enabled: {account_config.enabled}）")
         return True
 
     async def start_trader(self, account_id: str) -> bool:
@@ -629,10 +625,13 @@ class TradingManager:
         job_manager = ManagerJobManager(self)
 
         # 从全局配置加载 Manager 的 scheduler 配置
-        app_config: AppConfig = ctx.get_config()
+        app_config = ctx.get_config()
+        if app_config is None or app_config.scheduler is None:
+            logger.warning("未找到 Scheduler 配置，跳过启动")
+            return
         scheduler_config = app_config.scheduler
 
-        self._scheduler = TaskScheduler(scheduler_config, job_manager)
+        self._scheduler = TaskScheduler(scheduler_config, job_manager)  # type: ignore[arg-type]
         self._scheduler.start()
         logger.info("Manager Scheduler 已启动")
 

@@ -11,12 +11,11 @@ from pydantic import BaseModel, Field
 
 from src.models.object import (
     BarData,
+    Direction,
     Offset,
     OrderData,
     TickData,
     TradeData,
-    Direction,
-    Offset,
 )
 from src.trader.order_cmd import OrderCmd
 from src.utils.config_loader import StrategyConfig
@@ -31,6 +30,7 @@ logger = get_logger(__name__)
 
 class BaseParam(BaseModel):
     """策略公共参数"""
+
     symbol: str = Field(default="IM2603", title="合约代码")
     bar_type: str = Field(default="M1", title="bar类型")
     volume: int = Field(default=1, title="目标手数")
@@ -62,13 +62,16 @@ class BaseParam(BaseModel):
             else:
                 param_type = "string"
 
-            definitions.append({
-                "key": field_name,
-                "label": title,
-                "type": param_type,
-                "value": getattr(self, field_name)
-            })
+            definitions.append(
+                {
+                    "key": field_name,
+                    "label": title,
+                    "type": param_type,
+                    "value": getattr(self, field_name),
+                }
+            )
         return definitions
+
 
 class Signal(BaseModel):
     """策略信号基类"""
@@ -99,12 +102,11 @@ class BaseStrategy:
         # 策略ID
         self.strategy_id = strategy_id
         # 合约代码
-        self.symbol: str =strategy_config.symbol
+        self.symbol: str = strategy_config.symbol
         # 目标手数
-        self.volume: int =strategy_config.volume
+        self.volume: int = strategy_config.volume
         # k线类型
-        self.bar_type: str =strategy_config.bar
-
+        self.bar_type: str = strategy_config.bar
 
         self.inited: bool = False
         self.enabled: bool = True
@@ -130,8 +132,7 @@ class BaseStrategy:
         self._pending_cmd: Optional[OrderCmd] = None
         self._hist_cmds: Dict[str, OrderCmd] = {}
 
-
-    def init(self,trading_day: datetime) -> bool:
+    def init(self, trading_day: datetime) -> bool:
         """策略初始化"""
         logger.info(f"策略 [{self.strategy_id}] 初始化...")
         self.inited = True
@@ -160,7 +161,7 @@ class BaseStrategy:
             return []
         definitions = self.param.get_param_definitions()
         return definitions
-    
+
     def load_hist_bars(self, symbol: str, start: datetime, end: datetime) -> List[BarData]:
         """加载历史K线数据"""
         if self.strategy_manager is None:
@@ -194,7 +195,7 @@ class BaseStrategy:
         Args:
             signal: 要更新的信号字典
         """
-        if not self.signal: 
+        if not self.signal:
             self.signal = Signal()
 
         # 更新信号
@@ -225,7 +226,9 @@ class BaseStrategy:
                 # 有进行中的指令
                 if self._pending_cmd.offset == Offset.OPEN:
                     # 有未完成的开仓操作，等待下一次执行
-                    logger.info(f"策略 [{self.strategy_id}] 有未完成的开仓指令，先取消指令，等待下一次执行")
+                    logger.info(
+                        f"策略 [{self.strategy_id}] 有未完成的开仓指令，先取消指令，等待下一次执行"
+                    )
                     # 当前开仓报单未完成，先撤单，等待下一次执行平仓
                     await self.cancel_order_cmd(self._pending_cmd)
                     return
@@ -239,13 +242,13 @@ class BaseStrategy:
                         offset=Offset.CLOSE,
                         direction=Direction.SELL if signal.side == 1 else Direction.BUY,
                         volume=pos,
-                        price=0
+                        price=0,
                     )
                     await self.send_order_cmd(exit_cmd)
         else:
             # 开仓处理
             if self._pending_cmd and not self._pending_cmd.is_finished:
-                #有进行中的指令
+                # 有进行中的指令
                 pass
             else:
                 pos = self.pos_long if signal.side == 1 else self.pos_short
@@ -255,33 +258,35 @@ class BaseStrategy:
                         offset=Offset.OPEN,
                         direction=Direction.BUY if signal.side == 1 else Direction.SELL,
                         volume=self.volume - pos,
-                        price=0
+                        price=0,
                     )
                     await self.send_order_cmd(entry_cmd)
 
     def _on_cmd_change(self, cmd: OrderCmd):
         """处理订单状态变化"""
         if not cmd.is_finished or not self._pending_cmd:
-            return    
+            return
         if cmd.cmd_id != self._pending_cmd.cmd_id:
             return
 
-        # 等报单指令完成，指令中的成交数量不会变化了，再更新持仓     
-        if cmd.filled_volume>0:
-            #有进行中的指令  
+        # 等报单指令完成，指令中的成交数量不会变化了，再更新持仓
+        if cmd.filled_volume > 0:
+            # 有进行中的指令
             if cmd.offset == Offset.OPEN:
                 # 开仓指令
-                cost= (self.pos_long+self.pos_short)*self.pos_price + cmd.filled_volume * cmd.filled_price
+                cost = (
+                    self.pos_long + self.pos_short
+                ) * self.pos_price + cmd.filled_volume * cmd.filled_price
                 self.pos_long += cmd.filled_volume * 1 if cmd.direction == Direction.BUY else 0
                 self.pos_short += cmd.filled_volume * 1 if cmd.direction == Direction.SELL else 0
-                self.pos_price = cost/(self.pos_long+self.pos_short)
+                self.pos_price = cost / (self.pos_long + self.pos_short)
             elif cmd.offset == Offset.CLOSE:
                 # 平仓指令
                 self.pos_long -= cmd.filled_volume * 1 if cmd.direction == Direction.SELL else 0
                 self.pos_short -= cmd.filled_volume * 1 if cmd.direction == Direction.BUY else 0
             self._pending_cmd = None
 
-        if "报单被拒" in cmd.finish_reason:
+        if cmd.finish_reason and "报单被拒" in cmd.finish_reason:
             if cmd.offset == Offset.OPEN:
                 self.opening_paused = True
             elif cmd.offset == Offset.CLOSE:
@@ -293,7 +298,7 @@ class BaseStrategy:
             return "开仓中" if self._pending_cmd.offset == Offset.OPEN else "平仓中"
         return ""
 
-    def enable(self,status:bool=True) -> bool:
+    def enable(self, status: bool = True) -> bool:
         """启用策略"""
         self.enabled = status
         logger.info(f"策略 [{self.strategy_id}] 启用" if status else "禁用")
@@ -371,7 +376,6 @@ class BaseStrategy:
         self.closing_paused = paused
         status = "暂停" if paused else "恢复"
         logger.info(f"策略 [{self.strategy_id}] 平仓已{status}")
-
 
     def get_position(self, symbol: str) -> Optional["PositionData"]:
         """

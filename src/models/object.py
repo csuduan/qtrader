@@ -266,7 +266,7 @@ class OrderData(BaseModel):
     def is_active(self) -> bool:
         """是否为活动订单"""
         return self.status == OrderStatus.PENDING
-    
+
     def can_cancel(self) -> bool:
         return self.status == OrderStatus.PENDING and not self.canceled
 
@@ -323,17 +323,16 @@ class PositionData(BaseModel):
     pos_long_td: Optional[int] = Field(None, description="今仓多头持仓数量")
     pos_short_td: Optional[int] = Field(None, description="今仓空头持仓数量")
 
-    #成本
+    # 成本
     hold_price_long: Optional[float] = Field(0, description="多头持仓均价")
     hold_price_short: Optional[float] = Field(0, description="空头持仓均价")
     hold_cost_long: Optional[float] = Field(0, description="多头持仓成本")
     hold_cost_short: Optional[float] = Field(0, description="空头持仓成本")
-    #盈亏
+    # 盈亏
     hold_profit_long: Optional[float] = Field(0, description="多头持仓盈亏(盯日)")
     hold_profit_short: Optional[float] = Field(0, description="空头持仓盈亏(盯日)")
     close_profit_long: Optional[float] = Field(0, description="多头平仓盈亏(盯日)")
     close_profit_short: Optional[float] = Field(0, description="空头平仓盈亏(盯日)")
-
 
     margin_long: Optional[float] = Field(0, description="多头持仓保证金占用")
     margin_short: Optional[float] = Field(0, description="空头持仓保证金占用")

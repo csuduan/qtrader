@@ -69,7 +69,9 @@ async def get_trades(
                     ),
                     price=float(trade.price),
                     volume=trade.volume,
-                    trade_date_time=datetime.fromtimestamp(trade_time_ts) if trade_time_ts else datetime.now(),
+                    trade_date_time=(
+                        datetime.fromtimestamp(trade_time_ts) if trade_time_ts else datetime.now()
+                    ),
                     created_at=datetime.now(),
                 )
             )

@@ -72,27 +72,27 @@ def _query_contracts_from_database(db_path: str, update_date: str) -> List[dict]
         db = Database(db_path)
         with db.get_session() as session:
             contract_pos = (
-                session.query(ContractPo)
-                .filter(ContractPo.update_date == update_date)
-                .all()
+                session.query(ContractPo).filter(ContractPo.update_date == update_date).all()
             )
             # 在Session关闭前转换为字典
             result = []
             for c in contract_pos:
-                result.append({
-                    "symbol": c.symbol,
-                    "exchange_id": c.exchange_id,
-                    "name": c.instrument_name,
-                    "product_type": c.product_type,
-                    "volume_multiple": c.volume_multiple,
-                    "price_tick": float(c.price_tick),
-                    "min_volume": c.min_volume,
-                    "option_strike": float(c.option_strike) if c.option_strike else None,
-                    "option_underlying": c.option_underlying,
-                    "option_type": c.option_type,
-                    "update_date": c.update_date,
-                    "updated_at": c.updated_at.isoformat() if c.updated_at else None,
-                })
+                result.append(
+                    {
+                        "symbol": c.symbol,
+                        "exchange_id": c.exchange_id,
+                        "name": c.instrument_name,
+                        "product_type": c.product_type,
+                        "volume_multiple": c.volume_multiple,
+                        "price_tick": float(c.price_tick),
+                        "min_volume": c.min_volume,
+                        "option_strike": float(c.option_strike) if c.option_strike else None,
+                        "option_underlying": c.option_underlying,
+                        "option_type": c.option_type,
+                        "update_date": c.update_date,
+                        "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+                    }
+                )
             return result
     except Exception as e:
         logger.error(f"从数据库 [{db_path}] 查询合约信息失败: {e}")

@@ -119,7 +119,9 @@ class Persistence:
 
             with session_scope() as session:
                 position_po = (
-                    session.query(PositionPo).filter_by(account_id=account_id, symbol=symbol).first()
+                    session.query(PositionPo)
+                    .filter_by(account_id=account_id, symbol=symbol)
+                    .first()
                 )
 
                 if not position_po:
@@ -133,7 +135,7 @@ class Persistence:
                 # 处理None值：如果为None则使用0
                 margin_long = data.margin_long or 0
                 margin_short = data.margin_short or 0
-                position_po.float_profit = Decimal(str(float_profit_long + float_profit_short))  # type: ignore[assignment]
+                position_po.float_profit = Decimal(str(0))  # type: ignore[assignment]
                 position_po.margin = Decimal(str(margin_long + margin_short))  # type: ignore[assignment]
                 position_po.updated_at = datetime.now()  # type: ignore[assignment]
 

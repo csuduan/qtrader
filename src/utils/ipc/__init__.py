@@ -24,12 +24,10 @@ from src.utils.ipc.protocol import (
     create_request,
     create_response,
 )
-
 from src.utils.ipc.socket_client import SocketClient
 
 # V2版本（推荐）
-from src.utils.ipc.socket_server import SocketServer
-from src.utils.ipc.socket_server import request
+from src.utils.ipc.socket_server import SocketServer, request
 
 # 工具类
 from src.utils.ipc.utils import (

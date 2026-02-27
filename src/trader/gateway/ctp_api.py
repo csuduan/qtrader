@@ -16,36 +16,33 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from xxlimited import Str
 
-from tqsdk.ins_schema import cont
-from src.utils.logger import get_logger
-
-
 from openctp_ctp import mdapi, tdapi
+from tqsdk.ins_schema import cont
 
 from src.models.object import (
     AccountData,
     CancelRequest,
     ContractData,
     Direction,
-    PosDirection,
     Exchange,
     Offset,
     OrderData,
     OrderRequest,
     OrderStatus,
     OrderType,
+    PosDirection,
     PositionData,
     ProductType,
     SubscribeRequest,
     TickData,
     TradeData,
 )
+from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
     from src.trader.gateway.ctp_gateway import CtpGateway
 
 logger = get_logger(__name__)
-
 
 
 # ==================== CTP 常量映射 ====================
@@ -58,21 +55,18 @@ STATUS_CTP2VT = {
     tdapi.THOST_FTDC_OST_NoTradeQueueing: OrderStatus.PENDING,
     tdapi.THOST_FTDC_OST_PartTradedQueueing: OrderStatus.PENDING,
     tdapi.THOST_FTDC_OST_AllTraded: OrderStatus.FINISHED,
-    tdapi.THOST_FTDC_OST_Canceled: OrderStatus.REJECTED
+    tdapi.THOST_FTDC_OST_Canceled: OrderStatus.REJECTED,
 }
 
 
 # 方向映射: 系统内部 -> CTP
-DIRECTION_VT2CTP = {
-    Direction.BUY: tdapi.THOST_FTDC_D_Buy,
-    Direction.SELL: tdapi.THOST_FTDC_D_Sell
-}
+DIRECTION_VT2CTP = {Direction.BUY: tdapi.THOST_FTDC_D_Buy, Direction.SELL: tdapi.THOST_FTDC_D_Sell}
 DIRECTION_CTP2VT = {v: k for k, v in DIRECTION_VT2CTP.items()}
 
 POS_DIRECTION_VT2CTP = {
     PosDirection.LONG: tdapi.THOST_FTDC_PD_Long,
-    PosDirection.SHORT: tdapi.THOST_FTDC_PD_Short
-}   
+    PosDirection.SHORT: tdapi.THOST_FTDC_PD_Short,
+}
 POS_DIRECTION_CTP2VT = {v: k for k, v in POS_DIRECTION_VT2CTP.items()}
 
 # 开平映射: 系统内部 -> CTP
@@ -80,7 +74,7 @@ OFFSET_VT2CTP = {
     Offset.OPEN: tdapi.THOST_FTDC_OF_Open,
     Offset.CLOSE: tdapi.THOST_FTDC_OFEN_Close,
     Offset.CLOSETODAY: tdapi.THOST_FTDC_OFEN_CloseToday,
-    Offset.CLOSEYESTERDAY: tdapi.THOST_FTDC_OFEN_CloseYesterday, 
+    Offset.CLOSEYESTERDAY: tdapi.THOST_FTDC_OFEN_CloseYesterday,
 }
 
 # 开平映射: CTP -> 系统内部
@@ -104,12 +98,13 @@ PRODUCT_CTP2VT = {
     tdapi.THOST_FTDC_PC_Futures: ProductType.FUTURES,
     tdapi.THOST_FTDC_PC_Options: ProductType.OPTION,
     tdapi.THOST_FTDC_PC_SpotOption: ProductType.OPTION,
-    tdapi.THOST_FTDC_PC_Combination: ProductType.SPREAD
+    tdapi.THOST_FTDC_PC_Combination: ProductType.SPREAD,
 }
 
 
 # CTP 常用常量
 MIN_VOLUME = 1
+
 
 def adjust_price(price: float, max_value: float = 1e308) -> float:
     """调整异常价格（CTP 无效价格转换为 0）"""
@@ -214,9 +209,9 @@ class CtpMdApi(mdapi.CThostFtdcMdSpi):
     def resubscribe(self) -> None:
         """重新订阅已订阅的合约"""
         if self.hist_subscribed and len(self.hist_subscribed) > 0:
-            self.subscribe(self.hist_subscribed)
+            self.subscribe(list(self.hist_subscribed))  # type: ignore[arg-type]
 
-    def subscribe(self, symbols:list[Str]) -> None:
+    def subscribe(self, symbols: list[Str]) -> None:
         """订阅行情"""
         self.hist_subscribed.update(symbols)
         if not self.connected or not self.api:
@@ -230,7 +225,7 @@ class CtpMdApi(mdapi.CThostFtdcMdSpi):
             return
 
         self.api.SubscribeMarketData(
-            [s.encode("utf-8") for s in symbols_to_subscribe], len(symbols_to_subscribe)
+            [s.encode("utf-8") for s in symbols_to_subscribe if s], len(symbols_to_subscribe)
         )
         logger.info(f"CTP 订阅行情: {symbols_to_subscribe}")
 
@@ -502,14 +497,14 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
 
         # 时间条件和数量条件
         if req.price_type == OrderType.FAK:
-            ctp_req.TimeCondition = tdapi.THOST_FTDC_TC_IOC # 委托有效期: 立即成交剩余转限价
-            ctp_req.VolumeCondition = tdapi.THOST_FTDC_VC_AV 
+            ctp_req.TimeCondition = tdapi.THOST_FTDC_TC_IOC  # 委托有效期: 立即成交剩余转限价
+            ctp_req.VolumeCondition = tdapi.THOST_FTDC_VC_AV
         elif req.price_type == OrderType.FOK:
             ctp_req.TimeCondition = tdapi.THOST_FTDC_TC_IOC
-            ctp_req.VolumeCondition = tdapi.THOST_FTDC_VC_CV 
+            ctp_req.VolumeCondition = tdapi.THOST_FTDC_VC_CV
         else:
             ctp_req.TimeCondition = tdapi.THOST_FTDC_TC_GFD  # 委托有效期: 当日有效
-            ctp_req.VolumeCondition = tdapi.THOST_FTDC_VC_AV 
+            ctp_req.VolumeCondition = tdapi.THOST_FTDC_VC_AV
 
         self.reqid += 1
         ret = self.api.ReqOrderInsert(ctp_req, self.reqid)
@@ -619,7 +614,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
         if ret != 0:
             logger.error(f"查询合约失败，错误代码：{ret}")
             self.semaphore.release()
-    
+
     def query_trades(self):
         """查询成交"""
         if not self.api or not self.connected:
@@ -634,7 +629,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
         if ret != 0:
             logger.error(f"查询成交失败，错误代码：{ret}")
             self.semaphore.release()
-    
+
     def query_orders(self):
         """查询订单"""
         if not self.api or not self.connected:
@@ -667,7 +662,11 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
         logger.error(f"CTP 交易服务器连接断开，原因: {reason}")
 
     def OnRspAuthenticate(
-        self, pRspAuthenticateField: tdapi.CThostFtdcRspAuthenticateField, pRspInfo: tdapi.CThostFtdcRspInfoField, nRequestID: int, bIsLast: bool
+        self,
+        pRspAuthenticateField: tdapi.CThostFtdcRspAuthenticateField,
+        pRspInfo: tdapi.CThostFtdcRspInfoField,
+        nRequestID: int,
+        bIsLast: bool,
     ) -> None:
         """用户授权验证回报"""
         if pRspInfo and pRspInfo.ErrorID != 0:
@@ -678,7 +677,11 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
         self.login()
 
     def OnRspUserLogin(
-        self, pRspUserLogin: tdapi.CThostFtdcRspUserLoginField, pRspInfo: tdapi.CThostFtdcRspInfoField, nRequestID: int, bIsLast: bool
+        self,
+        pRspUserLogin: tdapi.CThostFtdcRspUserLoginField,
+        pRspInfo: tdapi.CThostFtdcRspInfoField,
+        nRequestID: int,
+        bIsLast: bool,
     ) -> None:
         """用户登录请求回报"""
         if pRspInfo and pRspInfo.ErrorID != 0:
@@ -707,7 +710,11 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
         threading.Thread(target=self._run_query, daemon=True).start()
 
     def OnRspOrderInsert(
-        self, pInputOrder: tdapi.CThostFtdcInputOrderField, pRspInfo: tdapi.CThostFtdcRspInfoField, nRequestID: int, bIsLast: bool
+        self,
+        pInputOrder: tdapi.CThostFtdcInputOrderField,
+        pRspInfo: tdapi.CThostFtdcRspInfoField,
+        nRequestID: int,
+        bIsLast: bool,
     ) -> None:
         """委托下单失败回报"""
         if not pRspInfo:
@@ -725,11 +732,17 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
             self.order_map.pop(order_ref, None)
 
     def OnRspOrderAction(
-        self, pInputOrderAction: tdapi.CThostFtdcInputOrderActionField, pRspInfo: tdapi.CThostFtdcRspInfoField, nRequestID: int, bIsLast: bool
+        self,
+        pInputOrderAction: tdapi.CThostFtdcInputOrderActionField,
+        pRspInfo: tdapi.CThostFtdcRspInfoField,
+        nRequestID: int,
+        bIsLast: bool,
     ) -> None:
         """委托撤单失败回报"""
         if pRspInfo and pRspInfo.ErrorID != 0:
-            logger.error(f"CTP 撤单失败: {pInputOrderAction.OrderRef}, {pRspInfo.ErrorID} {pRspInfo.ErrorMsg}")
+            logger.error(
+                f"CTP 撤单失败: {pInputOrderAction.OrderRef}, {pRspInfo.ErrorID} {pRspInfo.ErrorMsg}"
+            )
 
     def OnRtnOrder(self, pOrder: tdapi.CThostFtdcOrderField) -> None:
         """委托更新推送"""
@@ -773,7 +786,9 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
             offset=OFFSET_CTP2VT.get(pTrade.OffsetFlag, Offset.OPEN),
             price=pTrade.Price,
             volume=pTrade.Volume,
-            trade_time=datetime.strptime(pTrade.TradeDate+" "+pTrade.TradeTime, "%Y%m%d %H:%M:%S"),
+            trade_time=datetime.strptime(
+                pTrade.TradeDate + " " + pTrade.TradeTime, "%Y%m%d %H:%M:%S"
+            ),
             trading_day=pTrade.TradeDate,
         )
 
@@ -783,15 +798,20 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
         )
 
         self.gateway.on_trade(trade)
-    
-    def OnRspSettlementInfoConfirm(self, pSettlementInfoConfirm: "CThostFtdcSettlementInfoConfirmField",
-                                   pRspInfo: "CThostFtdcRspInfoField", nRequestID: "int", bIsLast: "bool") -> "void":
+
+    def OnRspSettlementInfoConfirm(
+        self, pSettlementInfoConfirm: Any, pRspInfo: Any, nRequestID: int, bIsLast: bool
+    ) -> None:
         """确认结算单回报"""
         logger.info("结算信息确认成功")
         self.semaphore.release()
 
     def OnRspQryTradingAccount(
-        self, pTradingAccount: tdapi.CThostFtdcTradingAccountField, pRspInfo: tdapi.CThostFtdcRspInfoField, nRequestID: int, bIsLast: bool
+        self,
+        pTradingAccount: tdapi.CThostFtdcTradingAccountField,
+        pRspInfo: tdapi.CThostFtdcRspInfoField,
+        nRequestID: int,
+        bIsLast: bool,
     ) -> None:
         """资金查询回报"""
         if pRspInfo and pRspInfo.ErrorID != 0:
@@ -805,7 +825,11 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
                 balance=round(pTradingAccount.Balance, 2),
                 available=round(pTradingAccount.Available, 2),
                 margin=round(pTradingAccount.CurrMargin, 2),
-                risk_ratio=round(pTradingAccount.CurrMargin/pTradingAccount.Balance,4) if pTradingAccount.Balance>0 else 0,
+                risk_ratio=(
+                    round(pTradingAccount.CurrMargin / pTradingAccount.Balance, 4)
+                    if pTradingAccount.Balance > 0
+                    else 0
+                ),
                 frozen=round(
                     pTradingAccount.FrozenMargin
                     + pTradingAccount.FrozenCash
@@ -822,7 +846,11 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
             logger.info(f"CTP 资金查询成功，余额: {account.balance}")
 
     def OnRspQryInvestorPosition(
-        self, pInvestorPosition: tdapi.CThostFtdcInvestorPositionField, pRspInfo: "CThostFtdcRspInfoField", nRequestID: int, bIsLast: bool
+        self,
+        pInvestorPosition: tdapi.CThostFtdcInvestorPositionField,
+        pRspInfo: Any,
+        nRequestID: int,
+        bIsLast: bool,
     ) -> None:
         """持仓查询回报"""
         if pRspInfo and pRspInfo.ErrorID != 0:
@@ -833,7 +861,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
         if pInvestorPosition:
             symbol = pInvestorPosition.InstrumentID
             contract = self.gateway.contracts.get(symbol)
-            multiple = contract.multiple if contract else 1
+            multiple = contract.multiple if contract and contract.multiple else 1
             direction = POS_DIRECTION_CTP2VT.get(pInvestorPosition.PosiDirection)
 
             # 获取或创建持仓
@@ -864,43 +892,65 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
             if direction:
                 # 说明：
                 # YdPosition是当前键值下的昨仓，是个静态值，不会更新。当前真实的昨仓值为Position-TodayPosition；
-                #对于非上期/能源的交易所，合约的昨仓YdPosition和今仓TodayPosition在一条记录里面，而上期/能源是分成了两条记录。
+                # 对于非上期/能源的交易所，合约的昨仓YdPosition和今仓TodayPosition在一条记录里面，而上期/能源是分成了两条记录。
                 volume = pInvestorPosition.Position
                 td_volume = pInvestorPosition.TodayPosition or 0
                 yd_volume = volume - td_volume
 
-                position.pos_long += volume if direction == PosDirection.LONG else 0
-                position.pos_short += volume if direction == PosDirection.SHORT else 0
-                position.pos_long_td += td_volume if direction == PosDirection.LONG else 0
-                position.pos_short_td += td_volume if direction == PosDirection.SHORT else 0
-                position.pos_long_yd += yd_volume if direction == PosDirection.LONG else 0
-                position.pos_short_yd += yd_volume if direction == PosDirection.SHORT else 0
+                position.pos_long += volume if direction == PosDirection.LONG else 0  # type: ignore[operator]
+                position.pos_short += volume if direction == PosDirection.SHORT else 0  # type: ignore[operator]
+                position.pos_long_td = (position.pos_long_td or 0) + (
+                    td_volume if direction == PosDirection.LONG else 0
+                )
+                position.pos_short_td = (position.pos_short_td or 0) + (
+                    td_volume if direction == PosDirection.SHORT else 0
+                )
+                position.pos_long_yd = (position.pos_long_yd or 0) + (
+                    yd_volume if direction == PosDirection.LONG else 0
+                )
+                position.pos_short_yd = (position.pos_short_yd or 0) + (
+                    yd_volume if direction == PosDirection.SHORT else 0
+                )
 
                 # 更新净持仓
                 position.pos = position.pos_long - position.pos_short
 
                 # 更新持仓成本和盈亏
+                hold_cost_long = position.hold_cost_long or 0.0
+                hold_cost_short = position.hold_cost_short or 0.0
                 if pInvestorPosition.PositionCost:
                     if direction == PosDirection.LONG:
-                        position.hold_cost_long += pInvestorPosition.PositionCost if volume > 0 else 0
-                        position.hold_price_long = round(position.hold_cost_long / position.pos_long /multiple,2) if position.pos_long > 0 else 0.0
+                        position.hold_cost_long = hold_cost_long + (
+                            pInvestorPosition.PositionCost if volume > 0 else 0
+                        )
+                        position.hold_price_long = (
+                            round(position.hold_cost_long / position.pos_long / multiple, 2)
+                            if position.pos_long > 0
+                            else 0.0
+                        )
                     else:
-                        position.hold_cost_short += pInvestorPosition.PositionCost if volume > 0 else 0
-                        position.hold_price_short = round(position.hold_cost_short / position.pos_short /multiple,2) if position.pos_short > 0 else 0.0
-                 
+                        position.hold_cost_short = hold_cost_short + (
+                            pInvestorPosition.PositionCost if volume > 0 else 0
+                        )
+                        position.hold_price_short = (
+                            round(position.hold_cost_short / position.pos_short / multiple, 2)
+                            if position.pos_short > 0
+                            else 0.0
+                        )
+
                 if pInvestorPosition.PositionProfit:
-                    #持仓盈亏(逐日盯市)
+                    # 持仓盈亏(逐日盯市)
                     if direction == PosDirection.LONG:
                         position.hold_profit_long += pInvestorPosition.PositionProfit
                     else:
                         position.hold_profit_short += pInvestorPosition.PositionProfit
                 if pInvestorPosition.CloseProfitByDate:
-                    #平仓盈亏(逐日盯市)
+                    # 平仓盈亏(逐日盯市)
                     if direction == PosDirection.LONG:
-                        position.close_profit_long += pInvestorPosition.CloseProfitByDate 
+                        position.close_profit_long += pInvestorPosition.CloseProfitByDate
                     else:
                         position.close_profit_short += pInvestorPosition.CloseProfitByDate
-                
+
                 if pInvestorPosition.UseMargin:
                     if direction == PosDirection.LONG:
                         position.margin_long += pInvestorPosition.UseMargin
@@ -917,7 +967,11 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
             self.position_map.clear()
 
     def OnRspQryInstrument(
-        self, pInstrument: tdapi.CThostFtdcInstrumentField, pRspInfo: tdapi.CThostFtdcRspInfoField, nRequestID: int, bIsLast: bool
+        self,
+        pInstrument: tdapi.CThostFtdcInstrumentField,
+        pRspInfo: tdapi.CThostFtdcRspInfoField,
+        nRequestID: int,
+        bIsLast: bool,
     ) -> None:
         """合约查询回报"""
         if pRspInfo and pRspInfo.ErrorID != 0:
@@ -938,7 +992,9 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
                     min_volume=1,
                     expire_date=pInstrument.ExpireDate,
                 )
-                if contract.expire_date >= datetime.now().strftime("%Y%m%d"):
+                if contract.expire_date and contract.expire_date >= datetime.now().strftime(
+                    "%Y%m%d"
+                ):
                     self.gateway.add_contract(contract)
 
         if bIsLast:
@@ -947,8 +1003,14 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
             self.gateway._contracts_update_date = datetime.now().strftime("%Y-%m-%d")
             self.semaphore.release()
             logger.info(f"CTP 合约查询成功，共 {len(self.gateway.contracts)} 条")
-        
-    def OnRspQryTrade(self, pTrade: tdapi.CThostFtdcTradeField, pRspInfo: tdapi.CThostFtdcRspInfoField, nRequestID: int, bIsLast: bool) -> None:
+
+    def OnRspQryTrade(
+        self,
+        pTrade: tdapi.CThostFtdcTradeField,
+        pRspInfo: tdapi.CThostFtdcRspInfoField,
+        nRequestID: int,
+        bIsLast: bool,
+    ) -> None:
         """请求查询成交响应"""
         if pRspInfo is not None and pRspInfo.ErrorID != 0:
             logger.error(f"查询成交失败,{pRspInfo.ErrorMsg}")
@@ -969,26 +1031,31 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
                 offset=OFFSET_CTP2VT[pTrade.OffsetFlag],
                 price=pTrade.Price,
                 volume=pTrade.Volume,
-                trade_time=datetime.strptime(pTrade.TradeDate+" "+pTrade.TradeTime, "%Y%m%d %H:%M:%S"),
-                account_id=self.config.account_id          
-                )
+                trade_time=datetime.strptime(
+                    pTrade.TradeDate + " " + pTrade.TradeTime, "%Y%m%d %H:%M:%S"
+                ),
+                account_id=self.config.account_id or "",
+                commission=0.0,
+            )
             self.gateway.add_trade(trade)
 
         if bIsLast:
             logger.info(f"成交信息查询成功")
             self.semaphore.release()
-    
-    def OnRspQryOrder(self, pOrder: tdapi.CThostFtdcOrderField, pRspInfo: "CThostFtdcRspInfoField", nRequestID: "int", bIsLast: "bool") -> "void":
+
+    def OnRspQryOrder(
+        self, pOrder: tdapi.CThostFtdcOrderField, pRspInfo: Any, nRequestID: int, bIsLast: bool
+    ) -> None:
         """请求查询订单响应"""
         if pRspInfo is not None and pRspInfo.ErrorID != 0:
             logger.error(f"查询订单失败,{pRspInfo.ErrorMsg}")
             self.semaphore.release()
             return
-        
+
         if pOrder:
+            order_id = pOrder.OrderSysID
             order: OrderData = OrderData(
-                order_id=pOrder.OrderSysID,
-                order_ref=pOrder.OrderRef,
+                order_id=order_id,
                 trading_day=pOrder.TradingDay,
                 symbol=pOrder.InstrumentID,
                 exchange=EXCHANGE_CTP2VT[pOrder.ExchangeID],
@@ -997,14 +1064,19 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
                 price=pOrder.LimitPrice,
                 volume=pOrder.VolumeTotalOriginal,
                 traded=pOrder.VolumeTraded,
+                traded_price=None,
                 status=STATUS_CTP2VT[pOrder.OrderStatus],
                 status_msg=pOrder.StatusMsg,
-                insert_time=datetime.strptime(pOrder.InsertDate+" "+pOrder.InsertTime, "%Y%m%d %H:%M:%S"),
-                account_id=self.config.account_id
+                insert_time=datetime.strptime(
+                    pOrder.InsertDate + " " + pOrder.InsertTime, "%Y%m%d %H:%M:%S"
+                ),
+                account_id=self.config.account_id or "",
+                gateway_order_id=pOrder.OrderSysID,
+                update_time=datetime.now(),
             )
             self.gateway.add_order(order)
             if order.is_active():
-                self.order_map[order.order_ref] = order
+                self.order_map[pOrder.OrderRef] = order
 
         if bIsLast:
             logger.info(f"订单信息查询成功")
@@ -1032,7 +1104,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
         self.semaphore.acquire()
         logger.info("CTP 查询完成！")
         self.semaphore.release()
-        self.is_ready=True
+        self.is_ready = True
         self.gateway.on_status()
 
     def query_settlement(self) -> None:

@@ -110,7 +110,7 @@ class OrderCmdExecutor:
             cmd: OrderCmd 实例
         """
         # 订阅合约行情（异步）
-        #asyncio.create_task()
+        # asyncio.create_task()
         self._trading_engine.subscribe_symbol(cmd.symbol)
 
         # 设置为运行状态
@@ -119,7 +119,9 @@ class OrderCmdExecutor:
         self._pending_cmds[cmd.cmd_id] = cmd
         self._history_cmds[cmd.cmd_id] = cmd
 
-        self.logger.info(f"添加OrderCmd到执行器: {cmd.cmd_id} {cmd.symbol} {cmd.offset} {cmd.direction} {cmd.volume}手")
+        self.logger.info(
+            f"添加OrderCmd到执行器: {cmd.cmd_id} {cmd.symbol} {cmd.offset} {cmd.direction} {cmd.volume}手"
+        )
         # 查询持仓信息（只对平仓指令需要）
         pos = None
         if cmd.offset == Offset.CLOSE:
@@ -246,7 +248,7 @@ class OrderCmdExecutor:
                     offset=req.offset,
                     volume=req.volume,
                     price=req.price or 0,
-                    slip = req.slip or 0
+                    slip=req.slip or 0,
                 )
                 if order:
                     cmd.add_order(order)

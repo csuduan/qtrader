@@ -244,7 +244,6 @@ class ConfigLoader:
         self.app_config = self._load_app_config()
 
         # 动态扫描config目录下所有account-*.yaml文件
-        
 
         for account_id in self.app_config.account_ids:
             try:
@@ -260,7 +259,11 @@ class ConfigLoader:
             # 按照account_ids中定义的顺序重新排序
             account_order = {aid: i for i, aid in enumerate(self.app_config.account_ids)}
             self.app_config.accounts.sort(
-                key=lambda acc: account_order.get(acc.account_id, float("inf")) if acc.account_id is not None else float("inf")
+                key=lambda acc: (
+                    account_order.get(acc.account_id, float("inf"))
+                    if acc.account_id is not None
+                    else float("inf")
+                )
             )
 
         return self.app_config

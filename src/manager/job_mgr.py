@@ -53,10 +53,9 @@ class ManagerJobManager:
                 # 检查 Trader 是否运行
                 is_running = trader_proxy.is_running()
                 if not is_running:
-                    disconnected_traders.append({
-                        "account_id": account_id,
-                        "reason": "Trader 进程未运行"
-                    })
+                    disconnected_traders.append(
+                        {"account_id": account_id, "reason": "Trader 进程未运行"}
+                    )
                     continue
 
                 # 检查连接状态（通过获取账户信息验证）
@@ -65,10 +64,9 @@ class ManagerJobManager:
                     # 只检查进程是否运行，具体连接状态由 Trader 自己检查
                     pass
                 except Exception as e:
-                    disconnected_traders.append({
-                        "account_id": account_id,
-                        "reason": f"连接检查失败: {str(e)}"
-                    })
+                    disconnected_traders.append(
+                        {"account_id": account_id, "reason": f"连接检查失败: {str(e)}"}
+                    )
 
             # 为未连接的 Trader 创建告警
             for trader_info in disconnected_traders:
@@ -78,7 +76,7 @@ class ManagerJobManager:
                     source="TRADER_HEALTH_CHECK",
                     title=f"Trader {trader_info['account_id']} 连接异常",
                     detail=f"原因: {trader_info['reason']}",
-                    now=now
+                    now=now,
                 )
 
             if not disconnected_traders:
@@ -107,9 +105,7 @@ class ManagerJobManager:
             three_days_ago = datetime.now() - timedelta(days=3)
 
             deleted_count = (
-                session.query(AlarmPo)
-                .filter(AlarmPo.created_at < three_days_ago)
-                .delete()
+                session.query(AlarmPo).filter(AlarmPo.created_at < three_days_ago).delete()
             )
 
             session.commit()

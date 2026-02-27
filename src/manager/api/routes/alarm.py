@@ -83,10 +83,7 @@ async def get_alarm_stats(request: Request):
 
         # 今日总告警数
         today_total = (
-            session.query(func.count(AlarmPo.id))
-            .filter(AlarmPo.alarm_date == today)
-            .scalar()
-            or 0
+            session.query(func.count(AlarmPo.id)).filter(AlarmPo.alarm_date == today).scalar() or 0
         )
 
         # 未处理告警数
@@ -180,8 +177,7 @@ async def confirm_all_alarms(
 
         # 构建查询条件：只处理当日未确认的告警
         query = session.query(AlarmPo).filter(
-            AlarmPo.status == "UNCONFIRMED",
-            AlarmPo.alarm_date == today
+            AlarmPo.status == "UNCONFIRMED", AlarmPo.alarm_date == today
         )
 
         # 如果提供了账户ID，按账户筛选

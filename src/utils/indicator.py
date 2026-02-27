@@ -22,11 +22,11 @@ def std(data):
 
 def ma(data, n):
     """移动平均线"""
-    mv = np.convolve(data, np.ones(n) / n, mode='valid')
+    mv = np.convolve(data, np.ones(n) / n, mode="valid")
     return np.concatenate(([np.NaN for k in range(n - 1)], mv))
 
 
-def ewma(data, period, row_size=None, dtype=None, order='C', out=None):
+def ewma(data, period, row_size=None, dtype=None, order="C", out=None):
     """
     copy from https://blog.csdn.net/Shepherdppz/article/details/104120689
 
@@ -94,8 +94,9 @@ def ewma(data, period, row_size=None, dtype=None, order='C', out=None):
         data_main_view = data
 
     # get all the scaled cumulative sums with 0 offset
-    ewma_vectorized_2d(data_main_view, alpha, axis=1, offset=0, dtype=dtype,
-                       order='C', out=out_main_view)
+    ewma_vectorized_2d(
+        data_main_view, alpha, axis=1, offset=0, dtype=dtype, order="C", out=out_main_view
+    )
 
     scaling_factors = (1 - alpha) ** np.arange(1, row_size + 1)
     last_scaling_factor = scaling_factors[-1]
@@ -112,13 +113,19 @@ def ewma(data, period, row_size=None, dtype=None, order='C', out=None):
 
     if trailing_n > 0:
         # process trailing data in the 2nd slice of the out parameter
-        ewma_vectorized(data[-trailing_n:], alpha, offset=out_main_view[-1, -1],
-                        dtype=dtype, order='C', out=out[-trailing_n:])
+        ewma_vectorized(
+            data[-trailing_n:],
+            alpha,
+            offset=out_main_view[-1, -1],
+            dtype=dtype,
+            order="C",
+            out=out[-trailing_n:],
+        )
     return out
 
 
 def get_max_row_size(alpha, dtype=float):
-    assert 0. <= alpha < 1.
+    assert 0.0 <= alpha < 1.0
     # This will return the maximum row size possible on
     # your platform for the given dtype. I can find no impact on accuracy
     # at this value on my machine.
@@ -131,7 +138,7 @@ def get_max_row_size(alpha, dtype=float):
     return int(np.log(epsilon) / np.log(1 - alpha)) + 1
 
 
-def ewma_vectorized(data, alpha, offset=None, dtype=None, order='C', out=None):
+def ewma_vectorized(data, alpha, offset=None, dtype=None, order="C", out=None):
     """
     Calculates the exponential moving average over a vector.
     Will fail for large inputs.
@@ -181,11 +188,9 @@ def ewma_vectorized(data, alpha, offset=None, dtype=None, order='C', out=None):
 
     # scaling_factors -> 0 as len(data) gets large
     # this leads to divide-by-zeros below
-    scaling_factors = np.power(1. - alpha, np.arange(data.size + 1, dtype=dtype),
-                               dtype=dtype)
+    scaling_factors = np.power(1.0 - alpha, np.arange(data.size + 1, dtype=dtype), dtype=dtype)
     # create cumulative sum array
-    np.multiply(data, (alpha * scaling_factors[-2]) / scaling_factors[:-1],
-                dtype=dtype, out=out)
+    np.multiply(data, (alpha * scaling_factors[-2]) / scaling_factors[:-1], dtype=dtype, out=out)
     np.cumsum(out, dtype=dtype, out=out)
 
     # cumsums / scaling
@@ -199,7 +204,7 @@ def ewma_vectorized(data, alpha, offset=None, dtype=None, order='C', out=None):
     return out
 
 
-def ewma_vectorized_2d(data, alpha, axis=None, offset=None, dtype=None, order='C', out=None):
+def ewma_vectorized_2d(data, alpha, axis=None, offset=None, dtype=None, order="C", out=None):
     """
     Calculates the exponential moving average over a given axis.
     :param data: Input data, must be 1D or 2D array.
@@ -247,8 +252,7 @@ def ewma_vectorized_2d(data, alpha, axis=None, offset=None, dtype=None, order='C
         # use 1D version
         if isinstance(offset, np.ndarray):
             offset = offset[0]
-        return ewma_vectorized(data, alpha, offset, dtype=dtype, order=order,
-                               out=out)
+        return ewma_vectorized(data, alpha, offset, dtype=dtype, order=order, out=out)
 
     assert -data.ndim <= axis < data.ndim
 
@@ -273,15 +277,14 @@ def ewma_vectorized_2d(data, alpha, axis=None, offset=None, dtype=None, order='C
     # calculate the moving average
     row_size = data.shape[1]
     row_n = data.shape[0]
-    scaling_factors = np.power(1. - alpha, np.arange(row_size + 1, dtype=dtype),
-                               dtype=dtype)
+    scaling_factors = np.power(1.0 - alpha, np.arange(row_size + 1, dtype=dtype), dtype=dtype)
     # create a scaled cumulative sum array
     np.multiply(
         data,
-        np.multiply(alpha * scaling_factors[-2], np.ones((row_n, 1), dtype=dtype),
-                    dtype=dtype)
+        np.multiply(alpha * scaling_factors[-2], np.ones((row_n, 1), dtype=dtype), dtype=dtype)
         / scaling_factors[np.newaxis, :-1],
-        dtype=dtype, out=out_view
+        dtype=dtype,
+        out=out_view,
     )
     np.cumsum(out_view, axis=1, dtype=dtype, out=out_view)
     out_view /= scaling_factors[np.newaxis, -2::-1]
@@ -296,10 +299,12 @@ def ewma_vectorized_2d(data, alpha, axis=None, offset=None, dtype=None, order='C
 
 def wma(values, window):
     weights = np.arange(window, 0, -1.0)
-    weights /= (window * (window + 1) / 2)
+    weights /= window * (window + 1) / 2
     weighted_moving_averages = np.empty(window - 1)
     weighted_moving_averages[:] = np.NAN
-    weighted_moving_averages = np.append(weighted_moving_averages, np.convolve(values, weights, 'valid'))
+    weighted_moving_averages = np.append(
+        weighted_moving_averages, np.convolve(values, weights, "valid")
+    )
     return weighted_moving_averages
 
 
@@ -337,7 +342,7 @@ def rsi(data, period=5):
     return 100.0 - 100.0 / (1.0 + rs)
 
 
-def kd(data: np.array, period, period_df_ast=3):
+def kd(data: np.ndarray, period: int, period_df_ast: int = 3):
     diff = np.diff(data)
     rolling_array = rolling(diff, period)
     lowest = np.array(list(map(np.min, rolling_array)))
@@ -360,13 +365,16 @@ def kdj(close, high, low, n=9, m1=3, m2=3):
     :param m2: int, the weight of D value
     :return: tuple, (K, D, J)
     """
-    RSV = (close - np.minimum(low, np.roll(close, n))) / (
-            np.maximum(high, np.roll(close, n)) - np.minimum(low, np.roll(close, n))) * 100
+    RSV = (
+        (close - np.minimum(low, np.roll(close, n)))
+        / (np.maximum(high, np.roll(close, n)) - np.minimum(low, np.roll(close, n)))
+        * 100
+    )
     K = np.zeros_like(RSV)
     K[:n] = 50
-    K = np.convolve(K, np.ones(m1) / m1, mode='same')[n - 1:]
-    K = np.convolve(K, np.ones(m2) / m2, mode='same')[m2 - 1:]
-    D = np.convolve(K, np.ones(m2) / m2, mode='same')
+    K = np.convolve(K, np.ones(m1) / m1, mode="same")[n - 1 :]
+    K = np.convolve(K, np.ones(m2) / m2, mode="same")[m2 - 1 :]
+    D = np.convolve(K, np.ones(m2) / m2, mode="same")
     J = 3 * K - 2 * D
     return K, D, J
 
@@ -381,5 +389,5 @@ def bollinger_bands(close, window_size, num_of_std):
 
 def sma(data, window):
     weights = np.repeat(1.0, window) / window
-    sma = np.convolve(data, weights, 'valid')
+    sma = np.convolve(data, weights, "valid")
     return sma

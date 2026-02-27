@@ -10,18 +10,19 @@ CTP Gateway 适配器（异步版本）
 
 import asyncio
 import queue
-from typing import Dict, List, Optional, Tuple, Any, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import pandas as pd
 
+from src.app_context import get_app_context
 from src.models.object import (
     AccountData,
     BarData,
     CancelRequest,
     ContractData,
+    Direction,
     Exchange,
     Offset,
-    Direction,
     OrderData,
     OrderRequest,
     OrderType,
@@ -31,15 +32,14 @@ from src.models.object import (
     TradeData,
 )
 from src.trader.gateway.base_gateway import BaseGateway
-from src.utils.config_loader import GatewayConfig
-from src.utils.event import EventTypes
-from src.utils.logger import get_logger
-from src.utils.bar_generator import MultiSymbolBarGenerator, parse_interval
 
 # 从 ctp_api 导入 CTP API 封装类
 from src.trader.gateway.ctp_api import CtpMdApi, CtpTdApi
-
-from src.app_context import get_app_context
+from src.utils.async_event_engine import AsyncEventEngine
+from src.utils.bar_generator import MultiSymbolBarGenerator, parse_interval
+from src.utils.config_loader import GatewayConfig
+from src.utils.event import EventTypes
+from src.utils.logger import get_logger
 
 ctx = get_app_context()
 
@@ -96,8 +96,8 @@ class CtpGateway(BaseGateway):
 
         # AsyncEventEngine引用（直接发送事件）
         self._event_engine: Optional[AsyncEventEngine] = ctx.get_event_engine()
-        
-        #加载合约
+
+        # 加载合约
         self.load_contracts()
 
         logger.info(f"CTP Gateway 初始化，账户: {self.account_id}")
@@ -145,23 +145,21 @@ class CtpGateway(BaseGateway):
         logger.info("CTP Gateway 已断开")
         return True
 
-
-
     def send_order(self, req: OrderRequest) -> Optional[OrderData]:
         """下单"""
         if not self.td_api or not self.td_api.connected:
             logger.error("CTP 交易接口未连接")
             return None
 
-        contract: ContractData = self.contracts.get(req.symbol)
+        contract = self.contracts.get(req.symbol)
         if not contract:
             logger.warning(f"CTP 下单失败，未找到合约信息，合约: {req.symbol}")
             raise ValueError(f"未找到合约信息，合约: {req.symbol}")
         req.exchange = contract.exchange
-        if not req.price or req.price<=0:
+        if not req.price or req.price <= 0:
             tick = self._quotes.get(req.symbol)
-            if tick and tick.last_price>0:
-                req.price = tick.bid_price1 if req.direction==Direction.BUY else tick.ask_price1
+            if tick and tick.last_price is not None and tick.last_price > 0:
+                req.price = tick.bid_price1 if req.direction == Direction.BUY else tick.ask_price1
             else:
                 logger.warning(f"CTP 下单失败，未获取到有效价格，合约: {req.symbol}")
                 raise ValueError(f"未获取到有效价格，合约: {req.symbol}")
@@ -227,16 +225,18 @@ class CtpGateway(BaseGateway):
         # 转换为 DataFrame
         data = []
         for bar in bars:
-            data.append({
-                "datetime": bar.datetime,
-                "open": bar.open_price,
-                "high": bar.high_price,
-                "low": bar.low_price,
-                "close": bar.close_price,
-                "volume": bar.volume or 0,
-                "turnover": bar.turnover or 0,
-                "open_interest": bar.open_interest or 0,
-            })
+            data.append(
+                {
+                    "datetime": bar.datetime,
+                    "open": bar.open_price,
+                    "high": bar.high_price,
+                    "low": bar.low_price,
+                    "close": bar.close_price,
+                    "volume": bar.volume or 0,
+                    "turnover": bar.turnover or 0,
+                    "open_interest": bar.open_interest or 0,
+                }
+            )
 
         df = pd.DataFrame(data)
         return df
@@ -245,7 +245,10 @@ class CtpGateway(BaseGateway):
         """订阅行情"""
         if isinstance(symbol, str):
             symbol = [symbol]
-        self.md_api.subscribe(symbol)
+        if self.md_api is None:
+            logger.error("CTP 行情接口未连接")
+            return False
+        self.md_api.subscribe(symbol)  # type: ignore[arg-type]
         return True
 
     def subscribe_bars(self, symbol: str, interval: str) -> bool:
@@ -287,10 +290,10 @@ class CtpGateway(BaseGateway):
 
         logger.info(f"订阅K线数据: {std_symbol} {interval}")
         return True
+
     def get_contract(self, symbol: str) -> Optional[ContractData]:
         """获取合约信息"""
         return self.contracts.get(symbol)
-
 
     async def _event_dispatcher(self):
         """
@@ -309,7 +312,7 @@ class CtpGateway(BaseGateway):
                         await asyncio.sleep(0)
                         continue
                     event_type, data = await asyncio.to_thread(self._sync_queue.get, timeout=1.0)
-                    if self._event_engine :
+                    if self._event_engine:
                         self._event_engine.put(event_type, data)
 
                 except asyncio.TimeoutError:
@@ -323,19 +326,19 @@ class CtpGateway(BaseGateway):
             logger.info("事件分发协程已取消")
         except Exception as e:
             logger.exception(f"事件分发协程致命错误: {e}")
-    
+
     def add_trade(self, trade: TradeData) -> None:
         """添加成交"""
         self._trades[trade.trade_id] = trade
-    
+
     def add_position(self, position: PositionData) -> None:
         """添加持仓"""
         self._positions[position.symbol] = position
-    
+
     def add_order(self, order: OrderData) -> None:
         """添加订单"""
         self._orders[order.order_id] = order
-    
+
     def add_contract(self, contract: ContractData) -> None:
         """添加合约"""
         self.contracts[contract.symbol] = contract
@@ -357,7 +360,7 @@ class CtpGateway(BaseGateway):
         """处理订单回调"""
         # 缓存订单数据
         self.add_order(order)
-        self._push_to_queue(EventTypes.ORDER_UPDATE,order)
+        self._push_to_queue(EventTypes.ORDER_UPDATE, order)
         logger.info(f"报单回报: {order}")
 
     def on_trade(self, trade: TradeData) -> None:
@@ -381,7 +384,7 @@ class CtpGateway(BaseGateway):
         if not position:
             # 获取合约乘数
             contract = self.contracts.get(symbol)
-            multiple = contract.multiple if contract else 1
+            multiple = contract.multiple if contract and contract.multiple else 1
 
             position = PositionData.model_construct(
                 account_id=self.account_id,
@@ -414,74 +417,112 @@ class CtpGateway(BaseGateway):
         is_open = trade.offset == Offset.OPEN
         is_buy = trade.direction == Direction.BUY
 
+        # 确保 hold_cost 不为 None
+        hold_cost_long = position.hold_cost_long or 0.0
+        hold_cost_short = position.hold_cost_short or 0.0
+
         if is_open:
             # 开仓：增加持仓
             if is_buy:
                 # 开多
-                position.hold_cost_long = (position.hold_cost_long * position.pos_long + price * volume * position.multiple)
+                position.hold_cost_long = (
+                    hold_cost_long * position.pos_long + price * volume * position.multiple
+                )
                 position.pos_long += volume
                 position.hold_cost_long = position.hold_cost_long if position.pos_long > 0 else 0.0
-                position.hold_price_long = round(position.hold_cost_long / position.pos_long / position.multiple, 2) if position.pos_long > 0 else 0.0
+                position.hold_price_long = (
+                    round(position.hold_cost_long / position.pos_long / position.multiple, 2)
+                    if position.pos_long > 0
+                    else 0.0
+                )
                 # 开仓全部算今仓
-                position.pos_long_td += volume
+                position.pos_long_td = (position.pos_long_td or 0) + volume
             else:
                 # 开空
-                position.hold_cost_short = (position.hold_cost_short * position.pos_short + price * volume * position.multiple)
+                position.hold_cost_short = (
+                    hold_cost_short * position.pos_short + price * volume * position.multiple
+                )
                 position.pos_short += volume
-                position.hold_cost_short = position.hold_cost_short if position.pos_short > 0 else 0.0
-                position.hold_price_short = round(position.hold_cost_short / position.pos_short / position.multiple, 2) if position.pos_short > 0 else 0.0
+                position.hold_cost_short = (
+                    position.hold_cost_short if position.pos_short > 0 else 0.0
+                )
+                position.hold_price_short = (
+                    round(position.hold_cost_short / position.pos_short / position.multiple, 2)
+                    if position.pos_short > 0
+                    else 0.0
+                )
                 # 开仓全部算今仓
-                position.pos_short_td += volume
+                position.pos_short_td = (position.pos_short_td or 0) + volume
         else:
             # 平仓：减少持仓
             if is_buy:
                 # 平空（买入平空）
                 if position.pos_short > 0:
                     # 按比例减少持仓成本
+                    hold_cost_short = position.hold_cost_short or 0.0
                     if position.pos_short > volume:
-                        position.hold_cost_short = position.hold_cost_short * (position.pos_short - volume) / position.pos_short
+                        position.hold_cost_short = (
+                            hold_cost_short * (position.pos_short - volume) / position.pos_short
+                        )
                     else:
                         position.hold_cost_short = 0.0
                     position.pos_short = max(0, position.pos_short - volume)
 
                     # 处理今仓/昨仓
+                    pos_short_td = position.pos_short_td or 0
+                    pos_short_yd = position.pos_short_yd or 0
                     if trade.offset == Offset.CLOSETODAY:
                         # 平今仓
-                        position.pos_short_td = max(0, position.pos_short_td - volume)
+                        position.pos_short_td = max(0, pos_short_td - volume)
                     else:
                         # 平昨仓（优先减昨仓）
-                        yd_to_close = min(position.pos_short_yd, volume)
-                        position.pos_short_yd = max(0, position.pos_short_yd - yd_to_close)
+                        yd_to_close = min(pos_short_yd, volume)
+                        position.pos_short_yd = max(0, pos_short_yd - yd_to_close)
                         remaining = volume - yd_to_close
                         if remaining > 0:
-                            position.pos_short_td = max(0, position.pos_short_td - remaining)
+                            position.pos_short_td = max(0, pos_short_td - remaining)
 
                     # 更新持仓均价
-                    position.hold_price_short = round(position.hold_cost_short / position.pos_short / position.multiple, 2) if position.pos_short > 0 else 0.0
+                    hold_cost_short_new = position.hold_cost_short or 0.0
+                    position.hold_price_short = (
+                        round(hold_cost_short_new / position.pos_short / position.multiple, 2)
+                        if position.pos_short > 0
+                        else 0.0
+                    )
             else:
                 # 平多（卖出平多）
                 if position.pos_long > 0:
                     # 按比例减少持仓成本
+                    hold_cost_long = position.hold_cost_long or 0.0
                     if position.pos_long > volume:
-                        position.hold_cost_long = position.hold_cost_long * (position.pos_long - volume) / position.pos_long
+                        position.hold_cost_long = (
+                            hold_cost_long * (position.pos_long - volume) / position.pos_long
+                        )
                     else:
                         position.hold_cost_long = 0.0
                     position.pos_long = max(0, position.pos_long - volume)
 
                     # 处理今仓/昨仓
+                    pos_long_td = position.pos_long_td or 0
+                    pos_long_yd = position.pos_long_yd or 0
                     if trade.offset == Offset.CLOSETODAY:
                         # 平今仓
-                        position.pos_long_td = max(0, position.pos_long_td - volume)
+                        position.pos_long_td = max(0, pos_long_td - volume)
                     else:
                         # 平昨仓（优先减昨仓）
-                        yd_to_close = min(position.pos_long_yd, volume)
-                        position.pos_long_yd = max(0, position.pos_long_yd - yd_to_close)
+                        yd_to_close = min(pos_long_yd, volume)
+                        position.pos_long_yd = max(0, pos_long_yd - yd_to_close)
                         remaining = volume - yd_to_close
                         if remaining > 0:
-                            position.pos_long_td = max(0, position.pos_long_td - remaining)
+                            position.pos_long_td = max(0, pos_long_td - remaining)
 
                     # 更新持仓均价
-                    position.hold_price_long = round(position.hold_cost_long / position.pos_long / position.multiple, 2) if position.pos_long > 0 else 0.0
+                    hold_cost_long_new = position.hold_cost_long or 0.0
+                    position.hold_price_long = (
+                        round(hold_cost_long_new / position.pos_long / position.multiple, 2)
+                        if position.pos_long > 0
+                        else 0.0
+                    )
 
         # 更新净持仓
         position.pos = position.pos_long - position.pos_short
@@ -492,26 +533,26 @@ class CtpGateway(BaseGateway):
 
         # 推送更新后的持仓
         self._push_to_queue(EventTypes.POSITION_UPDATE, position)
-    
 
     def on_account(self, account: AccountData) -> None:
         """处理账户回调"""
         # 缓存账户数据
         self._account = account
-        self._push_to_queue(EventTypes.ACCOUNT_UPDATE,account)
-
+        self._push_to_queue(EventTypes.ACCOUNT_UPDATE, account)
 
     def on_status(self) -> None:
         """处理状态回调"""
+        if self.td_api is None or self.md_api is None:
+            return
         self.connected = self.td_api.is_ready and self.md_api.connected
         if self.connected:
-            #订阅行情
+            # 订阅行情
             self.md_api.resubscribe()
-            #订阅k线
+            # 订阅k线
             for sub_bar in self.config.subscribe_bars:
-                symbol,interval = sub_bar.split("-")
-                self.subscribe_bars(symbol,interval)
-        
+                symbol, interval = sub_bar.split("-")
+                self.subscribe_bars(symbol, interval)
+
     def _push_to_queue(self, event_type: str, data: Any):
         """推送数据到同步队列（非阻塞）"""
         try:
@@ -533,24 +574,25 @@ class CtpGateway(BaseGateway):
 
         multiple = position.multiple
         trade_price = trade.price
+        close_profit_long = position.close_profit_long or 0.0
+        close_profit_short = position.close_profit_short or 0.0
 
         # 计算平仓盈亏
         if trade.direction == Direction.SELL:
             # 平多：(平仓价 - 持仓价) × 手数 × 乘数
             hold_price = position.hold_price_long or trade_price
             profit = (trade_price - hold_price) * volume * multiple
-            position.close_profit_long += profit
+            position.close_profit_long = close_profit_long + profit
         else:
             # 平空：(持仓价 - 平仓价) × 手数 × 乘数
             hold_price = position.hold_price_short or trade_price
             profit = (hold_price - trade_price) * volume * multiple
-            position.close_profit_short += profit
+            position.close_profit_short = close_profit_short + profit
 
         # 累加当日平仓盈亏
         if self._account.close_profit is None:
             self._account.close_profit = 0.0
         self._account.close_profit += profit
-
 
     def _update_hold_profit(self, tick: TickData) -> None:
         """
@@ -561,19 +603,25 @@ class CtpGateway(BaseGateway):
         """
         symbol = tick.symbol
         position = self._positions.get(symbol)
-        if not position or tick.last_price <= 0:
+        if not position or tick.last_price is None or tick.last_price <= 0:
             return
 
         multiple = position.multiple
         last_price = tick.last_price
+        hold_price_long = position.hold_price_long or 0.0
+        hold_price_short = position.hold_price_short or 0.0
 
         # 更新多头浮动盈亏
         if position.pos_long > 0:
-            position.hold_profit_long = (last_price - position.hold_price_long) * position.pos_long * multiple
+            position.hold_profit_long = (
+                (last_price - hold_price_long) * position.pos_long * multiple
+            )
 
         # 更新空头浮动盈亏
         if position.pos_short > 0:
-            position.hold_profit_short = (position.hold_price_short - last_price) * position.pos_short * multiple
+            position.hold_profit_short = (
+                (hold_price_short - last_price) * position.pos_short * multiple
+            )
 
         # 更新账户持仓盈亏
         if self._account:

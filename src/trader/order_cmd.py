@@ -152,13 +152,13 @@ class OrderCmd:
         # 报单间隔(默认1秒)
         order_interval: float = 1,
         # 控制参数(默认5分钟)
-        total_timeout: int = 60*5,
+        total_timeout: int = 60 * 5,
         # 单次报单超时时间(默认10秒)
         order_timeout: int = 10,
         # 来源标识
         source: str = "",
         # 滑点
-        slip: int  =0,
+        slip: int = 0,
         on_change: Optional[Callable[[Any], None]] = None,
     ):
         self.cmd_id = uuid.uuid4().hex
@@ -201,10 +201,10 @@ class OrderCmd:
         # 当前拆单
         self._cur_split_order: Optional[SplitOrder] = None
 
-    def split(self, pos: PositionData|None) -> None:
+    def split(self, pos: PositionData | None) -> None:
         """拆单"""
         self._strategy = SimpleSplitStrategy(self)
-        count=self._strategy.split(pos)
+        count = self._strategy.split(pos)
         self._left_retry_times = 2 * count + 1
 
     def _load_next_split_order(self) -> Optional[SplitOrder]:
@@ -231,11 +231,11 @@ class OrderCmd:
         """
         now = datetime.now()
 
-        if  self.is_finished:
+        if self.is_finished:
             return None
 
-        #1. 取消中处理
-        if self.status == OrderCmdStatus.CANCELING :
+        # 1. 取消中处理
+        if self.status == OrderCmdStatus.CANCELING:
             # 取消中，有挂单，且可以撤单
             if self._pending_order and self._pending_order.can_cancel():
                 return self._pending_order
@@ -245,7 +245,7 @@ class OrderCmd:
                 self._notify_change()
             return None
 
-        #2. 运行中处理
+        # 2. 运行中处理
         # 检查总超时
         if self.started_at is not None:
             elapsed = now - self.started_at
@@ -293,7 +293,7 @@ class OrderCmd:
         elif event_type == "TRADE_UPDATE":
             self._handle_trade_update(data)
 
-    def close(self,reason="指令已取消") -> None:
+    def close(self, reason="指令已取消") -> None:
         """关闭指令（取消）"""
         if self.status in [OrderCmdStatus.FINISHED, OrderCmdStatus.CANCELING]:
             return
@@ -360,6 +360,7 @@ class OrderCmd:
             self._cancel(f"报单被拒：{order.status_msg}")
 
         self._notify_change()
+
     def _handle_trade_update(self, trade: TradeData) -> None:
         """处理成交更新（成交统计已由订单更新处理）"""
         # 成交统计已在 _handle_order_update 中通过 traded 和 traded_price 完成
@@ -369,7 +370,7 @@ class OrderCmd:
     def _cancel(self, reason: str) -> None:
         """结束指令"""
         if self.status == OrderCmdStatus.FINISHED or self.status == OrderCmdStatus.CANCELING:
-            #指令已完成或者取消中
+            # 指令已完成或者取消中
             return
 
         if not "全部完成" in reason:
@@ -385,9 +386,9 @@ class OrderCmd:
             self.finished_at = datetime.now()
 
         self.finish_reason = reason
-        self._left_retry_times = 0   
+        self._left_retry_times = 0
         self._notify_change()
-    
+
     def _notify_change(self) -> None:
         """通知指令状态变更"""
         logger.info(

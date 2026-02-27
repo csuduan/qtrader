@@ -11,14 +11,14 @@ RSI 可执行策略
 """
 
 from collections import deque
-from datetime import datetime, time,timedelta
-from typing import Any, Optional, List
+from datetime import datetime, time, timedelta
+from typing import Any, List, Optional
 
 import numpy as np
 from pydantic import BaseModel, Field
 
 from src.models.object import BarData
-from src.trader.strategy.base_strategy import BaseStrategy, BaseParam, Signal
+from src.trader.strategy.base_strategy import BaseParam, BaseStrategy, Signal
 from src.utils.config_loader import StrategyConfig
 from src.utils.helpers import (
     _parse_time,
@@ -33,6 +33,7 @@ EPS = 1e-12
 
 class RsiParam(BaseParam):
     """RSI策略参数"""
+
     # RSI参数
     rsi_n: int = Field(default=5, title="RSI周期")  # RSI计算周期
     short_k: int = Field(default=5, title="短周期")  # 短K线周期（分钟）
@@ -58,10 +59,10 @@ class RsiStrategy(BaseStrategy):
         super().__init__(strategy_id, strategy_config)
         logger.info(f"RSI策略 [{strategy_id}] 初始化完成")
 
-    def init(self,trading_day: datetime) -> bool:
+    def init(self, trading_day: datetime) -> bool:
         """策略初始化，将配置字典转换为RsiParam"""
         logger.info(f"策略 [{self.strategy_id}] 初始化...")
-        #基础变量
+        # 基础变量
         self.signal = None
         self._pending_cmd = None
         self._hist_cmds = {}
@@ -76,7 +77,7 @@ class RsiStrategy(BaseStrategy):
 
         # 创建RsiParam实例
         if self.config.params and len(self.config.params) > 0:
-            self.param:RsiParam = RsiParam(**self.config.params)
+            self.param: RsiParam = RsiParam(**self.config.params)
             self.symbol = self.param.symbol
             self.volume = self.param.volume
         else:
@@ -87,7 +88,7 @@ class RsiStrategy(BaseStrategy):
         # 加载上一个交易日的数据
         hist_bars = self.load_hist_bars(
             self.symbol,
-            self.trading_day-timedelta(days=3),
+            self.trading_day - timedelta(days=3),
             self.trading_day,
         )
         for bar in hist_bars:
@@ -96,7 +97,6 @@ class RsiStrategy(BaseStrategy):
         self.inited = True
         logger.info(f"策略 [{self.strategy_id}] 初始化完成")
         return True
-
 
     def update_params(self, params: dict) -> None:
         """
@@ -119,7 +119,7 @@ class RsiStrategy(BaseStrategy):
                 logger.warning(f"策略 [{self.strategy_id}] 参数 {key} 不存在")
 
         logger.info(f"策略 [{self.strategy_id}] 参数已更新: {params}")
-    
+
     async def on_tick(self, tick):
         """Tick行情回调（暂不使用）"""
         await self.execute_signal()
@@ -141,14 +141,19 @@ class RsiStrategy(BaseStrategy):
 
             bar_time = bar.datetime.time()
             # 强制平仓检查（使用原始K线时间）
-            if self.signal and  self.signal.side!=0 and not self.signal.exit_time and bar_time >= self.param.force_exit_time:
+            if (
+                self.signal
+                and self.signal.side != 0
+                and not self.signal.exit_time
+                and bar_time >= self.param.force_exit_time
+            ):
                 self.signal.exit_price = bar.close_price
                 self.signal.exit_time = bar_time
                 self.signal.exit_reason = "FORCE"
                 logger.info(f"策略 [{self.strategy_id}] 信号结束: {self.signal}")
 
             # 止盈止损检查
-            if self.signal and self.signal.side!=0 and  not self.signal.exit_time :
+            if self.signal and self.signal.side != 0 and not self.signal.exit_time:
                 exit_reason = self._check_exit_conditions(bar.close_price, self.signal)
                 if exit_reason:
                     self.signal.exit_price = bar.close_price
@@ -159,13 +164,15 @@ class RsiStrategy(BaseStrategy):
             if self.signal:
                 # 已经有信号了，当天不再产生新信号了
                 return
-       
+
             # 每次产生新的short_bar，进行后续信号计算
             if short_bar is None:
                 return
 
             # 检查交易窗口（使用重采样后的短K线时间）
-            if not (self.param.trade_start_time <= short_bar.datetime.time() < self.param.trade_end_time):
+            if not (
+                self.param.trade_start_time <= short_bar.datetime.time() < self.param.trade_end_time
+            ):
                 return
 
             # 计算RSI并生成信号
@@ -184,7 +191,6 @@ class RsiStrategy(BaseStrategy):
             logger.info(f"策略 [{self.strategy_id}] 信号开始: {self.signal}")
         except Exception as e:
             logger.exception(f"策略 [{self.strategy_id}] on_bar 异常: {e}")
-
 
     def _resample_kline(self, bar: BarData) -> tuple[BarData, BarData]:
         """
@@ -211,7 +217,7 @@ class RsiStrategy(BaseStrategy):
         long_bar = None
         self._short_bar_buf.append(bar)
         self._long_bar_buf.append(bar)
-        if (min_idx + 1) % self.param.short_k == 0 and len(self._short_bar_buf)>0:
+        if (min_idx + 1) % self.param.short_k == 0 and len(self._short_bar_buf) > 0:
             # 产生新的shortbar
             short_bar = BarData(
                 symbol=bar.symbol,
@@ -227,8 +233,8 @@ class RsiStrategy(BaseStrategy):
             self.short_k_bars.append(short_bar)
             self._short_bar_buf.clear()
             logger.info(f"策略 [{self.strategy_id}] 产生新的short_bar: {short_bar}")
-        
-        if (min_idx + 1) % self.param.long_k == 0 and len(self._long_bar_buf)>0:
+
+        if (min_idx + 1) % self.param.long_k == 0 and len(self._long_bar_buf) > 0:
             # 产生新的longbar
             long_bar = BarData(
                 symbol=bar.symbol,
@@ -244,10 +250,9 @@ class RsiStrategy(BaseStrategy):
             self.long_k_bars.append(long_bar)
             self._long_bar_buf.clear()
             logger.info(f"策略 [{self.strategy_id}] 产生新的long_bar: {long_bar}")
-        
+
         return short_bar, long_bar
 
-    
     def _generate_signal(self) -> int:
         """
         生成交易信号
@@ -300,7 +305,7 @@ class RsiStrategy(BaseStrategy):
         Returns:
             bool: 是否通过过滤
         """
-        if not self.param :
+        if not self.param:
             return True
 
         ext_signal = self.param.used_signal
@@ -327,7 +332,7 @@ class RsiStrategy(BaseStrategy):
         #     )
         #     return False
 
-        return ext_signal!=0 and ext_signal==side
+        return ext_signal != 0 and ext_signal == side
 
     def _check_exit_conditions(self, current_price: float, signal: Signal) -> str:
         """

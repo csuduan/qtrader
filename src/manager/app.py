@@ -30,9 +30,9 @@ from src.manager.api.responses import (
 )
 from src.manager.api.websocket_manager import websocket_manager
 from src.manager.manager import TradingManager
+from src.utils.async_event_engine import AsyncEventEngine, Event
 from src.utils.config_loader import AccountConfig, DatabaseConfig, get_config_loader
 from src.utils.database import Database, get_database, init_database
-from src.utils.async_event_engine import Event, AsyncEventEngine
 from src.utils.logger import get_logger, setup_logger
 
 logger = get_logger(__name__)
@@ -75,6 +75,7 @@ async def lifespan(app: FastAPI):
 
     # 验证全局数据库是否正确设置
     from src.utils.database import get_database
+
     global_db = get_database()
     logger.info(f"全局数据库实例: {global_db}")
 
@@ -132,6 +133,7 @@ async def lifespan(app: FastAPI):
 
     # 关闭数据库
     from src.utils.database import close_database
+
     close_database()
 
     # 清理 AppContext

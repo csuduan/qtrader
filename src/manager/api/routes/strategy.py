@@ -576,7 +576,9 @@ async def reload_strategy_params(
 
         result = await trader.reload_strategy_params(strategy_id)
         if result.get("success"):
-            return success_response(message=f"策略 {strategy_id} 参数重载成功", data=result.get("params"))
+            return success_response(
+                message=f"策略 {strategy_id} 参数重载成功", data=result.get("params")
+            )
         else:
             return error_response(message=result.get("message", "重载参数失败"))
     except Exception as e:
@@ -717,9 +719,13 @@ async def send_strategy_order_cmd(
         )
 
         if result and result.get("success"):
-            return success_response(message=f"策略 {strategy_id} 报单指令已发送", data={"cmd_id": order_cmd.cmd_id})
+            return success_response(
+                message=f"策略 {strategy_id} 报单指令已发送", data={"cmd_id": order_cmd.cmd_id}
+            )
         else:
-            return error_response(message=result.get("message", "发送报单指令失败") if result else "发送报单指令失败")
+            return error_response(
+                message=result.get("message", "发送报单指令失败") if result else "发送报单指令失败"
+            )
 
     except Exception as e:
         logger.error(f"发送策略报单指令失败: {e}")

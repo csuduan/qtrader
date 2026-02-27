@@ -75,7 +75,8 @@ class TraderProxy:
         # ==================== 进程管理 ====================
         self._created_process: bool = False
         self.process: Optional[asyncio.subprocess.Process] = None
-        socket_dir_abs = Path(self.account_config.paths.socket_dir).expanduser().resolve()
+        socket_dir = self.account_config.paths.socket_dir if self.account_config.paths else "/tmp"
+        socket_dir_abs = Path(socket_dir).expanduser().resolve()
         self.socket_path = str(socket_dir_abs / f"qtrader_{self.account_id}.sock")
         self.pid_file = str(socket_dir_abs / f"qtrader_{self.account_id}.pid")
 
@@ -138,7 +139,7 @@ class TraderProxy:
         if self._running:
             logger.warning(f"TraderProxy [{self.account_id}] 已经在运行中，当前状态: {self._state}")
             return False
-        
+
         self._running = True
         logger.info(f"TraderProxy [{self.account_id}] 开始启动...")
 
@@ -199,14 +200,11 @@ class TraderProxy:
         self.start_time = datetime.now()
         if self.account_id is None:
             raise ValueError("account_id is required for SocketClient")
-        
-        
-        self.socket_client = SocketClient(
-            self.socket_path, self.account_id, self._on_msg_callback
-        )
+
+        self.socket_client = SocketClient(self.socket_path, self.account_id, self._on_msg_callback)
         attempt = 0
         check_interval = 5
-        while self._running:      
+        while self._running:
             try:
                 # 计算当前重试间隔（退避算法：指数增长）
                 attempt += 1
@@ -215,20 +213,18 @@ class TraderProxy:
                     await self._set_state(TraderState.STOPPED)
                     await asyncio.sleep(check_interval)
                     continue
-                
+
                 if self.socket_client.is_connected():
                     await self._set_state(TraderState.CONNECTED)
                     await asyncio.sleep(check_interval)
                     attempt = 0
                     continue
-                
-                 # 进程存在，且为未连接
-                self.last_heartbeat = datetime.now()           
+
+                # 进程存在，且为未连接
+                self.last_heartbeat = datetime.now()
                 # 状态变为连接中
                 await self._set_state(TraderState.CONNECTING)
-                logger.info(
-                    f"TraderProxy [{self.account_id}] 尝试连接 ({attempt + 1})..."
-                )
+                logger.info(f"TraderProxy [{self.account_id}] 尝试连接 ({attempt + 1})...")
                 success = await self.socket_client.connect()
                 if success:
                     logger.info(f"TraderProxy [{self.account_id}] 连接成功")
@@ -236,14 +232,10 @@ class TraderProxy:
                     attempt = 0
                     continue
                 else:
-                    logger.warning(
-                        f"TraderProxy [{self.account_id}] 连接失败 ({attempt + 1})"
-                    )
+                    logger.warning(f"TraderProxy [{self.account_id}] 连接失败 ({attempt + 1})")
 
             except Exception as e:
-                logger.exception(
-                    f"TraderProxy [{self.account_id}] 连接异常 ({attempt + 1}): {e}"
-                )
+                logger.exception(f"TraderProxy [{self.account_id}] 连接异常 ({attempt + 1}): {e}")
             # 等待重试
             await asyncio.sleep(check_interval)
 
@@ -442,6 +434,9 @@ class TraderProxy:
         from src.utils.database import get_database
 
         db = get_database()
+        if db is None:
+            logger.error("数据库未初始化，无法保存告警")
+            return
 
         try:
             with db.get_session() as session:
@@ -483,8 +478,8 @@ class TraderProxy:
     # ==================== 数据查询接口 ====================
 
     async def get_account(self) -> Optional[AccountData]:
-        """实时获取账户数据"""        
-        if self.socket_client and self.socket_client.is_connected:
+        """实时获取账户数据"""
+        if self.socket_client and self.socket_client.is_connected:  # type: ignore[truthy-function]
             data = await self.socket_client.request("get_account", {}, timeout=5.0)
             if not data:
                 if self.account_id is None:
@@ -658,9 +653,7 @@ class TraderProxy:
         try:
             request_data = {"order_id": order_id}
 
-            response = await self.socket_client.request(
-                "cancel_req", request_data, timeout=10.0
-            )
+            response = await self.socket_client.request("cancel_req", request_data, timeout=10.0)
             return bool(response)
 
         except Exception as e:
@@ -722,9 +715,7 @@ class TraderProxy:
             return False
 
         try:
-            response = await self.socket_client.request(
-                "disconnect_gateway", {}, timeout=10.0
-            )
+            response = await self.socket_client.request("disconnect_gateway", {}, timeout=10.0)
             return bool(response)
         except Exception as e:
             logger.error(f"TraderProxy [{self.account_id}] 断开网关请求失败: {e}")
@@ -897,7 +888,9 @@ class TraderProxy:
 
         try:
             response = await self.socket_client.request(
-                "set_strategy_trading_status", {"strategy_id": strategy_id, "status": status}, timeout=10.0
+                "set_strategy_trading_status",
+                {"strategy_id": strategy_id, "status": status},
+                timeout=10.0,
             )
             return response or {"success": False, "message": "无响应"}
         except Exception as e:
@@ -1071,7 +1064,9 @@ class TraderProxy:
             是否成功
         """
         if not self.socket_client or not self.socket_client.is_connected():
-            logger.error(f"TraderProxy [{self.account_id}] 未连接到Trader，无法发送切换任务状态请求")
+            logger.error(
+                f"TraderProxy [{self.account_id}] 未连接到Trader，无法发送切换任务状态请求"
+            )
             return False
 
         try:

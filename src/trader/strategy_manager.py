@@ -6,14 +6,14 @@
 import asyncio
 import csv
 import os
-from datetime import datetime,timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from src.app_context import get_app_context
-from src.models.object import BarData, Direction, Exchange, Offset, TickData,OrderData,TradeData
-from src.trader.trading_engine import TradingEngine
+from src.models.object import BarData, Direction, Exchange, Offset, OrderData, TickData, TradeData
 from src.trader.order_cmd import OrderCmd
 from src.trader.strategy.base_strategy import BaseStrategy
+from src.trader.trading_engine import TradingEngine
 from src.utils.bar_generator import MultiSymbolBarGenerator, parse_interval
 from src.utils.config_loader import StrategyConfig
 from src.utils.event_engine import EventEngine, EventTypes
@@ -152,7 +152,7 @@ class StrategyManager:
 
             # 创建策略实例
             try:
-                strategy:BaseStrategy = strategy_class(name, config)
+                strategy: BaseStrategy = strategy_class(name, config)
                 strategy.strategy_manager = self
                 self.strategies[name] = strategy
                 strategy.init(self.trading_engine.trading_day)
@@ -175,12 +175,11 @@ class StrategyManager:
         # 注册事件
         self.event_engine.register(EventTypes.TICK_UPDATE, self._on_tick)
         self.event_engine.register(EventTypes.KLINE_UPDATE, self._on_bar)
-        self.event_engine.register( EventTypes.ORDER_UPDATE, self._on_order)
+        self.event_engine.register(EventTypes.ORDER_UPDATE, self._on_order)
         self.event_engine.register(EventTypes.TRADE_UPDATE, self._on_trade)
 
         logger.info("策略事件已注册到EventEngine")
 
-    
     async def _on_tick(self, data: TickData) -> None:
         """处理tick事件"""
         tick: TickData = data
@@ -190,7 +189,7 @@ class StrategyManager:
                     await strategy.on_tick(tick)
                 except Exception as e:
                     logger.exception(f"策略 {name} on_tick 失败: {e}")
-    
+
     async def _on_bar(self, data: BarData) -> None:
         """处理bar事件"""
         bar: BarData = data
@@ -200,7 +199,7 @@ class StrategyManager:
                     await strategy.on_bar(bar)
                 except Exception as e:
                     logger.exception(f"策略 {name} on_bar 失败: {e}")
-    
+
     async def _on_order(self, data: OrderData) -> None:
         """处理订单事件"""
         order: OrderData = data
@@ -210,7 +209,7 @@ class StrategyManager:
                     await strategy.on_order(order)
                 except Exception as e:
                     logger.exception(f"策略 {name} on_order 失败: {e}")
-        
+
     async def _on_trade(self, data: TradeData) -> None:
         """处理成交事件"""
         trade: TradeData = data
@@ -220,7 +219,6 @@ class StrategyManager:
                     await strategy.on_trade(trade)
                 except Exception as e:
                     logger.exception(f"策略 {name} on_trade 失败: {e}")
-        
 
     def enable_strategy(self, name: str) -> bool:
         """启用策略"""
@@ -234,7 +232,6 @@ class StrategyManager:
             return False
         return self.strategies[name].enable(False)
 
-
     def subscribe_symbol(self, symbol: str, interval: str) -> bool:
         """订阅合约行情（按需订阅）"""
         if not self.trading_engine:
@@ -243,13 +240,12 @@ class StrategyManager:
         if interval:
             self.trading_engine.subscribe_bars(symbol, interval)
         return True
-    
+
     def reset_all_for_new_day(self) -> None:
         """重置所有策略状态"""
         trading_day = self.trading_engine.trading_day
         for strategy in self.strategies.values():
             strategy.init(trading_day)
-
 
     # ==================== 交易接口 ====================
     async def _insert_order(
@@ -467,7 +463,9 @@ class StrategyManager:
                 return False
 
             symbol, interval = strategy.bar_subscriptions[0].split("-")
-            trading_bars = self.load_hist_bars(symbol, interval, trading_date,trading_date+timedelta(days=1)) 
+            trading_bars = self.load_hist_bars(
+                symbol, interval, trading_date, trading_date + timedelta(days=1)
+            )
             # 4. 循环调用on_bar()
             for bar in trading_bars:
                 await strategy.on_bar(bar)
@@ -482,7 +480,6 @@ class StrategyManager:
         finally:
             # 5. 恢复策略交易
             strategy.enable()
-    
 
     async def replay_all_strategies(self) -> dict:
         """
@@ -527,8 +524,8 @@ class StrategyManager:
         except Exception as e:
             logger.exception(f"回播所有策略失败: {e}")
             return {"success": False, "message": f"回播失败: {str(e)}", "replayed_count": 0}
-    
-    def load_hist_bars(self,symbol, interval, start: datetime,end: datetime) ->List[BarData]:
+
+    def load_hist_bars(self, symbol, interval, start: datetime, end: datetime) -> List[BarData]:
         # 通过网关获取K线数据
         kline_df = self.trading_engine.get_kline(symbol, interval)
         if kline_df is None:
@@ -550,7 +547,7 @@ class StrategyManager:
                     close_price=float(row["close"]),
                     volume=float(row["volume"]),
                     type="history",
-                    update_time=bar_datetime+timedelta(minutes=1),
+                    update_time=bar_datetime + timedelta(minutes=1),
                 )
                 trading_bars.append(bar)
         if not trading_bars:

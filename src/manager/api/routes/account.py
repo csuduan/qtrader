@@ -11,7 +11,7 @@ from src.manager.api.dependencies import get_trading_manager
 from src.manager.api.responses import error_response, success_response
 from src.manager.api.schemas import AccountRes, TraderStatusRes
 from src.manager.manager import TradingManager
-from src.models.object import AccountData,TraderState
+from src.models.object import AccountData, TraderState
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -48,7 +48,8 @@ async def get_account_info(
                 balance=float(account_data.balance or 0),
                 available=float(account_data.available or 0),
                 margin=float(account_data.margin or 0),
-                today_profit=float(account_data.hold_profit or 0) + float(account_data.close_profit or 0),
+                today_profit=float(account_data.hold_profit or 0)
+                + float(account_data.close_profit or 0),
                 position_profit=float(account_data.hold_profit or 0),
                 close_profit=float(account_data.close_profit or 0),
                 risk_ratio=float(account_data.risk_ratio or 0),
@@ -100,14 +101,19 @@ async def get_all_accounts(
                     margin=float(account_info.margin or 0),
                     position_profit=float(account_info.hold_profit or 0),
                     close_profit=float(account_info.close_profit or 0),
-                    today_profit=float(account_info.hold_profit or 0) + float(account_info.close_profit or 0),
+                    today_profit=float(account_info.hold_profit or 0)
+                    + float(account_info.close_profit or 0),
                     risk_ratio=float(account_info.risk_ratio or 0),
                     updated_at=datetime.now(),
                     user_id=account_info.user_id or "--",
                     gateway_connected=account_info.gateway_connected,
                     trade_paused=account_info.trade_paused,
                     risk_status=account_info.risk_status or {},
-                    status=account_info.status.value if account_info.status else TraderState.STOPPED.value,
+                    status=(
+                        account_info.status.value
+                        if account_info.status
+                        else TraderState.STOPPED.value
+                    ),
                 )
             )
 
@@ -115,8 +121,7 @@ async def get_all_accounts(
         config = get_config_loader().load_config()
         account_order = {aid: i for i, aid in enumerate(config.account_ids)}
         sorted_list = sorted(
-            accounts_list,
-            key=lambda x: account_order.get(x.account_id, float("inf"))
+            accounts_list, key=lambda x: account_order.get(x.account_id, float("inf"))
         )
         return success_response(data=sorted_list, message="获取成功")
     except Exception as e:

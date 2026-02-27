@@ -4,24 +4,26 @@ Gateway适配器基类
 """
 
 from abc import ABC, abstractmethod
-from typing import  Optional, Union
+from datetime import date, datetime
+from typing import Dict, Optional, Union
+
 import pandas as pd
-from datetime import datetime
 
 from src.models.object import (
     AccountData,
     CancelRequest,
     ContractData,
+    Exchange,
+    Interval,
     OrderData,
     OrderRequest,
     PositionData,
+    ProductType,
     TickData,
     TradeData,
-    Exchange,
-    Interval,
-    ProductType
 )
 from src.utils.logger import get_logger
+
 logger = get_logger(__name__)
 
 
@@ -41,9 +43,9 @@ class BaseGateway(ABC):
     - 不直接访问数据库
     - 所有公共接口改为异步
     """
+
     # Gateway名称
     gateway_name: str = "BaseGateway"
-
 
     def __init__(self):
         """初始化Gateway"""
@@ -53,7 +55,6 @@ class BaseGateway(ABC):
         # 合约更新日期，用于判断是否需要重新查询
         self._contracts_update_date: Optional[str] = None
         logger.info(f"{self.gateway_name} Gateway 初始化完成")
-
 
     def std_symbol(self, symbol: str) -> Optional[str]:
         """
@@ -77,39 +78,41 @@ class BaseGateway(ABC):
         # 已经是标准格式 "symbol.exchange"
         if "." in symbol:
             parts = symbol.split(".")
-            if len(parts) == 2:
-                first, second = parts
-                std_symbol=None
-                exchange = None
-                # 判断哪个是交易所
-                if first.upper() in Exchange.__members__:
-                    # 格式: "SHFE.rb2505" -> "rb2505.SHFE"
-                    std_symbol=second
-                    exchange = first.upper()
-                elif second.upper() in Exchange.__members__:
-                    # 格式: "rb2505.SHFE" -> 保持不变
-                    std_symbol=first
-                    exchange = second.upper()
-                else:
-                    # 无法识别交易所，尝试从合约缓存中查找
-                    logger.warning(f"无法识别交易所: {symbol}")
-                    return None
-                if exchange in ["CZCE","CFFEX"]:
-                    std_symbol=std_symbol.upper()
-                else:
-                    std_symbol=std_symbol.lower()
-                return std_symbol
+            if len(parts) != 2:
+                logger.warning(f"无法识别交易所: {symbol}")
+                return None
+            first, second = parts
+            std_symbol = None
+            exchange = None
+            # 判断哪个是交易所
+            if first.upper() in Exchange.__members__:
+                # 格式: "SHFE.rb2505" -> "rb2505.SHFE"
+                std_symbol = second
+                exchange = first.upper()
+            elif second.upper() in Exchange.__members__:
+                # 格式: "rb2505.SHFE" -> 保持不变
+                std_symbol = first
+                exchange = second.upper()
+            else:
+                # 无法识别交易所，尝试从合约缓存中查找
+                logger.warning(f"无法识别交易所: {symbol}")
+                return None
+            if exchange in ["CZCE", "CFFEX"]:
+                std_symbol = std_symbol.upper()
+            else:
+                std_symbol = std_symbol.lower()
+            return std_symbol
         else:
             # 尝试从合约缓存中查找
             symbol_lower = symbol.lower()
             symbol_upper = symbol.upper()
             # 直接匹配
-            contract: ContractData = self.contracts.get(symbol_upper) or self.contracts.get(symbol_lower)
+            contract = self.contracts.get(symbol_upper) or self.contracts.get(symbol_lower)
             if not contract:
                 logger.warning(f"无法识别交易所: {symbol}")
                 return None
             return contract.symbol
-    
+
     def load_contracts(self) -> Optional[dict[str, ContractData]]:
         """
         从数据库加载指定更新日期的合约信息
@@ -119,16 +122,14 @@ class BaseGateway(ABC):
         Returns:
             合约信息字典，如果没有则返回None
         """
-        from src.utils.database import session_scope
         from src.models.po import ContractPo
+        from src.utils.database import session_scope
 
         update_date = datetime.now().strftime("%Y-%m-%d")
         try:
             with session_scope() as session:
                 contract_pos = (
-                    session.query(ContractPo)
-                    .filter(ContractPo.update_date == update_date)
-                    .all()
+                    session.query(ContractPo).filter(ContractPo.update_date == update_date).all()
                 )
 
                 if not contract_pos:
@@ -137,24 +138,24 @@ class BaseGateway(ABC):
 
                 loaded_count = 0
                 for po in contract_pos:
-                    symbol=po.symbol.split(".")[1] if "." in po.symbol else po.symbol
-                    exchange = Exchange.from_str(po.exchange_id)
+                    symbol = po.symbol.split(".")[1] if "." in po.symbol else po.symbol  # type: ignore[union-attr]
+                    exchange = Exchange.from_str(po.exchange_id)  # type: ignore[arg-type]
                     if exchange == Exchange.NONE:
                         continue
                     contract = ContractData(
-                        symbol=symbol,
+                        symbol=symbol,  # type: ignore[arg-type]
                         exchange=exchange,
-                        name=po.instrument_name or po.symbol,
+                        name=po.instrument_name or po.symbol,  # type: ignore[arg-type]
                         product_type=ProductType.FUTURES,
-                        multiple=po.volume_multiple,
+                        multiple=po.volume_multiple,  # type: ignore[arg-type]
                         pricetick=float(po.price_tick),
-                        min_volume=po.min_volume,
+                        min_volume=po.min_volume,  # type: ignore[arg-type]
                         option_strike=float(po.option_strike) if po.option_strike else None,
-                        option_underlying=po.option_underlying,
-                        option_type=po.option_type,
-                    )
+                        option_underlying=po.option_underlying,  # type: ignore[arg-type]
+                        option_type=po.option_type,  # type: ignore[arg-type]
+                    )  # type: ignore[call-arg]
                     self.contracts[contract.symbol] = contract
-                    #self._upper_symbols[contract.symbol.rsplit(".")[1].upper()] = contract.exchange.value
+                    # self._upper_symbols[contract.symbol.rsplit(".")[1].upper()] = contract.exchange.value
                     loaded_count += 1
 
                 # 记录合约更新日期
@@ -164,7 +165,6 @@ class BaseGateway(ABC):
         except Exception as e:
             logger.error(f"从数据库加载合约信息失败: {e}")
             return None
-
 
     @abstractmethod
     async def connect(self) -> bool:
@@ -195,7 +195,6 @@ class BaseGateway(ABC):
             Optional[str]: 交易日日期（YYYYMMDD）
         """
         pass
-
 
     @abstractmethod
     def subscribe(self, symbols: list[str]) -> bool:
@@ -299,7 +298,7 @@ class BaseGateway(ABC):
 
         Returns:
             Dict[str, ContractData]: 合约字典 {symbol: ContractData}
-        """  
+        """
 
     @abstractmethod
     def get_quotes(self) -> dict[str, TickData]:
@@ -310,7 +309,6 @@ class BaseGateway(ABC):
             dict[str, QuoteData]: 行情字典 {symbol: QuoteData}
         """
         pass
-    
 
     @abstractmethod
     def get_kline(self, symbol: str, interval: str) -> Optional[pd.DataFrame]:

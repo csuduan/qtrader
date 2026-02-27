@@ -4,11 +4,11 @@
 执行换仓逻辑
 """
 
+import asyncio
 import csv
 import os
 import shutil
 import time
-import asyncio
 from datetime import datetime
 from gc import enable
 from pathlib import Path
@@ -20,9 +20,9 @@ from sqlalchemy.orm import Session as SQLASession
 from src.models.object import OrderCmdFinishReason
 from src.models.po import RotationInstructionPo
 from src.models.po import SwitchPosImportPo as OrderFile
-from src.trader.trading_engine import TradingEngine
 from src.trader.order_cmd import OrderCmd, SplitStrategyType
-from src.utils.config_loader import AppConfig,AccountConfig
+from src.trader.trading_engine import TradingEngine
+from src.utils.config_loader import AccountConfig, AppConfig
 from src.utils.database import session_scope
 from src.utils.helpers import parse_symbol
 from src.utils.logger import get_logger
@@ -85,36 +85,36 @@ class SwitchPosManager:
         # 加载所有换仓指令
         self.load_rotation_instructions()
         pass
-    
+
     def get_today_instructions(self) -> List[RotationInstructionPo]:
         """获取今日换仓指令"""
         today = datetime.now().strftime("%Y%m%d")
         return [x for x in self.all_instructions if x.trading_date == today]
-    
+
     def update_instruction(self, data: dict):
         """更新换仓指令"""
         instruction_id = data.get("instruction_id")
         if not instruction_id:
             raise ValueError("缺少指令ID")
-        
+
         instruction = next((x for x in self.all_instructions if x.id == instruction_id), None)
         if not instruction:
             raise ValueError("指令不存在")
-        
+
         if data.get("enabled") is not None:
             instruction.enabled = data["enabled"]
         if data.get("status") is not None:
             instruction.status = data["status"]
         if data.get("filled_volume") is not None:
-            instruction.filled_volume = data["filled_volume"]   
+            instruction.filled_volume = data["filled_volume"]
         instruction.updated_at = datetime.now()
 
         # 更新数据库
         with session_scope() as session:
             session.merge(instruction)
-        
+
         return instruction
-    
+
     def delete_instruction(self, ids: List[str]):
         """删除换仓指令"""
         self.all_instructions = [x for x in self.all_instructions if x.id not in ids]
@@ -147,10 +147,6 @@ class SwitchPosManager:
         except Exception as e:
             logger.error(f"获取所有指令列表时出错: {e}")
         logger.info(f"加载换仓指令完成，共 {len(self.all_instructions)} 条")
-
-        
-
-
 
     def import_csv(self, csv_text: str, filename: str, mode: str = "replace"):
         """
@@ -192,7 +188,7 @@ class SwitchPosManager:
 
                 account_id = values[0].strip()
                 strategy_id = values[1].strip()
-                instrument_str = self.trading_engine.std_symbol(values[2].strip().split(".")[0])               
+                instrument_str = self.trading_engine.std_symbol(values[2].strip().split(".")[0])
                 offset_str = values[3].strip()
                 direction_str = values[4].strip()
                 volume_str = values[5].strip()
@@ -204,7 +200,9 @@ class SwitchPosManager:
                     continue
 
                 if self.config.account_id != account_id:
-                    logger.warning(f"第{line_num}行账户ID {account_id} 与配置账户ID {self.config.account_id} 不一致，跳过")
+                    logger.warning(
+                        f"第{line_num}行账户ID {account_id} 与配置账户ID {self.config.account_id} 不一致，跳过"
+                    )
                     failed_count += 1
                     continue
 
@@ -262,19 +260,19 @@ class SwitchPosManager:
                 failed_count += 1
                 errors.append({"row": line_num, "error": str(e), "content": line})
                 continue
-        
+
         if mode == "replace":
             with session_scope() as session:
                 # 先删除已存在的记录
-                session.query(RotationInstructionPo).filter_by(
-                    trading_date=trading_date
-                ).update({"is_deleted": True})
+                session.query(RotationInstructionPo).filter_by(trading_date=trading_date).update(
+                    {"is_deleted": True}
+                )
                 session.bulk_save_objects(add_instruction)
         else:
             with session_scope() as session:
                 session.bulk_save_objects(add_instruction)
-        
-        #重新加载数据
+
+        # 重新加载数据
         self.load_rotation_instructions()
         logger.info(f"CSV导入完成，成功: {imported_count}, 失败: {failed_count}")
         data = {"imported": imported_count, "failed": failed_count, "errors": errors[:10]}
@@ -313,13 +311,15 @@ class SwitchPosManager:
                             created_at=datetime.now(),
                         )
                         session.add(record)
-                        #session.commit()
+                        # session.commit()
                         logger.info(f"文件 {csv_file.name} 导入记录已保存")
 
         except Exception as e:
             logger.exception(f"扫描订单文件时出错: {e}")
 
-    async def execute_position_rotation(self, trading_type: str = "", is_manual: bool = False) -> None:
+    async def execute_position_rotation(
+        self, trading_type: str = "", is_manual: bool = False
+    ) -> None:
         """
         执行换仓逻辑（使用OrderCmd）
 
@@ -333,7 +333,9 @@ class SwitchPosManager:
         self.is_manual = is_manual
         logger.info(f"开始换仓, 手动: {is_manual}")
 
-        todo_instructions = [x for x in self.get_today_instructions() if x.status not in ("COMPLETED") and x.enabled]
+        todo_instructions = [
+            x for x in self.get_today_instructions() if x.status not in ("COMPLETED") and x.enabled
+        ]
         if not todo_instructions:
             logger.info("今日无换仓指令")
             self.working = False
@@ -384,7 +386,7 @@ class SwitchPosManager:
                     logger.info(f"为指令 {instruction.symbol} 创建报单指令: {order_cmd.cmd_id}")
 
             # 监控OrderCmd执行状态
-            #self._monitor_order_commands(all_instructions)
+            # self._monitor_order_commands(all_instructions)
             await self._monitor_order_commands(todo_instructions)
 
         except Exception as e:
@@ -522,8 +524,6 @@ class SwitchPosManager:
             logger.error(f"检查指令状态时出错: {e}")
 
         return True
-
-    
 
     def _update_instruction(self, instruction: RotationInstructionPo) -> None:
         """

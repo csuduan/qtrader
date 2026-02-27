@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 
 import pandas as pd
+from sqlalchemy import or_
 
 from src.app_context import get_app_context
 from src.models.object import (
@@ -25,19 +26,17 @@ from src.models.object import (
     PositionData,
     TradeData,
 )
-from src.trader.risk_control import RiskControl
+from src.models.po import SystemParamPo
 from src.trader.order_cmd import OrderCmd, OrderCmdStatus, SplitStrategyType
 from src.trader.order_executor import OrderCmdExecutor
+from src.trader.risk_control import RiskControl
 from src.utils.async_event_engine import AsyncEventEngine
-from src.utils.config_loader import AccountConfig, AppConfig,RiskControlConfig
+from src.utils.config_loader import AccountConfig, AppConfig, RiskControlConfig
+from src.utils.database import get_session
 from src.utils.event_engine import EventTypes
+from src.utils.helpers import _get_int_param
 from src.utils.logger import get_logger
 from src.utils.wecomm import send_wechat
-from src.utils.helpers import _get_int_param
-from src.models.po import SystemParamPo
-from src.utils.database import get_session
-
-
 
 logger = get_logger(__name__)
 ctx = get_app_context()
@@ -74,6 +73,7 @@ class TradingEngine:
             self.risk_control = RiskControl(risk_config)
         else:
             from src.utils.config_loader import RiskControlConfig
+
             self.risk_control = RiskControl(RiskControlConfig())
 
         # 异步事件引擎
@@ -213,7 +213,6 @@ class TradingEngine:
             self.event_engine.start()
             ctx.set(ctx.KEY_EVENT_ENGINE, self.event_engine)
 
-
     def _load_risk_control_config(self):
         """
         加载风控配置
@@ -293,7 +292,7 @@ class TradingEngine:
         offset: Union[str, Offset],
         volume: int,
         price: float = 0,
-        slip: int =0
+        slip: int = 0,
     ) -> Optional[OrderData]:
         """
         下单
@@ -322,7 +321,6 @@ class TradingEngine:
             logger.error(f"风控检查失败: 手数 {volume} 超过限制")
             raise Exception(f"风控检查失败: 手数 {volume} 超过限制")
 
-        
         if self.gateway is None:
             raise Exception("Gateway未初始化")
 
@@ -339,10 +337,10 @@ class TradingEngine:
             offset=offset,
             volume=volume,
             price=price if price > 0 else None,
-            slip = slip
+            slip=slip,
         )
 
-        order_data =  self.gateway.send_order(req)
+        order_data = self.gateway.send_order(req)
         if order_data is not None:
             logger.bind(tags=["trade"]).info(
                 f"下单: {symbol} {direction} {offset} {volume}手 @{price if price > 0 else 'MARKET'}, 委托单ID: {order_data.order_id}"
@@ -351,10 +349,10 @@ class TradingEngine:
             # 更新风控计数
             self.risk_control.on_order_inserted()
         else:
-            logger.error(f"下单失败: {symbol} {direction} {offset} {volume}手 @{price if price > 0 else 'MARKET'}")
+            logger.error(
+                f"下单失败: {symbol} {direction} {offset} {volume}手 @{price if price > 0 else 'MARKET'}"
+            )
         return order_data
-
-
 
     def cancel_order(self, order_id: str) -> bool:
         """
@@ -368,7 +366,7 @@ class TradingEngine:
         """
         if self.gateway and self.gateway.connected:
             req = CancelRequest(order_id=order_id)
-            return  self.gateway.cancel_order(req)
+            return self.gateway.cancel_order(req)
 
         logger.warning("Gateway未初始化或未连接")
         return False
@@ -514,8 +512,6 @@ class TradingEngine:
         except Exception as e:
             logger.error(f"发送报单指令更新事件失败: {e}")
 
-    
-
     def insert_order_cmd(self, cmd: OrderCmd) -> Optional[str]:
         """
         创建报单指令
@@ -596,11 +592,7 @@ class TradingEngine:
         """
         清理已完成的报单指令
         """
-        finished_cmds = [
-            cmd_id
-            for cmd_id, cmd in self._order_cmds.items()
-            if cmd.is_finished
-        ]
+        finished_cmds = [cmd_id for cmd_id, cmd in self._order_cmds.items() if cmd.is_finished]
         for cmd_id in finished_cmds:
             # 从执行器注销
             if self._order_cmd_executor:
@@ -619,4 +611,7 @@ class TradingEngine:
         Returns:
             标准化后的合约代码，如 "rb2505.SHFE"
         """
-        return self.gateway.std_symbol(symbol)
+        if self.gateway is None:
+            return symbol
+        result = self.gateway.std_symbol(symbol)
+        return result or symbol
