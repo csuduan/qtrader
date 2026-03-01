@@ -865,6 +865,61 @@ class TraderProxy:
             logger.error(f"TraderProxy [{self.account_id}] 更新策略信号请求失败: {e}")
             return {"success": False, "message": f"请求失败: {str(e)}"}
 
+    async def clear_strategy_signal(self, strategy_id: str) -> dict:
+        """
+        清除策略信号（无信号状态）
+
+        通过socket发送请求到远程Trader
+
+        Args:
+            strategy_id: 策略ID
+
+        Returns:
+            操作结果
+        """
+        if not self.socket_client or not self.socket_client.is_connected():
+            logger.error(f"TraderProxy [{self.account_id}] 未连接到Trader，无法发送清除请求")
+            return {"success": False, "message": "未连接"}
+
+        try:
+            response = await self.socket_client.request(
+                "clear_strategy_signal",
+                {"strategy_id": strategy_id},
+                timeout=10.0,
+            )
+            return response or {"success": False, "message": "无响应"}
+        except Exception as e:
+            logger.error(f"TraderProxy [{self.account_id}] 清除策略信号请求失败: {e}")
+            return {"success": False, "message": f"请求失败: {str(e)}"}
+
+    async def update_strategy_position(self, strategy_id: str, position: dict) -> dict:
+        """
+        更新策略持仓
+
+        通过socket发送请求到远程Trader
+
+        Args:
+            strategy_id: 策略ID
+            position: 持仓数据 {pos_long, pos_short, pos_price}
+
+        Returns:
+            更新结果
+        """
+        if not self.socket_client or not self.socket_client.is_connected():
+            logger.error(f"TraderProxy [{self.account_id}] 未连接到Trader，无法发送更新请求")
+            return {"success": False, "message": "未连接"}
+
+        try:
+            response = await self.socket_client.request(
+                "update_strategy_position",
+                {"strategy_id": strategy_id, "position": position},
+                timeout=10.0,
+            )
+            return response or {"success": False, "message": "无响应"}
+        except Exception as e:
+            logger.error(f"TraderProxy [{self.account_id}] 更新策略持仓请求失败: {e}")
+            return {"success": False, "message": f"请求失败: {str(e)}"}
+
     async def set_strategy_trading_status(self, strategy_id: str, status: dict) -> dict:
         """
         设置策略交易状态（统一接口）

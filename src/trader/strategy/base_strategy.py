@@ -43,6 +43,7 @@ class BaseParam(BaseModel):
     stop_loss_pct: float = Field(default=0.0, title="止损率")
     overnight: bool = Field(default=False, title="隔夜持仓")
     force_exit_time: time = Field(default=time(14, 45, 0), title="强平时间")
+    lock_position: bool = Field(default=False, title="锁仓模式")
 
     def get_param_definitions(self) -> List[Dict[str, Any]]:
         """获取参数定义列表"""
@@ -129,18 +130,23 @@ class BaseStrategy:
         self.closing_paused: bool = False
 
         # 运行中信息
-        self._pending_cmd: Optional[OrderCmd] = None
+        self._pending_cmds: List[OrderCmd] = []
         self._hist_cmds: Dict[str, OrderCmd] = {}
 
     def init(self, trading_day: datetime) -> bool:
         """策略初始化"""
         logger.info(f"策略 [{self.strategy_id}] 初始化...")
         self.inited = True
-        self._pending_cmd = None
+        self._pending_cmds = []
         self._hist_cmds = {}
         self.signal = None
         self.trading_day = trading_day
         self.close_profit = 0.0
+
+        # 重置持仓
+        self.pos_long = 0
+        self.pos_short = 0
+        self.pos_price = 0.0
 
         # 解析参数
         if self.config.params:
@@ -208,94 +214,282 @@ class BaseStrategy:
                     except ValueError:
                         pass
                 setattr(self.signal, key, value)
-        # 更新持仓状态
-        self.pos_long = data.get("pos_long", 0)
-        self.pos_short = data.get("pos_short", 0)
-        self.pos_price = data.get("pos_price", 0.0)
 
         logger.info(f"策略 [{self.strategy_id}] 信号已更新: side={self.signal.side}")
 
+    def clear_signal(self) -> None:
+        """清除策略信号（无信号状态）"""
+        if self.signal:
+            logger.info(f"策略 [{self.strategy_id}] 信号已清除 (原信号: {self.signal})")
+            self.signal = None
+        else:
+            logger.debug(f"策略 [{self.strategy_id}] 无信号需要清除")
+
+    def update_position(self, position: dict) -> None:
+        """更新策略持仓"""
+        self.pos_long = position.get("pos_long", 0)
+        self.pos_short = position.get("pos_short", 0)
+        self.pos_price = position.get("pos_price", 0.0)
+        logger.info(f"策略 [{self.strategy_id}] 持仓已更新: 多仓={self.pos_long}, 空仓={self.pos_short}, 均价={self.pos_price}")
+
     async def execute_signal(self) -> None:
-        """执行信号"""
+        """执行信号（支持锁仓模式）"""
         if not self.signal or self.param is None:
             return
+
         signal = self.signal
         if signal.exit_time:
             # 平仓处理
-            if self._pending_cmd and not self._pending_cmd.is_finished:
-                # 有进行中的指令
-                if self._pending_cmd.offset == Offset.OPEN:
-                    # 有未完成的开仓操作，等待下一次执行
-                    logger.info(
-                        f"策略 [{self.strategy_id}] 有未完成的开仓指令，先取消指令，等待下一次执行"
-                    )
-                    # 当前开仓报单未完成，先撤单，等待下一次执行平仓
-                    await self.cancel_order_cmd(self._pending_cmd)
-                    return
+            if self.param.lock_position:
+                await self._handle_lock_close(signal)
             else:
-                # 无进行中的指令
-                # 当前信号持有手数>0
-                pos = self.pos_long if signal.side == 1 else self.pos_short
-                if pos > 0:
-                    exit_cmd = OrderCmd(
-                        symbol=self.param.symbol,
-                        offset=Offset.CLOSE,
-                        direction=Direction.SELL if signal.side == 1 else Direction.BUY,
-                        volume=pos,
-                        price=0,
-                    )
-                    await self.send_order_cmd(exit_cmd)
+                await self._handle_normal_close(signal)
         else:
             # 开仓处理
-            if self._pending_cmd and not self._pending_cmd.is_finished:
-                # 有进行中的指令
-                pass
+            if self.param.lock_position:
+                await self._handle_lock_open(signal)
             else:
-                pos = self.pos_long if signal.side == 1 else self.pos_short
-                if pos < self.volume:
-                    entry_cmd = OrderCmd(
-                        symbol=self.symbol,
-                        offset=Offset.OPEN,
-                        direction=Direction.BUY if signal.side == 1 else Direction.SELL,
-                        volume=self.volume - pos,
-                        price=0,
+                await self._handle_normal_open(signal)
+
+    async def _handle_normal_close(self, signal: Signal) -> None:
+        """正常模式平仓处理"""
+        if self._has_pending_open_cmd():
+            # 有未完成的开仓操作，先撤单
+            logger.info(f"策略 [{self.strategy_id}] 有未完成的开仓指令，先取消指令")
+            await self._cancel_pending_cmds()
+            return
+
+        if self._has_pending_close_cmd():
+            # 已有进行中的平仓指令
+            return
+
+        pos = self.pos_long if signal.side == 1 else self.pos_short
+        if pos > 0:
+            exit_cmd = OrderCmd(
+                symbol=self.param.symbol,
+                offset=Offset.CLOSE,
+                direction=Direction.SELL if signal.side == 1 else Direction.BUY,
+                volume=pos,
+                price=0,
+            )
+            await self._send_order_cmds([exit_cmd])
+
+    async def _handle_lock_close(self, signal: Signal) -> None:
+        """锁仓模式平仓：反向开仓实现锁仓，不平今，保证净头寸为0"""
+        if self._has_pending_cmd():
+            # 已有进行中的平仓指令
+            return
+
+        pos_net = self.pos_long - self.pos_short
+        if pos_net > 0:
+            # 锁仓：净头寸为多，需要开空
+            lock_cmd = OrderCmd(
+                symbol=self.param.symbol,
+                offset=Offset.OPEN,
+                direction=Direction.SELL,
+                volume=pos_net,
+                price=0,
+            )
+            await self._send_order_cmds([lock_cmd])
+        elif pos_net < 0:
+            # 锁仓：净头寸为空，需要开多
+            lock_cmd = OrderCmd(
+                symbol=self.param.symbol,
+                offset=Offset.OPEN,
+                direction=Direction.BUY,
+                volume=-pos_net,
+                price=0,
+            )
+            await self._send_order_cmds([lock_cmd])
+
+    async def _handle_normal_open(self, signal: Signal) -> None:
+        """正常模式开仓处理"""
+        if self._has_pending_cmd():
+            return
+
+        pos = self.pos_long if signal.side == 1 else self.pos_short
+        if pos < self.volume:
+            entry_cmd = OrderCmd(
+                symbol=self.symbol,
+                offset=Offset.OPEN,
+                direction=Direction.BUY if signal.side == 1 else Direction.SELL,
+                volume=self.volume - pos,
+                price=0,
+            )
+            await self._send_order_cmds([entry_cmd])
+
+    async def _handle_lock_open(self, signal: Signal) -> None:
+        """锁仓模式开仓：先平反向昨仓，再开新仓"""
+        if self._has_pending_cmd():
+            return
+
+        position = self.get_position(self.symbol)
+        cmds: List[OrderCmd] = []    
+
+        if signal.side == 1:
+            pos_net = self.pos_long - self.pos_short
+            if pos_net > self.volume:
+                #净多超过目标手数了，优先平多(昨)，剩余开空
+                target_volume = pos_net - self.volume
+                pos_long_yd = min(position.pos_long_yd or 0,self.pos_long) if position else 0
+                close_volume  = min(target_volume, pos_long_yd)
+                open_volume = target_volume - close_volume
+                logger.info(f"开多，净多头[{pos_net}]超过目标手数[{self.volume}]，优先平多(昨)[{close_volume}]手，剩余开空[{open_volume}]手")
+                if close_volume >0:
+                    cmds.append(
+                        OrderCmd(
+                            symbol=self.symbol,
+                            offset=Offset.CLOSE,
+                            direction=Direction.SELL,
+                            volume=close_volume,
+                            price=0,
+                        )
                     )
-                    await self.send_order_cmd(entry_cmd)
+                if open_volume > 0:
+                    cmds.append(
+                        OrderCmd(
+                            symbol=self.symbol,
+                            offset=Offset.OPEN,
+                            direction=Direction.BUY,
+                            volume=open_volume,
+                            price=0,
+                        )
+                    )
+
+
+            elif pos_net < self.volume:
+                #净多不足目标手数了，优先平空(昨)，剩余开多
+                target_volume = self.volume - pos_net
+                pos_short_yd = min(position.pos_short_yd or 0,self.pos_short) if position else 0
+                close_volume  = min(target_volume, pos_short_yd)
+                open_volume = target_volume - close_volume
+                logger.info(f"开多，净多头[{pos_net}]不足目标手数[{self.volume}]，优先平空(昨)[{close_volume}]手，剩余开多[{open_volume}]手")
+                if close_volume >0:
+                    cmds.append(
+                        OrderCmd(
+                            symbol=self.symbol,
+                            offset=Offset.CLOSE,
+                            direction=Direction.BUY,
+                            volume=close_volume,
+                            price=0,
+                        )
+                    )
+                if open_volume > 0:
+                    cmds.append(
+                        OrderCmd(
+                            symbol=self.symbol,
+                            offset=Offset.OPEN,
+                            direction=Direction.BUY,
+                            volume=open_volume,
+                            price=0,
+                        )
+                    )
+        if signal.side == -1:
+            pos_net = self.pos_short - self.pos_long
+            if pos_net > self.volume:
+                #净空超过目标手数了，优先平空(昨)，剩余开多
+                target_volume = pos_net - self.volume
+                pos_short_yd = min(position.pos_short_yd or 0,self.pos_short) if position else 0
+                close_volume  = min(target_volume, pos_short_yd)
+                open_volume = target_volume - close_volume
+                logger.info(f"开空，净空头[{pos_net}]超过目标手数[{self.volume}]，优先平空(昨)[{close_volume}]手，剩余开多[{open_volume}]手")
+                if close_volume >0:
+                    cmds.append(
+                        OrderCmd(
+                            symbol=self.symbol,
+                            offset=Offset.CLOSE,
+                            direction=Direction.BUY,
+                            volume=close_volume,
+                            price=0,
+                        )
+                    )
+                if open_volume > 0:
+                    cmds.append(
+                        OrderCmd(
+                            symbol=self.symbol,
+                            offset=Offset.OPEN,
+                            direction=Direction.BUY,
+                            volume=open_volume,
+                            price=0,
+                        )
+                    )
+            elif pos_net < self.volume:
+                #净空不足目标手数了，优先平多(昨)，剩余开空
+                target_volume = self.volume - pos_net
+                pos_long_yd = min(position.pos_long_yd or 0,self.pos_long) if position else 0
+                close_volume  = min(target_volume, pos_long_yd)
+                open_volume = target_volume - close_volume
+                logger.info(f"开空，净空头[{pos_net}]不足目标手数[{self.volume}]，优先平多(昨)[{close_volume}]手，剩余开空[{open_volume}]手")
+                if close_volume >0:
+                    cmds.append(
+                        OrderCmd(
+                            symbol=self.symbol,
+                            offset=Offset.CLOSE,
+                            direction=Direction.SELL,
+                            volume=close_volume,
+                            price=0,
+                        )
+                    )
+                if open_volume > 0:
+                    cmds.append(
+                        OrderCmd(
+                            symbol=self.symbol,
+                            offset=Offset.OPEN,
+                            direction=Direction.SELL,
+                            volume=open_volume,
+                            price=0,
+                        )
+                    )
+
+        if cmds and len(cmds) > 0:
+            await self._send_order_cmds(cmds)
 
     def _on_cmd_change(self, cmd: OrderCmd):
-        """处理订单状态变化"""
-        if not cmd.is_finished or not self._pending_cmd:
-            return
-        if cmd.cmd_id != self._pending_cmd.cmd_id:
+        """处理订单状态变化（支持多指令）"""
+        if not cmd.is_finished:
             return
 
         # 等报单指令完成，指令中的成交数量不会变化了，再更新持仓
         if cmd.filled_volume > 0:
-            # 有进行中的指令
             if cmd.offset == Offset.OPEN:
                 # 开仓指令
                 cost = (
                     self.pos_long + self.pos_short
-                ) * self.pos_price + cmd.filled_volume * cmd.filled_price
-                self.pos_long += cmd.filled_volume * 1 if cmd.direction == Direction.BUY else 0
-                self.pos_short += cmd.filled_volume * 1 if cmd.direction == Direction.SELL else 0
-                self.pos_price = cost / (self.pos_long + self.pos_short)
+                ) * (self.pos_price or cmd.filled_price) + cmd.filled_volume * cmd.filled_price
+                self.pos_long += cmd.filled_volume if cmd.direction == Direction.BUY else 0
+                self.pos_short += cmd.filled_volume if cmd.direction == Direction.SELL else 0
+                total_pos = self.pos_long + self.pos_short
+                self.pos_price = cost / total_pos if total_pos > 0 else 0
             elif cmd.offset == Offset.CLOSE:
                 # 平仓指令
-                self.pos_long -= cmd.filled_volume * 1 if cmd.direction == Direction.SELL else 0
-                self.pos_short -= cmd.filled_volume * 1 if cmd.direction == Direction.BUY else 0
-            self._pending_cmd = None
+                self.pos_long -= cmd.filled_volume if cmd.direction == Direction.SELL else 0
+                self.pos_short -= cmd.filled_volume if cmd.direction == Direction.BUY else 0
 
         if cmd.finish_reason and "报单被拒" in cmd.finish_reason:
             if cmd.offset == Offset.OPEN:
                 self.opening_paused = True
             elif cmd.offset == Offset.CLOSE:
                 self.closing_paused = True
+        
+        # 从pending列表中移除完成的指令
+        if cmd in self._pending_cmds:
+            self._pending_cmds.remove(cmd)
+        # 保存到历史
+        self._hist_cmds[cmd.cmd_id] = cmd
 
     def get_trading_status(self) -> str:
         """是否正在交易中(开仓中，平仓中)"""
-        if self._pending_cmd and not self._pending_cmd.is_finished:
-            return "开仓中" if self._pending_cmd.offset == Offset.OPEN else "平仓中"
+        open_count = sum(
+            1 for cmd in self._pending_cmds if not cmd.is_finished and cmd.offset == Offset.OPEN
+        )
+        close_count = sum(
+            1 for cmd in self._pending_cmds if not cmd.is_finished and cmd.offset == Offset.CLOSE
+        )
+
+        if open_count > 0:
+            return f"开仓中({open_count})"
+        if close_count > 0:
+            return f"平仓中({close_count})"
         return ""
 
     def enable(self, status: bool = True) -> bool:
@@ -322,31 +516,59 @@ class BaseStrategy:
         pass
 
     # ==================== 交易接口 ====================
-    async def send_order_cmd(self, order_cmd: OrderCmd):
-        """发送报单指令"""
+    async def _send_order_cmds(self, cmds: List[OrderCmd]):
+        """发送报单指令（支持多指令）"""
         if self.param is None:
             logger.error(f"策略 [{self.strategy_id}] 的参数未初始化")
             return
-        if order_cmd.offset == Offset.CLOSE and self.closing_paused:
-            logger.warning(f"策略 [{self.strategy_id}] 暂停平仓")
-            return
-        if order_cmd.offset == Offset.OPEN and self.opening_paused:
-            logger.warning(f"策略 [{self.strategy_id}] 暂停开仓")
-            return
 
-        self._pending_cmd = order_cmd
-        self._hist_cmds[order_cmd.cmd_id] = order_cmd
-        if order_cmd.on_change is None:
-            order_cmd.on_change = self._on_cmd_change
+        for cmd in cmds:
+            if cmd.offset == Offset.CLOSE and self.closing_paused:
+                logger.warning(f"策略 [{self.strategy_id}] 暂停平仓")
+                continue
+            if cmd.offset == Offset.OPEN and self.opening_paused:
+                logger.warning(f"策略 [{self.strategy_id}] 暂停开仓")
+                continue
 
-        order_cmd.source = f"策略-{self.strategy_id}"
-        order_cmd.order_timeout = self.param.order_timeout
-        order_cmd.cmd_timeout = self.param.cmd_timeout
-        order_cmd.volume_per_order = self.param.volume_per_order
+            self._pending_cmds.append(cmd)
+            self._hist_cmds[cmd.cmd_id] = cmd
+            if cmd.on_change is None:
+                cmd.on_change = self._on_cmd_change
+
+            cmd.source = f"策略-{self.strategy_id}"
+            cmd.order_timeout = self.param.order_timeout
+            cmd.cmd_timeout = self.param.cmd_timeout
+            cmd.volume_per_order = self.param.volume_per_order
+
+            if self.strategy_manager is None:
+                logger.error(f"策略 [{self.strategy_id}] 的 strategy_manager 未初始化")
+                return
+            await self.strategy_manager.send_order_cmd(self.strategy_id, cmd)
+
+    async def _cancel_pending_cmds(self) -> None:
+        """取消所有进行中的指令"""
         if self.strategy_manager is None:
-            logger.error(f"策略 [{self.strategy_id}] 的 strategy_manager 未初始化")
             return
-        await self.strategy_manager.send_order_cmd(self.strategy_id, order_cmd)
+        for cmd in list(self._pending_cmds):
+            if not cmd.is_finished:
+                await self.strategy_manager.cancel_order_cmd(self.strategy_id, cmd)
+        self._pending_cmds.clear()
+
+    def _has_pending_cmd(self) -> bool:
+        """是否有进行中的指令"""
+        return any(not cmd.is_finished for cmd in self._pending_cmds)
+
+    def _has_pending_open_cmd(self) -> bool:
+        """是否有进行中的开仓指令"""
+        return any(
+            not cmd.is_finished and cmd.offset == Offset.OPEN for cmd in self._pending_cmds
+        )
+
+    def _has_pending_close_cmd(self) -> bool:
+        """是否有进行中的平仓指令"""
+        return any(
+            not cmd.is_finished and cmd.offset == Offset.CLOSE for cmd in self._pending_cmds
+        )
 
     async def cancel_order_cmd(self, order_cmd: OrderCmd):
         """取消报单指令"""

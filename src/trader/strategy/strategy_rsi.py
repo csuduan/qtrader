@@ -64,7 +64,7 @@ class RsiStrategy(BaseStrategy):
         logger.info(f"策略 [{self.strategy_id}] 初始化...")
         # 基础变量
         self.signal = None
-        self._pending_cmd = None
+        self._pending_cmds = []
         self._hist_cmds = {}
         self.trading_day = trading_day
         self.close_profit = 0.0
@@ -80,6 +80,7 @@ class RsiStrategy(BaseStrategy):
             self.param: RsiParam = RsiParam(**self.config.params)
             self.symbol = self.param.symbol
             self.volume = self.param.volume
+            self.param.lock_position = True
         else:
             self.enabled = False
             logger.error(f"策略 [{self.strategy_id}] 未配置参数")
@@ -344,7 +345,7 @@ class RsiStrategy(BaseStrategy):
         Returns:
             退出原因 ("TP"/"SL"/None)
         """
-        open_price = self.pos_price or signal.entry_price
+        open_price = self.pos_price or signal.entry_price or current_price
         if signal.side == 1:
             # 多头仓位
             profit_pct = (current_price - open_price) / open_price

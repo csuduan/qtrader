@@ -63,3 +63,37 @@ async def get_order_cmds_status(
     except Exception as e:
         logger.exception(f"获取报单指令失败: {e}", exc_info=True)
         return error_response(code=500, message=f"获取报单指令失败: {str(e)}")
+
+
+@router.post("/{cmd_id}/cancel")
+async def cancel_order_cmd(
+    cmd_id: str,
+    account_id: Optional[str] = Query(None, description="账户ID"),
+    trading_manager: TradingManager = Depends(get_trading_manager),
+):
+    """
+    强制取消报单指令
+
+    Args:
+        cmd_id: 指令ID
+        account_id: 账户ID
+
+    Returns:
+        操作结果
+    """
+    try:
+        if not account_id:
+            return error_response(code=400, message="请提供账户ID")
+
+        result = await trading_manager.cancel_order_cmd(account_id, cmd_id)
+
+        if not result:
+            return error_response(code=500, message="取消指令失败")
+
+        if result.get("success"):
+            return success_response(message="取消指令成功")
+        else:
+            return error_response(code=400, message=result.get("message", "取消指令失败"))
+    except Exception as e:
+        logger.exception(f"取消报单指令失败: {e}", exc_info=True)
+        return error_response(code=500, message=f"取消报单指令失败: {str(e)}")

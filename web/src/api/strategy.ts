@@ -69,10 +69,21 @@ export const strategyApi = {
 
   /**
    * 更新策略信号
+   * 无信号时（side=0或未选择信号），body传空对象{}
    */
   updateStrategySignal: async (strategyId: string, signal: Partial<StrategySignalData>, accountId?: string): Promise<void> => {
     const config = accountId ? { params: { account_id: accountId } } : undefined
-    await api.post(`/strategies/${strategyId}/update-signal`, signal, config)
+    // 无信号时（side=0或未定义），传空对象
+    const body = signal.side ? signal : {}
+    await api.post(`/strategies/${strategyId}/update-signal`, body, config)
+  },
+
+  /**
+   * 更新策略持仓（独立接口）
+   */
+  updateStrategyPosition: async (strategyId: string, position: { pos_long: number, pos_short: number, pos_price: number | null }, accountId?: string): Promise<void> => {
+    const config = accountId ? { params: { account_id: accountId } } : undefined
+    await api.post(`/strategies/${strategyId}/update-position`, position, config)
   },
 
   /**

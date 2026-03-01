@@ -158,22 +158,23 @@ class TestSignal:
 
     def test_signal_with_values(self):
         """测试设置信号值"""
-        now = datetime.now()
+        from datetime import time as Time
+        now_time = Time(10, 30, 0)
         signal = Signal(
             side=1,
             entry_price=3500.0,
-            entry_time=now,
+            entry_time=now_time,
             entry_volume=5,
             exit_price=3550.0,
-            exit_time=now,
+            exit_time=now_time,
             exit_reason="止盈",
         )
         assert signal.side == 1
         assert signal.entry_price == 3500.0
-        assert signal.entry_time == now
+        assert signal.entry_time == now_time
         assert signal.entry_volume == 5
         assert signal.exit_price == 3550.0
-        assert signal.exit_time == now
+        assert signal.exit_time == now_time
         assert signal.exit_reason == "止盈"
 
     def test_signal_str_method(self):
@@ -209,7 +210,7 @@ class TestBaseStrategyInitialization:
         """测试信号和持仓初始化为空"""
         assert strategy.signal is None
         assert strategy.pos_long == 0
-        assert strategy.pos_price is None
+        assert strategy.pos_price == 0.0
 
     def test_pause_state_initial_values(self, strategy: BaseStrategy):
         """测试暂停状态初始值"""
@@ -218,7 +219,7 @@ class TestBaseStrategyInitialization:
 
     def test_internal_state_initialization(self, strategy: BaseStrategy):
         """测试内部状态初始化"""
-        assert strategy._pending_cmd is None
+        assert strategy._pending_cmds == []
         assert strategy._hist_cmds == {}
         assert strategy.bar_subscriptions == []
         assert strategy.trading_day is None
@@ -237,9 +238,9 @@ class TestBaseStrategyInit:
         assert result is True
 
     def test_init_resets_internal_state(self, strategy: BaseStrategy):
-        """测试重置内部状态 (_pending_cmd, _hist_cmds, signal)"""
+        """测试重置内部状态 (_pending_cmds, _hist_cmds, signal)"""
         # 设置一些初始值
-        strategy._pending_cmd = MagicMock()
+        strategy._pending_cmds = [MagicMock()]
         strategy._hist_cmds = {"cmd1": MagicMock()}
         strategy.signal = Signal(side=1)
 
@@ -247,19 +248,19 @@ class TestBaseStrategyInit:
         strategy.init(datetime.now())
 
         # 验证重置
-        assert strategy._pending_cmd is None
+        assert strategy._pending_cmds == []
         assert strategy._hist_cmds == {}
         assert strategy.signal is None
 
     def test_init_resets_position(self, strategy: BaseStrategy):
-        """测试重置持仓 (pos_volume=0, pos_price=None)"""
+        """测试重置持仓 (pos_long=0, pos_price=0.0)"""
         strategy.pos_long = 10
         strategy.pos_price = 3500.0
 
         strategy.init(datetime.now())
 
         assert strategy.pos_long == 0
-        assert strategy.pos_price is None
+        assert strategy.pos_price == 0.0
 
     def test_init_parses_params_from_config(self, strategy: BaseStrategy):
         """测试参数解析从 config.params"""
@@ -379,7 +380,7 @@ class TestBaseStrategyExecuteSignal:
         """测试平仓信号：发送平仓指令"""
         strategy.init(datetime.now())
         strategy.pos_long = 5
-        strategy.signal = Signal(side=1, exit_time=datetime.now())
+        strategy.signal = Signal(side=1, exit_time=datetime.now().time())
 
         await strategy.execute_signal()
 
@@ -393,7 +394,7 @@ class TestBaseStrategyExecuteSignal:
     async def test_execute_signal_with_entry_signal(self, strategy: BaseStrategy):
         """测试开仓信号：发送开仓指令"""
         strategy.init(datetime.now())
-        strategy.signal = Signal(side=1, entry_time=datetime.now())
+        strategy.signal = Signal(side=1, entry_time=datetime.now().time())
 
         await strategy.execute_signal()
 
@@ -407,13 +408,14 @@ class TestBaseStrategyExecuteSignal:
     async def test_execute_signal_with_pending_open_order(self, strategy: BaseStrategy):
         """测试有进行中开仓指令时的行为"""
         strategy.init(datetime.now())
-        strategy._pending_cmd = OrderCmd(
+        pending_cmd = OrderCmd(
             symbol="SHFE.rb2505",
             direction=Direction.BUY,
             offset=Offset.OPEN,
             volume=5,
         )
-        strategy.signal = Signal(side=1, exit_time=datetime.now())
+        strategy._pending_cmds = [pending_cmd]
+        strategy.signal = Signal(side=1, exit_time=datetime.now().time())
 
         await strategy.execute_signal()
 
@@ -425,7 +427,7 @@ class TestBaseStrategyExecuteSignal:
         """测试持仓数量检查"""
         strategy.init(datetime.now())
         strategy.pos_long = 5
-        strategy.signal = Signal(side=1, entry_time=datetime.now())
+        strategy.signal = Signal(side=1, entry_time=datetime.now().time())
 
         await strategy.execute_signal()
 
@@ -450,13 +452,13 @@ class TestBaseStrategyOnCmdChange:
         cmd.filled_volume = 5
         cmd.filled_price = 3500.0
         cmd._cancel("全部完成")
-        strategy._pending_cmd = cmd
+        strategy._pending_cmds = [cmd]
 
         strategy._on_cmd_change(cmd)
 
         assert strategy.pos_long == 5
         assert strategy.pos_price == 3500.0
-        assert strategy._pending_cmd is None
+        assert cmd not in strategy._pending_cmds
 
     def test_on_cmd_change_close_order_reduces_position(self, strategy: BaseStrategy):
         """测试平仓指令完成减少持仓"""
@@ -472,12 +474,12 @@ class TestBaseStrategyOnCmdChange:
         cmd.filled_volume = 5
         cmd.filled_price = 3550.0
         cmd._cancel("全部完成")
-        strategy._pending_cmd = cmd
+        strategy._pending_cmds = [cmd]
 
         strategy._on_cmd_change(cmd)
 
         assert strategy.pos_long == 5
-        assert strategy._pending_cmd is None
+        assert cmd not in strategy._pending_cmds
 
     def test_on_cmd_change_rejected_sets_pause(self, strategy: BaseStrategy):
         """测试报单被拒设置暂停状态"""
@@ -488,7 +490,7 @@ class TestBaseStrategyOnCmdChange:
             volume=5,
         )
         cmd._cancel("报单被拒")
-        strategy._pending_cmd = cmd
+        strategy._pending_cmds = [cmd]
 
         strategy._on_cmd_change(cmd)
 
@@ -503,14 +505,14 @@ class TestBaseStrategyOnCmdChange:
             volume=5,
         )
         cmd._cancel("报单被拒")
-        strategy._pending_cmd = cmd
+        strategy._pending_cmds = [cmd]
 
         strategy._on_cmd_change(cmd)
 
         assert strategy.closing_paused is True
 
     def test_on_cmd_change_ignores_non_pending_cmd(self, strategy: BaseStrategy):
-        """测试非自己指令忽略"""
+        """测试非pending列表中的指令也会处理（新行为：处理所有完成的指令）"""
         strategy.pos_long = 5
         other_cmd = OrderCmd(
             symbol="SHFE.rb2505",
@@ -520,12 +522,12 @@ class TestBaseStrategyOnCmdChange:
         )
         other_cmd.filled_volume = 5
         other_cmd._cancel("全部完成")
-        # 不设置为 pending_cmd
+        # 不设置为 pending_cmds
 
-        original_volume = strategy.pos_long
         strategy._on_cmd_change(other_cmd)
 
-        assert strategy.pos_long == original_volume
+        # 新行为：即使指令不在 pending_cmds 中，也会更新持仓
+        assert strategy.pos_long == 10
 
 
 # ==================== TestBaseStrategyTradingStatus ====================
@@ -536,27 +538,31 @@ class TestBaseStrategyTradingStatus:
 
     def test_get_trading_status_opening(self, strategy: BaseStrategy):
         """测试开仓中状态"""
-        strategy._pending_cmd = OrderCmd(
-            symbol="SHFE.rb2505",
-            direction=Direction.BUY,
-            offset=Offset.OPEN,
-            volume=5,
-        )
+        strategy._pending_cmds = [
+            OrderCmd(
+                symbol="SHFE.rb2505",
+                direction=Direction.BUY,
+                offset=Offset.OPEN,
+                volume=5,
+            )
+        ]
 
         status = strategy.get_trading_status()
-        assert status == "开仓中"
+        assert status == "开仓中(1)"
 
     def test_get_trading_status_closing(self, strategy: BaseStrategy):
         """测试平仓中状态"""
-        strategy._pending_cmd = OrderCmd(
-            symbol="SHFE.rb2505",
-            direction=Direction.SELL,
-            offset=Offset.CLOSE,
-            volume=5,
-        )
+        strategy._pending_cmds = [
+            OrderCmd(
+                symbol="SHFE.rb2505",
+                direction=Direction.SELL,
+                offset=Offset.CLOSE,
+                volume=5,
+            )
+        ]
 
         status = strategy.get_trading_status()
-        assert status == "平仓中"
+        assert status == "平仓中(1)"
 
     def test_get_trading_status_no_pending_cmd(self, strategy: BaseStrategy):
         """测试无进行中指令返回空字符串"""
@@ -572,7 +578,7 @@ class TestBaseStrategyTradingStatus:
             volume=5,
         )
         cmd._cancel("全部完成")
-        strategy._pending_cmd = cmd
+        strategy._pending_cmds = [cmd]
 
         status = strategy.get_trading_status()
         assert status == ""
@@ -618,7 +624,7 @@ class TestBaseStrategySendOrderCmd:
     async def test_send_order_param_not_initialized(self, strategy: BaseStrategy):
         """测试参数未初始化时错误处理"""
         # 验证不会报错，应该优雅处理
-        await strategy.send_order_cmd(OrderCmd(symbol="SHFE.rb2505", direction=Direction.BUY, offset=Offset.OPEN, volume=5))
+        await strategy._send_order_cmds([OrderCmd(symbol="SHFE.rb2505", direction=Direction.BUY, offset=Offset.OPEN, volume=5)])
 
     @pytest.mark.asyncio
     async def test_send_order_opening_paused(self, strategy: BaseStrategy):
@@ -627,7 +633,7 @@ class TestBaseStrategySendOrderCmd:
         strategy.opening_paused = True
 
         # 暂停开仓应该阻止订单发送
-        await strategy.send_order_cmd(OrderCmd(symbol="SHFE.rb2505", direction=Direction.BUY, offset=Offset.OPEN, volume=5))
+        await strategy._send_order_cmds([OrderCmd(symbol="SHFE.rb2505", direction=Direction.BUY, offset=Offset.OPEN, volume=5)])
 
         # 验证没有发送订单
         strategy.strategy_manager.send_order_cmd.assert_not_awaited()
@@ -639,20 +645,20 @@ class TestBaseStrategySendOrderCmd:
         strategy.closing_paused = True
 
         # 暂停平仓应该阻止订单发送
-        await strategy.send_order_cmd(OrderCmd(symbol="SHFE.rb2505", direction=Direction.SELL, offset=Offset.CLOSE, volume=5))
+        await strategy._send_order_cmds([OrderCmd(symbol="SHFE.rb2505", direction=Direction.SELL, offset=Offset.CLOSE, volume=5)])
 
         # 验证没有发送订单
         strategy.strategy_manager.send_order_cmd.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_send_order_sets_pending_cmd(self, strategy: BaseStrategy):
-        """测试正确设置 pending_cmd"""
+        """测试正确设置 pending_cmds"""
         strategy.init(datetime.now())
         order_cmd = OrderCmd(symbol="SHFE.rb2505", direction=Direction.BUY, offset=Offset.OPEN, volume=5)
 
-        await strategy.send_order_cmd(order_cmd)
+        await strategy._send_order_cmds([order_cmd])
 
-        assert strategy._pending_cmd == order_cmd
+        assert order_cmd in strategy._pending_cmds
 
     @pytest.mark.asyncio
     async def test_send_order_adds_to_history(self, strategy: BaseStrategy):
@@ -660,7 +666,7 @@ class TestBaseStrategySendOrderCmd:
         strategy.init(datetime.now())
         order_cmd = OrderCmd(symbol="SHFE.rb2505", direction=Direction.BUY, offset=Offset.OPEN, volume=5)
 
-        await strategy.send_order_cmd(order_cmd)
+        await strategy._send_order_cmds([order_cmd])
 
         assert order_cmd.cmd_id in strategy._hist_cmds
         assert strategy._hist_cmds[order_cmd.cmd_id] == order_cmd
@@ -671,7 +677,7 @@ class TestBaseStrategySendOrderCmd:
         strategy.init(datetime.now())
         order_cmd = OrderCmd(symbol="SHFE.rb2505", direction=Direction.BUY, offset=Offset.OPEN, volume=5)
 
-        await strategy.send_order_cmd(order_cmd)
+        await strategy._send_order_cmds([order_cmd])
 
         strategy.strategy_manager.send_order_cmd.assert_awaited_once_with(strategy.strategy_id, order_cmd)
 

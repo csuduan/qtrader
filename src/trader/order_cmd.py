@@ -152,7 +152,7 @@ class OrderCmd:
         # 报单间隔(默认1秒)
         order_interval: float = 1,
         # 控制参数(默认5分钟)
-        total_timeout: int = 60 * 5,
+        total_timeout: int = 60 * 2,
         # 单次报单超时时间(默认10秒)
         order_timeout: int = 10,
         # 来源标识
@@ -342,7 +342,7 @@ class OrderCmd:
         traded = order.traded if order.traded is not None else 0
         if traded > 0:
             # 更新报单指令
-            traded_price = order.traded_price or 0.0
+            traded_price = order.traded_price or order.price
             total_cost = self.filled_volume * self.filled_price + traded * traded_price
             self.filled_volume += traded
             if self.filled_volume > 0:

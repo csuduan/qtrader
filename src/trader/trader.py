@@ -567,6 +567,34 @@ class Trader:
             logger.exception(f"Trader [{self.account_id}] 获取报单指令状态失败: {e}")
             return None
 
+    @request("cancel_order_cmd")
+    async def _req_cancel_order_cmd(self, data: dict) -> dict:
+        """
+        处理取消报单指令请求
+
+        Args:
+            data: {"cmd_id": 指令ID}
+
+        Returns:
+            {"success": bool, "message": str}
+        """
+        if self.trading_engine is None:
+            return {"success": False, "message": "交易引擎未初始化"}
+
+        cmd_id = data.get("cmd_id")
+        if not cmd_id:
+            return {"success": False, "message": "缺少指令ID"}
+
+        try:
+            result = await self.trading_engine.cancel_order_cmd(cmd_id)
+            if result:
+                return {"success": True, "message": "取消指令已发送"}
+            else:
+                return {"success": False, "message": "取消指令失败，指令可能已完成或不存在"}
+        except Exception as e:
+            logger.exception(f"Trader [{self.account_id}] 取消报单指令失败: {e}")
+            return {"success": False, "message": f"取消失败: {str(e)}"}
+
     @request("get_jobs")
     async def _req_get_jobs(self, data: dict) -> list:
         """处理获取所有任务请求"""
@@ -774,6 +802,50 @@ class Trader:
             return {"success": True, "message": "信号更新成功"}
         except Exception as e:
             logger.exception(f"更新策略信号失败: {e}")
+            return {"success": False, "message": f"更新失败: {str(e)}"}
+
+    @request("clear_strategy_signal")
+    async def _req_clear_strategy_signal(self, data: dict) -> dict:
+        """处理清除策略信号请求"""
+        if self.strategy_manager is None:
+            return {"success": False, "message": "策略管理器未初始化"}
+
+        strategy_id = data.get("strategy_id")
+        if not strategy_id:
+            return {"success": False, "message": "缺少 strategy_id"}
+
+        strategy = self.strategy_manager.strategies.get(strategy_id)
+        if not strategy:
+            return {"success": False, "message": f"策略 {strategy_id} 不存在"}
+
+        try:
+            strategy.clear_signal()
+            return {"success": True, "message": "信号已清除"}
+        except Exception as e:
+            logger.exception(f"清除策略信号失败: {e}")
+            return {"success": False, "message": f"清除失败: {str(e)}"}
+
+    @request("update_strategy_position")
+    async def _req_update_strategy_position(self, data: dict) -> dict:
+        """处理更新策略持仓请求"""
+        if self.strategy_manager is None:
+            return {"success": False, "message": "策略管理器未初始化"}
+
+        strategy_id = data.get("strategy_id")
+        if not strategy_id:
+            return {"success": False, "message": "缺少 strategy_id"}
+
+        strategy = self.strategy_manager.strategies.get(strategy_id)
+        if not strategy:
+            return {"success": False, "message": f"策略 {strategy_id} 不存在"}
+
+        try:
+            position = data.get("position", {})
+            strategy.update_position(position)
+            logger.info(f"策略 [{strategy_id}] 持仓已更新: {position}")
+            return {"success": True, "message": "持仓更新成功"}
+        except Exception as e:
+            logger.exception(f"更新策略持仓失败: {e}")
             return {"success": False, "message": f"更新失败: {str(e)}"}
 
     @request("set_strategy_trading_status")

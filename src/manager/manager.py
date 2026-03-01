@@ -537,6 +537,14 @@ class TradingManager:
             return result if isinstance(result, list) else None
         return None
 
+    async def cancel_order_cmd(self, account_id: str, cmd_id: str) -> Optional[dict]:
+        """取消报单指令"""
+        trader = self.traders.get(account_id)
+        if trader:
+            result: Any = await trader.send_request("cancel_order_cmd", {"cmd_id": cmd_id})
+            return result if isinstance(result, dict) else None
+        return None
+
     async def batch_execute_instructions(self, account_id: str, ids: List[int]) -> Optional[dict]:
         """批量执行换仓指令"""
         trader = self.traders.get(account_id)

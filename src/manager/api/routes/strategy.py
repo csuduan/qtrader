@@ -302,7 +302,7 @@ async def update_strategy(
 @router.post("/{strategy_id}/update-signal")
 async def update_strategy_signal(
     strategy_id: str,
-    signal: dict = Body(..., description="信号数据"),
+    signal: Optional[dict] = Body(None, description="信号数据，不传或传空表示清除信号"),
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
 ):
@@ -311,7 +311,7 @@ async def update_strategy_signal(
 
     Args:
         strategy_id: 策略ID
-        signal: 信号数据
+        signal: 信号数据，不传或 side=0 表示清除信号
         account_id: 账户ID
 
     Returns:
@@ -321,6 +321,13 @@ async def update_strategy_signal(
         trader = trading_manager.get_trader(account_id)
         if not trader:
             _handle_trader_not_found(account_id)
+
+        # 如果 signal 为空或 side=0，清除信号
+        if not signal or signal.get("side") == 0:
+            result = await trader.clear_strategy_signal(strategy_id)
+            if not result.get("success"):
+                return error_response(message=result.get("message", "清除信号失败"))
+            return success_response(message=f"策略 {strategy_id} 信号已清除")
 
         result = await trader.update_strategy_signal(strategy_id, signal)
         if not result.get("success"):
@@ -332,6 +339,41 @@ async def update_strategy_signal(
     except Exception as e:
         logger.error(f"更新策略信号失败: {e}")
         return error_response(message=f"更新策略信号失败: {str(e)}")
+
+
+@router.post("/{strategy_id}/update-position")
+async def update_strategy_position(
+    strategy_id: str,
+    position: dict = Body(..., description="持仓数据 {pos_long, pos_short, pos_price}"),
+    account_id: str = Query(..., description="账户ID"),
+    trading_manager: TradingManager = Depends(get_trading_manager),
+):
+    """
+    更新策略持仓（独立接口）
+
+    Args:
+        strategy_id: 策略ID
+        position: 持仓数据 {pos_long, pos_short, pos_price}
+        account_id: 账户ID
+
+    Returns:
+        操作结果
+    """
+    try:
+        trader = trading_manager.get_trader(account_id)
+        if not trader:
+            _handle_trader_not_found(account_id)
+
+        result = await trader.update_strategy_position(strategy_id, position)
+        if not result.get("success"):
+            return error_response(message=result.get("message", "更新持仓失败"))
+
+        return success_response(message=f"策略 {strategy_id} 持仓更新成功")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"更新策略持仓失败: {e}")
+        return error_response(message=f"更新策略持仓失败: {str(e)}")
 
 
 @router.get("/{strategy_id}/status")

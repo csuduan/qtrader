@@ -110,6 +110,7 @@
       <template #header>
         <span>信号与持仓</span>
       </template>
+      <el-divider content-position="left">当前信号</el-divider>
       <el-form :model="signalForm" label-width="140px" v-if="strategy">
         <el-row :gutter="20">
           <el-col :span="24">
@@ -125,7 +126,6 @@
 
         <!-- 入场信息 -->
         <template v-if="signalForm.side !== 0">
-          <el-divider content-position="left">入场信息</el-divider>
           <el-row :gutter="20">
             <el-col :span="8">
               <el-form-item label="入场时间">
@@ -150,7 +150,6 @@
           </el-row>
 
           <!-- 退场信息 -->
-          <el-divider content-position="left">退场信息</el-divider>
           <el-row :gutter="20">
             <el-col :span="8">
               <el-form-item label="退场时间">
@@ -174,27 +173,34 @@
             </el-col>
           </el-row>
         </template>
+        <el-form-item>
+          <el-space>
+            <el-button type="primary" @click="handleSaveSignal" :loading="saveSignalLoading">保存信号</el-button>
+          </el-space>
+        </el-form-item>
 
         <el-divider content-position="left">当前持仓状态</el-divider>
         <el-row :gutter="20">
           <el-col :span="8">
             <el-form-item label="多头持仓">
-              <el-input-number v-model="signalForm.pos_long" :min="0" :max="100" />
+              <el-input-number v-model="positionForm.pos_long" :min="0" :max="100" />
             </el-form-item>
           </el-col>
           <el-col :span="8">
             <el-form-item label="空头持仓">
-              <el-input-number v-model="signalForm.pos_short" :min="0" :max="100" />
+              <el-input-number v-model="positionForm.pos_short" :min="0" :max="100" />
             </el-form-item>
           </el-col>
           <el-col :span="8">
             <el-form-item label="持仓均价">
-              <el-input-number v-model="signalForm.pos_price" :min="0" :step="0.1" :precision="2" />
+              <el-input-number v-model="positionForm.pos_price" :min="0" :step="0.1" :precision="2" />
             </el-form-item>
           </el-col>
         </el-row>
         <el-form-item>
-          <el-button type="primary" @click="handleSaveSignal" :loading="saveLoading">保存信号</el-button>
+          <el-space>
+            <el-button type="primary" @click="handleSavePosition" :loading="savePositionLoading">保存持仓</el-button>
+          </el-space>
         </el-form-item>
       </el-form>
     </el-card>
@@ -214,7 +220,7 @@
           </div>
         </div>
       </template>
-      <el-table :data="orderCmds" stripe v-loading="orderCmdsLoading" table-layout="auto">
+      <el-table :data="sortedOrderCmds" stripe v-loading="orderCmdsLoading" table-layout="auto">
         <el-table-column prop="cmd_id" label="指令ID" width="120" show-overflow-tooltip/>
         <el-table-column prop="symbol" label="合约" width="120" />
         <el-table-column label="方向" width="80">
@@ -242,6 +248,7 @@
           </template>
         </el-table-column>
         <el-table-column prop="finish_reason" label="完成原因" width="180"  show-overflow-tooltip/>
+        <el-table-column prop="total_orders" label="报单次数" width="100"/>
         <el-table-column prop="created_at" label="创建时间" width="180">
           <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
         </el-table-column>
@@ -285,7 +292,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useStore } from '@/stores'
@@ -300,6 +307,8 @@ const strategy = ref<any>(null)
 const loading = ref(false)
 const actionLoading = ref(false)
 const saveLoading = ref(false)
+const saveSignalLoading = ref(false)
+const savePositionLoading = ref(false)
 
 const paramsForm = ref<Record<string, any>>({
   symbol: '',
@@ -319,7 +328,10 @@ const signalForm = ref<any>({
   entry_volume: 1,
   exit_time: '',
   exit_price: 0,
-  exit_reason: '',
+  exit_reason: ''
+})
+
+const positionForm = ref<any>({
   pos_long: 0,
   pos_short: 0,
   pos_price: null
@@ -328,6 +340,16 @@ const signalForm = ref<any>({
 const orderCmds = ref<any[]>([])
 const orderCmdsLoading = ref(false)
 const orderCmdFilter = ref<'all' | 'active' | 'finished'>('active')
+
+// 按创建时间倒序排序的报单指令
+const sortedOrderCmds = computed(() => {
+  if (!orderCmds.value || orderCmds.value.length === 0) return []
+  return [...orderCmds.value].sort((a, b) => {
+    const timeA = a.created_at ? new Date(a.created_at).getTime() : 0
+    const timeB = b.created_at ? new Date(b.created_at).getTime() : 0
+    return timeB - timeA
+  })
+})
 
 // 新增指令对话框
 const addOrderCmdDialogVisible = ref(false)
@@ -419,8 +441,11 @@ async function loadStrategy() {
       entry_volume: signal.entry_volume || paramsForm.value.volume_per_trade || 1,
       exit_time: signal.exit_time || '',
       exit_price: signal.exit_price || 0,
-      exit_reason: signal.exit_reason || '',
-      // 使用API返回的持仓数据（区分多头和空头）
+      exit_reason: signal.exit_reason || ''
+    }
+
+    // 初始化持仓表单（独立）
+    positionForm.value = {
       pos_long: strategy.value.pos_long || 0,
       pos_short: strategy.value.pos_short || 0,
       pos_price: strategy.value.pos_price || null
@@ -523,7 +548,7 @@ async function handleSaveParams() {
 }
 
 async function handleSaveSignal() {
-  saveLoading.value = true
+  saveSignalLoading.value = true
   try {
     await strategyApi.updateStrategySignal(strategyId, signalForm.value, store.selectedAccountId || undefined)
     ElMessage.success('信号保存成功')
@@ -531,7 +556,20 @@ async function handleSaveSignal() {
   } catch (error: any) {
     ElMessage.error(`保存信号失败: ${error.message}`)
   } finally {
-    saveLoading.value = false
+    saveSignalLoading.value = false
+  }
+}
+
+async function handleSavePosition() {
+  savePositionLoading.value = true
+  try {
+    await strategyApi.updateStrategyPosition(strategyId, positionForm.value, store.selectedAccountId || undefined)
+    ElMessage.success('持仓保存成功')
+    await loadStrategy()
+  } catch (error: any) {
+    ElMessage.error(`保存持仓失败: ${error.message}`)
+  } finally {
+    savePositionLoading.value = false
   }
 }
 

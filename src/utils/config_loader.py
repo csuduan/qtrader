@@ -117,22 +117,6 @@ class StrategyConfig(BaseModel):
     volume: int = 1
     bar: str = "M1"
     params_file: Optional[str] = None
-
-    # 交易参数
-    take_profit_pct: float = 0.02
-    stop_loss_pct: float = 0.01
-    trade_start_time: str = "09:30:00"
-    trade_end_time: str = "14:50:00"
-    force_exit_time: str = "14:55:00"
-    one_trade_per_day: bool = True
-
-    # RSI策略参数
-    rsi_period: int = 14
-    rsi_long_threshold: int = 50
-    rsi_short_threshold: int = 80
-    short_kline_period: int = 5
-    long_kline_period: int = 15
-
     # 其他参数（动态扩展）
     params: Dict[str, Any] = Field(default_factory=dict)
 

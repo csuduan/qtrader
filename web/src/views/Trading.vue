@@ -268,6 +268,23 @@
             </el-table-column>
             <el-table-column prop="total_orders" label="总报单数" width="100" />
             <el-table-column prop="finish_reason" label="结束原因" width="180" show-overflow-tooltip />
+            <el-table-column
+              v-if="orderCmdStatus === 'active'"
+              label="操作"
+              width="100"
+              fixed="right"
+            >
+              <template #default="{ row }">
+                <el-button
+                  type="danger"
+                  size="small"
+                  @click="handleCancelOrderCmd(row.cmd_id)"
+                  :loading="cancellingCmdId === row.cmd_id"
+                >
+                  取消
+                </el-button>
+              </template>
+            </el-table-column>
           </el-table>
         </el-card>
       </el-tab-pane>
@@ -427,7 +444,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, watch, onMounted, onUnmounted, computed } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useStore } from '@/stores'
 import { orderApi, quoteApi, orderCmdApi, contractApi } from '@/api'
 import wsManager from '@/ws'
@@ -439,6 +456,7 @@ const loadingQuotes = ref(false)
 const creating = ref(false)
 const subscribing = ref(false)
 const cancelling = ref(false)
+const cancellingCmdId = ref<string | null>(null)
 const showOrderInputDialog = ref(false)
 const showOrderConfirmDialog = ref(false)
 const showCancelDialog = ref(false)
@@ -687,6 +705,34 @@ async function handleCancelOrderConfirm() {
   } catch (error: any) {
     ElMessage.error(`撤单失败: ${error.message}`)
     showCancelDialog.value = false
+  }
+}
+
+async function handleCancelOrderCmd(cmdId: string) {
+  try {
+    await ElMessageBox.confirm(
+      `确定要强制取消报单指令 ${cmdId} 吗？`,
+      '确认取消',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+  } catch {
+    // 用户取消
+    return
+  }
+
+  cancellingCmdId.value = cmdId
+  try {
+    await orderCmdApi.cancelOrderCmd(cmdId, store.selectedAccountId || undefined)
+    ElMessage.success('取消指令成功')
+    await loadOrderCmdData()
+  } catch (error: any) {
+    ElMessage.error(`取消指令失败: ${error.message}`)
+  } finally {
+    cancellingCmdId.value = null
   }
 }
 

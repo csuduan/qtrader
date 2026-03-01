@@ -11,5 +11,13 @@ export const orderCmdApi = {
       params.status = status
     }
     return request.get('/order-cmd', { params })
+  },
+
+  async cancelOrderCmd(cmdId: string, accountId?: string): Promise<void> {
+    const params: any = {}
+    if (accountId) {
+      params.account_id = accountId
+    }
+    return request.post(`/order-cmd/${cmdId}/cancel`, null, { params })
   }
 }
