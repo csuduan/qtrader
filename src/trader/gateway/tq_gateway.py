@@ -773,7 +773,7 @@ class TqGateway(BaseGateway):
             update: K线更新时间（纳秒时间戳，TqSdk格式）
         """
         bar = BarData(
-            symbol=symbol.split(".")[1],
+            symbol=symbol,
             interval=interval,
             datetime=datetime.fromtimestamp(data["datetime"] / 1e9),
             open_price=float(data["open"]),

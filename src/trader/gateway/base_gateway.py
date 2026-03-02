@@ -109,8 +109,7 @@ class BaseGateway(ABC):
             # 直接匹配
             contract = self.contracts.get(symbol_upper) or self.contracts.get(symbol_lower)
             if not contract:
-                logger.warning(f"无法识别交易所: {symbol}")
-                return None
+                return symbol
             return contract.symbol
 
     def load_contracts(self) -> Optional[dict[str, ContractData]]:
