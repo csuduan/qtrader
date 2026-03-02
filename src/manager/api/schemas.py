@@ -200,6 +200,28 @@ class SystemParamUpdateReq(BaseModel):
     param_value: str
 
 
+class StrategyPositionRes(BaseModel):
+    """策略持仓响应"""
+
+    symbol: str  # 合约代码
+    # 多头持仓
+    pos_long: int = 0  # 多头总持仓
+    pos_long_td: int = 0  # 多头今仓
+    pos_long_yd: int = 0  # 多头昨仓
+    # 空头持仓
+    pos_short: int = 0  # 空头总持仓
+    pos_short_td: int = 0  # 空头今仓
+    pos_short_yd: int = 0  # 空头昨仓
+    # 净持仓
+    pos_net: int = 0  # 净持仓（多头 - 空头）
+    # 持仓均价
+    avg_price_long: float = 0.0  # 多头持仓均价
+    avg_price_short: float = 0.0  # 空头持仓均价
+    # 盈亏
+    position_profit: float = 0.0  # 持仓盈亏
+    close_profit: float = 0.0  # 平仓盈亏
+
+
 class StrategyRes(BaseModel):
     """策略信息响应"""
 
@@ -213,12 +235,14 @@ class StrategyRes(BaseModel):
     ext_params: List = []  # 扩展参数定义
     # 信号信息（从策略的get_signal()获取）
     signal: dict | None = None
-    # 持仓信息（区分多头和空头）
+    # 持仓信息（区分多头和空头）- 主合约持仓，保持兼容
     pos_long: int = 0  # 多头持仓量
     pos_short: int = 0  # 空头持仓量
     pos_price: Optional[float] = None  # 持仓均价
     # 保留旧字段以兼容前端（net position）
     pos_volume: int = 0  # 净持仓量（pos_long - pos_short）
+    # 多合约持仓详情（新增）
+    positions: List[StrategyPositionRes] = []  # 所有合约持仓
     trading_status: str | None = None
     # 时间戳
     updated_at: datetime = Field(default_factory=datetime.now)

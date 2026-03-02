@@ -10,7 +10,17 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from src.app_context import get_app_context
-from src.models.object import BarData, Direction, Exchange, Offset, OrderData, TickData, TradeData
+from src.models.object import (
+    BarData,
+    Direction,
+    Exchange,
+    Offset,
+    OrderData,
+    StrategyPosition,
+    TickData,
+    TradeData,
+)
+from src.trader.dao.position_dao import StrategyPositionService
 from src.trader.order_cmd import OrderCmd
 from src.trader.strategy.base_strategy import BaseStrategy
 from src.trader.trading_engine import TradingEngine
@@ -109,6 +119,9 @@ class StrategyManager:
         # 策略bar订阅映射 (symbol -> {strategy_id -> [interval_str]})
         self._strategy_bar_subscriptions: Dict[str, Dict[str, List[str]]] = {}
 
+        # 持仓持久化服务
+        self._position_service = StrategyPositionService()
+
     async def start(self) -> bool:
         """
         启动策略管理器
@@ -136,6 +149,9 @@ class StrategyManager:
         """从配置加载并实例化策略"""
         from src.trader.strategy import get_strategy_class
 
+        # 获取账户ID
+        account_id = self._get_account_id()
+
         for name, config in self.strategies_configs.items():
             if not config.enabled:
                 logger.info(f"策略 {name} 未启用，跳过")
@@ -156,6 +172,14 @@ class StrategyManager:
                 strategy.strategy_manager = self
                 self.strategies[name] = strategy
                 strategy.init(self.trading_engine.trading_day)
+
+                # 从数据库加载策略持仓
+                if account_id:
+                    positions = self._position_service.load_positions(account_id, name)
+                    if positions:
+                        strategy.init_positions(positions)
+                        logger.info(f"策略 {name} 加载了 {len(positions)} 个合约的持仓")
+
                 logger.info(f"添加策略: {name}")
 
                 # 按需订阅合约行情
@@ -165,6 +189,55 @@ class StrategyManager:
                     strategy.bar_subscriptions.append(f"{symbol}-{config.bar}")
             except Exception as e:
                 logger.exception(f"创建策略 {name} 失败: {e}", exc_info=True)
+
+    def _get_account_id(self) -> Optional[str]:
+        """获取当前账户ID"""
+        if self.trading_engine and self.trading_engine.account:
+            return self.trading_engine.account.account_id
+        return None
+
+    def save_strategy_position(self, position) -> None:
+        """
+        保存策略持仓到数据库
+
+        Args:
+            position: StrategyPosition 对象
+        """
+        account_id = self._get_account_id()
+        if account_id:
+            self._position_service.save_position(account_id, position)
+
+    def get_strategy_position(self, strategy_id: str, symbol: str):
+        """
+        获取策略的持仓信息
+
+        Args:
+            strategy_id: 策略ID
+            symbol: 合约代码
+
+        Returns:
+            StrategyPosition: 持仓对象，不存在返回None
+        """
+        strategy = self.strategies.get(strategy_id)
+        if strategy:
+            return strategy.get_position(symbol)
+        return None
+
+    def get_all_strategy_positions(self, strategy_id: str) -> Dict[str, Any]:
+        """
+        获取策略的所有持仓
+
+        Args:
+            strategy_id: 策略ID
+
+        Returns:
+            Dict: {symbol -> position_dict}
+        """
+        strategy = self.strategies.get(strategy_id)
+        if not strategy:
+            return {}
+        positions = strategy.get_all_positions()
+        return {symbol: pos.to_dict() for symbol, pos in positions.items()}
 
     def _register_events(self) -> None:
         """注册策略事件到 EventEngine"""
@@ -343,6 +416,62 @@ class StrategyManager:
             for p in self.trading_engine.positions.values():
                 if p.symbol == symbol:
                     return p
+        return None
+
+    # ==================== 策略持仓管理 ====================
+
+    def save_strategy_position(self, position: "StrategyPosition") -> bool:
+        """
+        保存策略持仓到数据库
+
+        Args:
+            position: 策略持仓对象
+
+        Returns:
+            bool: 是否成功
+        """
+        try:
+            account_id = self.trading_engine.account_id if self.trading_engine else None
+            if account_id:
+                position.account_id = account_id
+            return self._position_service.save_position(position)
+        except Exception as e:
+            logger.error(f"保存策略持仓失败: {e}")
+            return False
+
+    def load_strategy_positions(self, strategy_id: str) -> List["StrategyPosition"]:
+        """
+        从数据库加载策略持仓
+
+        Args:
+            strategy_id: 策略ID
+
+        Returns:
+            List[StrategyPosition]: 持仓列表
+        """
+        try:
+            account_id = self.trading_engine.account_id if self.trading_engine else None
+            if not account_id:
+                return []
+            return self._position_service.load_positions(account_id, strategy_id)
+        except Exception as e:
+            logger.error(f"加载策略持仓失败: {e}")
+            return []
+
+    def get_strategy_position(self, strategy_id: str, symbol: str) -> Optional["StrategyPosition"]:
+        """
+        获取策略指定合约的持仓
+
+        Args:
+            strategy_id: 策略ID
+            symbol: 合约代码
+
+        Returns:
+            StrategyPosition: 持仓对象，如果不存在则返回None
+        """
+        strategy = self.strategies.get(strategy_id)
+        if strategy:
+            return strategy.get_position(symbol)
         return None
 
     def open(

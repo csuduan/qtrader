@@ -279,18 +279,46 @@ class ContractPo(Base):
 
 
 class StrategyPositionPo(Base):
-    """策略持仓记录表"""
+    """策略持仓记录表 - 支持多合约、今昨仓、锁仓模式"""
 
     __tablename__ = "strategy_positions"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     account_id = Column(String(50), nullable=False, index=True)
-    trading_date = Column(String(10), nullable=False, index=True)  # YYYY-MM-DD
     strategy_id = Column(String(100), nullable=False, index=True)
-    long_volume = Column(Integer, nullable=False, default=0)  # 多头手数
-    short_volume = Column(Integer, nullable=False, default=0)  # 空头手数
-    avg_price = Column(Numeric(20, 4), nullable=True)  # 持仓均价
+    symbol = Column(String(80), nullable=False, index=True)  # 合约代码
+
+    # 多头持仓
+    pos_long_td = Column(Integer, nullable=False, default=0)  # 多头今仓
+    pos_long_yd = Column(Integer, nullable=False, default=0)  # 多头昨仓
+
+    # 空头持仓
+    pos_short_td = Column(Integer, nullable=False, default=0)  # 空头今仓
+    pos_short_yd = Column(Integer, nullable=False, default=0)  # 空头昨仓
+
+    # 持仓均价
+    avg_price_long = Column(Numeric(20, 4), default=0)  # 多头持仓均价
+    avg_price_short = Column(Numeric(20, 4), default=0)  # 空头持仓均价
+
+    # 盈亏
+    position_profit = Column(Numeric(20, 2), default=0)  # 持仓盈亏
+    close_profit = Column(Numeric(20, 2), default=0)     # 平仓盈亏
+
+    # 交易日（用于区分不同交易日的持仓）
+    trading_date = Column(String(10), nullable=True, index=True)  # YYYY-MM-DD
+
+    created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
+    __table_args__ = (
+        UniqueConstraint("account_id", "strategy_id", "symbol", name="uq_account_strategy_symbol"),
+    )
+
     def __repr__(self):
-        return f"<StrategyPositionPo(account_id={self.account_id}, strategy_id={self.strategy_id}, trading_date={self.trading_date}, long={self.long_volume}, short={self.short_volume})>"
+        total_long = self.pos_long_td + self.pos_long_yd
+        total_short = self.pos_short_td + self.pos_short_yd
+        return (
+            f"<StrategyPositionPo(account_id={self.account_id}, strategy_id={self.strategy_id}, "
+            f"symbol={self.symbol}, long={total_long}({self.pos_long_td}/{self.pos_long_yd}), "
+            f"short={total_short}({self.pos_short_td}/{self.pos_short_yd}))>"
+        )

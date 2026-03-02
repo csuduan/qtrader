@@ -546,3 +546,31 @@ export interface StrategySignalData {
   created_at: string
   updated_at: string
 }
+
+/** 策略持仓 */
+export interface StrategyPosition {
+  symbol: string
+  pos_long: number
+  pos_long_td: number
+  pos_long_yd: number
+  pos_short: number
+  pos_short_td: number
+  pos_short_yd: number
+  pos_net: number
+  avg_price_long: number
+  avg_price_short: number
+  position_profit: number
+  close_profit: number
+}
+
+/** 更新策略持仓请求 */
+export interface UpdateStrategyPositionRequest {
+  symbol: string
+  pos_long_td: number
+  pos_long_yd: number
+  pos_short_td: number
+  pos_short_yd: number
+  avg_price_long: number
+  avg_price_short: number
+  close_profit: number
+}

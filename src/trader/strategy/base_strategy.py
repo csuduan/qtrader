@@ -14,6 +14,7 @@ from src.models.object import (
     Direction,
     Offset,
     OrderData,
+    StrategyPosition,
     TickData,
     TradeData,
 )
@@ -118,12 +119,11 @@ class BaseStrategy:
         # 参数模型（子类覆盖）
         self.param: Optional[BaseParam] = None
 
-        # 信号及持仓
+        # 策略持仓管理: {symbol -> StrategyPosition}
+        self._positions: Dict[str, StrategyPosition] = {}
+
+        # 信号
         self.signal: Optional[Signal] = None
-        self.pos_long: int = 0  # 空头
-        self.pos_short: int = 0  # 多头
-        self.pos_price: float = 0.0  # 持仓均价
-        self.close_profit: float = 0.0  # 平仓盈亏
 
         # 暂停状态
         self.opening_paused: bool = False
@@ -141,12 +141,6 @@ class BaseStrategy:
         self._hist_cmds = {}
         self.signal = None
         self.trading_day = trading_day
-        self.close_profit = 0.0
-
-        # 重置持仓
-        self.pos_long = 0
-        self.pos_short = 0
-        self.pos_price = 0.0
 
         # 解析参数
         if self.config.params:
@@ -159,6 +153,22 @@ class BaseStrategy:
             return False
 
         return True
+
+    def init_positions(self, positions: List[StrategyPosition]) -> None:
+        """
+        初始化策略持仓（从数据库加载）
+
+        Args:
+            positions: 持仓列表
+        """
+        self._positions.clear()
+        for pos in positions:
+            self._positions[pos.symbol] = pos
+            logger.info(
+                f"策略 [{self.strategy_id}] 加载持仓: {pos.symbol} "
+                f"多仓={pos.pos_long}({pos.pos_long_td}/{pos.pos_long_yd}), "
+                f"空仓={pos.pos_short}({pos.pos_short_td}/{pos.pos_short_yd})"
+            )
 
     def get_params(self) -> List[Dict[str, Any]]:
         """获取策略参数（包含元数据）"""
@@ -225,12 +235,172 @@ class BaseStrategy:
         else:
             logger.debug(f"策略 [{self.strategy_id}] 无信号需要清除")
 
-    def update_position(self, position: dict) -> None:
-        """更新策略持仓"""
-        self.pos_long = position.get("pos_long", 0)
-        self.pos_short = position.get("pos_short", 0)
-        self.pos_price = position.get("pos_price", 0.0)
-        logger.info(f"策略 [{self.strategy_id}] 持仓已更新: 多仓={self.pos_long}, 空仓={self.pos_short}, 均价={self.pos_price}")
+    # ==================== 持仓管理（支持多合约）====================
+
+    def _get_or_create_position(self, symbol: str) -> StrategyPosition:
+        """
+        获取或创建指定合约的持仓对象
+
+        Args:
+            symbol: 合约代码
+
+        Returns:
+            StrategyPosition: 持仓对象
+        """
+        if symbol not in self._positions:
+            self._positions[symbol] = StrategyPosition(
+                strategy_id=self.strategy_id,
+                symbol=symbol,
+            )
+        return self._positions[symbol]
+
+    def get_position(self, symbol: Optional[str] = None) -> Optional[StrategyPosition]:
+        """
+        获取指定合约的持仓信息
+
+        Args:
+            symbol: 合约代码，默认为None（返回主合约持仓）
+
+        Returns:
+            StrategyPosition: 持仓数据，如果不存在则返回None
+        """
+        symbol = symbol or self.symbol
+        return self._positions.get(symbol)
+
+    def get_all_positions(self) -> Dict[str, StrategyPosition]:
+        """
+        获取所有合约的持仓
+
+        Returns:
+            Dict[str, StrategyPosition]: {symbol -> position}
+        """
+        return self._positions.copy()
+
+    def update_position(self, position_data: Dict[str, Any]) -> None:
+        """
+        更新策略持仓（兼容旧接口）
+
+        Args:
+            position_data: 持仓数据字典，包含 symbol, pos_long, pos_short, pos_price 等
+        """
+        symbol = position_data.get("symbol", self.symbol)
+        pos = self._get_or_create_position(symbol)
+
+        if "pos_long" in position_data:
+            pos_long = position_data["pos_long"]
+            # 默认分配到昨仓（兼容旧数据）
+            pos.pos_long_yd = pos_long
+            pos.pos_long_td = 0
+        if "pos_short" in position_data:
+            pos_short = position_data["pos_short"]
+            # 默认分配到昨仓（兼容旧数据）
+            pos.pos_short_yd = pos_short
+            pos.pos_short_td = 0
+        if "pos_price" in position_data:
+            price = position_data["pos_price"]
+            pos.avg_price_long = price
+            pos.avg_price_short = price
+
+        pos.updated_at = datetime.now()
+        logger.info(
+            f"策略 [{self.strategy_id}] 持仓已更新: {symbol} "
+            f"多仓={pos.pos_long}({pos.pos_long_td}/{pos.pos_long_yd}), "
+            f"空仓={pos.pos_short}({pos.pos_short_td}/{pos.pos_short_yd})"
+        )
+
+    def load_positions(self, positions: List[Dict[str, Any]]) -> None:
+        """
+        从数据库加载持仓数据
+
+        Args:
+            positions: 持仓数据列表
+        """
+        self._positions.clear()
+        for pos_data in positions:
+            symbol = pos_data.get("symbol")
+            if not symbol:
+                continue
+            position = StrategyPosition(
+                strategy_id=self.strategy_id,
+                symbol=symbol,
+                account_id=pos_data.get("account_id"),
+                pos_long_td=pos_data.get("pos_long_td", 0),
+                pos_long_yd=pos_data.get("pos_long_yd", 0),
+                pos_short_td=pos_data.get("pos_short_td", 0),
+                pos_short_yd=pos_data.get("pos_short_yd", 0),
+                avg_price_long=pos_data.get("avg_price_long", 0.0),
+                avg_price_short=pos_data.get("avg_price_short", 0.0),
+                position_profit=pos_data.get("position_profit", 0.0),
+                close_profit=pos_data.get("close_profit", 0.0),
+            )
+            self._positions[symbol] = position
+            logger.info(
+                f"策略 [{self.strategy_id}] 加载持仓: {symbol} "
+                f"多仓={position.pos_long}, 空仓={position.pos_short}"
+            )
+
+    def save_positions(self) -> None:
+        """保存持仓到数据库"""
+        if not self.strategy_manager:
+            return
+        for position in self._positions.values():
+            if position.total_pos > 0:  # 只保存有持仓的记录
+                self.strategy_manager.save_strategy_position(position)
+
+    # ==================== Backward Compatibility Properties ====================
+
+    @property
+    def pos_long(self) -> int:
+        """多头持仓（主合约）- 兼容旧接口"""
+        pos = self._positions.get(self.symbol)
+        return pos.pos_long if pos else 0
+
+    @pos_long.setter
+    def pos_long(self, value: int) -> None:
+        """设置多头持仓（主合约）- 兼容旧接口"""
+        pos = self._get_or_create_position(self.symbol)
+        # 默认分配到昨仓
+        pos.pos_long_yd = value
+        pos.pos_long_td = 0
+
+    @property
+    def pos_short(self) -> int:
+        """空头持仓（主合约）- 兼容旧接口"""
+        pos = self._positions.get(self.symbol)
+        return pos.pos_short if pos else 0
+
+    @pos_short.setter
+    def pos_short(self, value: int) -> None:
+        """设置空头持仓（主合约）- 兼容旧接口"""
+        pos = self._get_or_create_position(self.symbol)
+        # 默认分配到昨仓
+        pos.pos_short_yd = value
+        pos.pos_short_td = 0
+
+    @property
+    def pos_price(self) -> float:
+        """持仓均价（主合约多头）- 兼容旧接口"""
+        pos = self._positions.get(self.symbol)
+        return pos.avg_price_long if pos else 0.0
+
+    @pos_price.setter
+    def pos_price(self, value: float) -> None:
+        """设置持仓均价（主合约）- 兼容旧接口"""
+        pos = self._get_or_create_position(self.symbol)
+        pos.avg_price_long = value
+        pos.avg_price_short = value
+
+    @property
+    def close_profit(self) -> float:
+        """平仓盈亏（主合约）- 兼容旧接口"""
+        pos = self._positions.get(self.symbol)
+        return pos.close_profit if pos else 0.0
+
+    @close_profit.setter
+    def close_profit(self, value: float) -> None:
+        """设置平仓盈亏（主合约）- 兼容旧接口"""
+        pos = self._get_or_create_position(self.symbol)
+        pos.close_profit = value
 
     async def execute_signal(self) -> None:
         """执行信号（支持锁仓模式）"""
@@ -445,32 +615,40 @@ class BaseStrategy:
             await self._send_order_cmds(cmds)
 
     def _on_cmd_change(self, cmd: OrderCmd):
-        """处理订单状态变化（支持多指令）"""
+        """处理订单状态变化（支持多指令和多合约持仓）"""
         if not cmd.is_finished:
             return
 
         # 等报单指令完成，指令中的成交数量不会变化了，再更新持仓
         if cmd.filled_volume > 0:
-            if cmd.offset == Offset.OPEN:
-                # 开仓指令
-                cost = (
-                    self.pos_long + self.pos_short
-                ) * (self.pos_price or cmd.filled_price) + cmd.filled_volume * cmd.filled_price
-                self.pos_long += cmd.filled_volume if cmd.direction == Direction.BUY else 0
-                self.pos_short += cmd.filled_volume if cmd.direction == Direction.SELL else 0
-                total_pos = self.pos_long + self.pos_short
-                self.pos_price = cost / total_pos if total_pos > 0 else 0
-            elif cmd.offset == Offset.CLOSE:
-                # 平仓指令
-                self.pos_long -= cmd.filled_volume if cmd.direction == Direction.SELL else 0
-                self.pos_short -= cmd.filled_volume if cmd.direction == Direction.BUY else 0
+            # 获取或创建对应合约的持仓对象
+            position = self._get_or_create_position(cmd.symbol)
+
+            # 使用 StrategyPosition 的更新方法
+            position.update_from_trade(
+                direction=cmd.direction,
+                offset=cmd.offset,
+                volume=cmd.filled_volume,
+                price=cmd.filled_price,
+            )
+
+            logger.info(
+                f"策略 [{self.strategy_id}] {cmd.symbol} 持仓更新: "
+                f"方向={cmd.direction.value}, 开平={cmd.offset.value}, "
+                f"数量={cmd.filled_volume}, 价格={cmd.filled_price}, "
+                f"当前持仓 多={position.pos_long}({position.pos_long_td}/{position.pos_long_yd}) "
+                f"空={position.pos_short}({position.pos_short_td}/{position.pos_short_yd})"
+            )
+
+            # 保存到数据库
+            self.save_positions()
 
         if cmd.finish_reason and "报单被拒" in cmd.finish_reason:
             if cmd.offset == Offset.OPEN:
                 self.opening_paused = True
             elif cmd.offset == Offset.CLOSE:
                 self.closing_paused = True
-        
+
         # 从pending列表中移除完成的指令
         if cmd in self._pending_cmds:
             self._pending_cmds.remove(cmd)

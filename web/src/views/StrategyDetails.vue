@@ -179,31 +179,114 @@
           </el-space>
         </el-form-item>
 
-        <el-divider content-position="left">当前持仓状态</el-divider>
+        <el-divider content-position="left">当前持仓</el-divider>
+
+        <!-- 多合约持仓表格（只读） -->
+        <el-table
+          :data="editablePositions"
+          stripe
+          style="margin-bottom: 20px;"
+          v-loading="positionLoading"
+          :empty-text="positionLoading ? '加载中...' : '暂无持仓'"
+        >
+          <el-table-column prop="symbol" label="合约" width="140" />
+          <el-table-column label="多头持仓" width="160">
+            <template #default="{ row }">
+              <span>{{ row.pos_long }} (今{{ row.pos_long_td }}/昨{{ row.pos_long_yd }})</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="空头持仓" width="160">
+            <template #default="{ row }">
+              <span>{{ row.pos_short }} (今{{ row.pos_short_td }}/昨{{ row.pos_short_yd }})</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="多头均价" width="130">
+            <template #default="{ row }">
+              {{ row.avg_price_long?.toFixed(2) || '-' }}
+            </template>
+          </el-table-column>
+          <el-table-column label="空头均价" width="130">
+            <template #default="{ row }">
+              {{ row.avg_price_short?.toFixed(2) || '-' }}
+            </template>
+          </el-table-column>
+          <el-table-column label="平仓盈亏" width="120">
+            <template #default="{ row }">
+              <span :class="row.close_profit > 0 ? 'profit-positive' : row.close_profit < 0 ? 'profit-negative' : ''">
+                {{ row.close_profit?.toFixed(2) || '0.00' }}
+              </span>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" fixed="right">
+            <template #default="{ row, $index }">
+              <el-button type="primary" size="small" text @click="handleEditPosition(row)">编辑</el-button>
+              <el-button type="danger" size="small" text @click="handleDeletePosition(row, $index)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <!-- 添加持仓按钮 -->
+        <el-button type="primary" @click="handleAddPosition" :loading="savePositionLoading">
+          <el-icon><Plus /></el-icon> 添加持仓
+        </el-button>
+      </el-form>
+    </el-card>
+
+    <!-- 添加/编辑持仓对话框 -->
+    <el-dialog
+      v-model="positionDialogVisible"
+      :title="positionDialogTitle"
+      width="600px"
+      :close-on-click-modal="false"
+    >
+      <el-form :model="positionDialogForm" label-width="120px" ref="positionFormRef" :rules="positionFormRules">
+        <el-form-item label="合约代码" prop="symbol">
+          <el-input v-model="positionDialogForm.symbol" placeholder="如: IM2506" :disabled="positionDialogIsEdit" />
+        </el-form-item>
+
+        <el-divider content-position="left">多头持仓</el-divider>
         <el-row :gutter="20">
-          <el-col :span="8">
-            <el-form-item label="多头持仓">
-              <el-input-number v-model="positionForm.pos_long" :min="0" :max="100" />
+          <el-col :span="12">
+            <el-form-item label="今仓">
+              <el-input-number v-model="positionDialogForm.pos_long_td" :min="0" :max="1000" style="width: 100%" />
             </el-form-item>
           </el-col>
-          <el-col :span="8">
-            <el-form-item label="空头持仓">
-              <el-input-number v-model="positionForm.pos_short" :min="0" :max="100" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="持仓均价">
-              <el-input-number v-model="positionForm.pos_price" :min="0" :step="0.1" :precision="2" />
+          <el-col :span="12">
+            <el-form-item label="昨仓">
+              <el-input-number v-model="positionDialogForm.pos_long_yd" :min="0" :max="1000" style="width: 100%" />
             </el-form-item>
           </el-col>
         </el-row>
-        <el-form-item>
-          <el-space>
-            <el-button type="primary" @click="handleSavePosition" :loading="savePositionLoading">保存持仓</el-button>
-          </el-space>
+        <el-form-item label="持仓均价">
+          <el-input-number v-model="positionDialogForm.avg_price_long" :min="0" :step="0.01" :precision="2" style="width: 100%" />
+        </el-form-item>
+
+        <el-divider content-position="left">空头持仓</el-divider>
+        <el-row :gutter="20">
+          <el-col :span="12">
+            <el-form-item label="今仓">
+              <el-input-number v-model="positionDialogForm.pos_short_td" :min="0" :max="1000" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="昨仓">
+              <el-input-number v-model="positionDialogForm.pos_short_yd" :min="0" :max="1000" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-form-item label="持仓均价">
+          <el-input-number v-model="positionDialogForm.avg_price_short" :min="0" :step="0.01" :precision="2" style="width: 100%" />
+        </el-form-item>
+
+        <el-form-item label="平仓盈亏">
+          <el-input-number v-model="positionDialogForm.close_profit" :step="0.01" :precision="2" style="width: 100%" />
+          <div class="form-tip">正数表示盈利，负数表示亏损</div>
         </el-form-item>
       </el-form>
-    </el-card>
+      <template #footer>
+        <el-button @click="positionDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleSavePositionDialog" :loading="savePositionLoading">保存</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 报单指令历史 -->
     <el-card shadow="hover" class="section">
@@ -294,7 +377,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useStore } from '@/stores'
 import { strategyApi } from '@/api'
 
@@ -337,6 +420,13 @@ const positionForm = ref<any>({
   pos_price: null
 })
 
+// 可编辑的持仓列表
+const editablePositions = ref<any[]>([])
+const positionLoading = ref(false)
+
+// 原始持仓数据备份（用于取消编辑）
+const originalPositions = ref<any[]>([])
+
 const orderCmds = ref<any[]>([])
 const orderCmdsLoading = ref(false)
 const orderCmdFilter = ref<'all' | 'active' | 'finished'>('active')
@@ -367,6 +457,25 @@ const orderCmdFormRules = {
   offset: [{ required: true, message: '请选择操作类型', trigger: 'change' }],
   direction: [{ required: true, message: '请选择方向', trigger: 'change' }],
   volume: [{ required: true, message: '请输入手数', trigger: 'blur' }]
+}
+
+// 持仓编辑对话框
+const positionDialogVisible = ref(false)
+const positionDialogTitle = computed(() => positionDialogIsEdit.value ? '编辑持仓' : '添加持仓')
+const positionDialogIsEdit = ref(false)
+const positionFormRef = ref()
+const positionDialogForm = ref({
+  symbol: '',
+  pos_long_td: 0,
+  pos_long_yd: 0,
+  pos_short_td: 0,
+  pos_short_yd: 0,
+  avg_price_long: 0,
+  avg_price_short: 0,
+  close_profit: 0
+})
+const positionFormRules = {
+  symbol: [{ required: true, message: '请输入合约代码', trigger: 'blur' }]
 }
 
 function goBack() {
@@ -450,6 +559,9 @@ async function loadStrategy() {
       pos_short: strategy.value.pos_short || 0,
       pos_price: strategy.value.pos_price || null
     }
+
+    // 初始化可编辑持仓列表
+    initEditablePositions()
   } catch (error: any) {
     ElMessage.error(`加载策略失败: ${error.message}`)
     strategy.value = null
@@ -560,16 +672,141 @@ async function handleSaveSignal() {
   }
 }
 
-async function handleSavePosition() {
+// ==================== 多合约持仓管理 ====================
+
+function initEditablePositions() {
+  // 从策略的 positions 初始化，如果没有则使用主合约持仓创建一个
+  const positions = strategy.value?.positions || []
+
+  if (positions.length > 0) {
+    editablePositions.value = positions.map((p: any) => ({
+      ...p,
+      pos_long: p.pos_long || (p.pos_long_td || 0) + (p.pos_long_yd || 0),
+      pos_short: p.pos_short || (p.pos_short_td || 0) + (p.pos_short_yd || 0),
+      _editing: false
+    }))
+  } else if (strategy.value?.pos_long || strategy.value?.pos_short) {
+    // 兼容旧数据：使用主合约持仓创建一条记录
+    editablePositions.value = [{
+      symbol: strategy.value.params?.symbol || strategy.value.config?.symbol || '',
+      pos_long: strategy.value.pos_long || 0,
+      pos_long_td: strategy.value.pos_long || 0,
+      pos_long_yd: 0,
+      pos_short: strategy.value.pos_short || 0,
+      pos_short_td: strategy.value.pos_short || 0,
+      pos_short_yd: 0,
+      pos_net: (strategy.value.pos_long || 0) - (strategy.value.pos_short || 0),
+      avg_price_long: strategy.value.pos_price || 0,
+      avg_price_short: strategy.value.pos_price || 0,
+      position_profit: 0,
+      close_profit: 0,
+      _editing: false
+    }]
+  } else {
+    editablePositions.value = []
+  }
+
+  // 备份原始数据
+  originalPositions.value = JSON.parse(JSON.stringify(editablePositions.value))
+}
+
+function handleAddPosition() {
+  // 打开添加持仓对话框
+  positionDialogIsEdit.value = false
+  positionDialogForm.value = {
+    symbol: strategy.value?.params?.symbol || strategy.value?.config?.symbol || '',
+    pos_long_td: 0,
+    pos_long_yd: 0,
+    pos_short_td: 0,
+    pos_short_yd: 0,
+    avg_price_long: 0,
+    avg_price_short: 0,
+    close_profit: 0
+  }
+  positionDialogVisible.value = true
+}
+
+function handleEditPosition(row: any) {
+  // 打开编辑持仓对话框
+  positionDialogIsEdit.value = true
+  positionDialogForm.value = {
+    symbol: row.symbol,
+    pos_long_td: row.pos_long_td || 0,
+    pos_long_yd: row.pos_long_yd || 0,
+    pos_short_td: row.pos_short_td || 0,
+    pos_short_yd: row.pos_short_yd || 0,
+    avg_price_long: row.avg_price_long || 0,
+    avg_price_short: row.avg_price_short || 0,
+    close_profit: row.close_profit || 0
+  }
+  positionDialogVisible.value = true
+}
+
+async function handleSavePositionDialog() {
+  await positionFormRef.value?.validate()
   savePositionLoading.value = true
   try {
-    await strategyApi.updateStrategyPosition(strategyId, positionForm.value, store.selectedAccountId || undefined)
-    ElMessage.success('持仓保存成功')
+    // 构建保存的持仓数据
+    const positionData = {
+      symbol: positionDialogForm.value.symbol,
+      pos_long_td: positionDialogForm.value.pos_long_td || 0,
+      pos_long_yd: positionDialogForm.value.pos_long_yd || 0,
+      pos_short_td: positionDialogForm.value.pos_short_td || 0,
+      pos_short_yd: positionDialogForm.value.pos_short_yd || 0,
+      avg_price_long: positionDialogForm.value.avg_price_long || 0,
+      avg_price_short: positionDialogForm.value.avg_price_short || 0,
+      close_profit: positionDialogForm.value.close_profit || 0
+    }
+
+    // 调用 API 保存持仓
+    await strategyApi.updateStrategyPositionDetail(
+      strategyId,
+      positionData,
+      store.selectedAccountId || undefined
+    )
+
+    ElMessage.success(positionDialogIsEdit.value ? '持仓更新成功' : '持仓添加成功')
+    positionDialogVisible.value = false
+
+    // 刷新策略数据
     await loadStrategy()
   } catch (error: any) {
     ElMessage.error(`保存持仓失败: ${error.message}`)
   } finally {
     savePositionLoading.value = false
+  }
+}
+
+async function handleDeletePosition(row: any, index: number) {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除 ${row.symbol || '该合约'} 的持仓吗？`,
+      '确认删除',
+      { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }
+    )
+
+    positionLoading.value = true
+    try {
+      // 调用 API 删除持仓（清空该合约持仓）
+      await strategyApi.deleteStrategyPosition(
+        strategyId,
+        row.symbol,
+        store.selectedAccountId || undefined
+      )
+
+      ElMessage.success('持仓已删除')
+      editablePositions.value.splice(index, 1)
+      originalPositions.value.splice(index, 1)
+
+      // 刷新策略数据
+      await loadStrategy()
+    } catch (error: any) {
+      ElMessage.error(`删除持仓失败: ${error.message}`)
+    } finally {
+      positionLoading.value = false
+    }
+  } catch {
+    // 用户取消
   }
 }
 
@@ -669,5 +906,15 @@ onMounted(async () => {
   font-size: 12px;
   color: var(--el-text-color-secondary);
   margin-top: 4px;
+}
+
+.profit-positive {
+  color: #f56c6c;
+  font-weight: 500;
+}
+
+.profit-negative {
+  color: #67c23a;
+  font-weight: 500;
 }
 </style>

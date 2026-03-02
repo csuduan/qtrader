@@ -79,11 +79,28 @@ export const strategyApi = {
   },
 
   /**
-   * 更新策略持仓（独立接口）
+   * 更新策略持仓详情（单个合约）
    */
-  updateStrategyPosition: async (strategyId: string, position: { pos_long: number, pos_short: number, pos_price: number | null }, accountId?: string): Promise<void> => {
+  updateStrategyPositionDetail: async (strategyId: string, position: {
+    symbol: string
+    pos_long_td: number
+    pos_long_yd: number
+    pos_short_td: number
+    pos_short_yd: number
+    avg_price_long: number
+    avg_price_short: number
+    close_profit: number
+  }, accountId?: string): Promise<void> => {
     const config = accountId ? { params: { account_id: accountId } } : undefined
-    await api.post(`/strategies/${strategyId}/update-position`, position, config)
+    await api.post(`/strategies/${strategyId}/update-position-detail`, position, config)
+  },
+
+  /**
+   * 删除策略持仓（单个合约）
+   */
+  deleteStrategyPosition: async (strategyId: string, symbol: string, accountId?: string): Promise<void> => {
+    const config = accountId ? { params: { account_id: accountId } } : undefined
+    await api.post(`/strategies/${strategyId}/delete-position`, { symbol }, config)
   },
 
   /**

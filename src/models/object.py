@@ -471,3 +471,132 @@ class AlarmData(BaseModel):
     detail: Optional[str] = Field(None, description="告警详情")
     status: str = Field(default="UNCONFIRMED", description="告警状态")
     created_at: DateTime = Field(default_factory=DateTime.now, description="创建时间")
+
+
+class StrategyPosition(BaseModel):
+    """
+    策略仓位数据类
+    支持多合约、区分今昨仓、锁仓模式
+    """
+
+    strategy_id: str = Field(..., description="策略ID")
+    symbol: str = Field(..., description="合约代码")
+    account_id: Optional[str] = Field(None, description="账户ID")
+
+    # 多头持仓
+    pos_long_td: int = Field(default=0, description="多头今仓")
+    pos_long_yd: int = Field(default=0, description="多头昨仓")
+
+    # 空头持仓
+    pos_short_td: int = Field(default=0, description="空头今仓")
+    pos_short_yd: int = Field(default=0, description="空头昨仓")
+
+    # 持仓均价
+    avg_price_long: float = Field(default=0.0, description="多头持仓均价")
+    avg_price_short: float = Field(default=0.0, description="空头持仓均价")
+
+    # 盈亏
+    position_profit: float = Field(default=0.0, description="持仓盈亏")
+    close_profit: float = Field(default=0.0, description="平仓盈亏")
+
+    # 时间戳
+    created_at: Optional[DateTime] = Field(default=None, description="创建时间")
+    updated_at: Optional[DateTime] = Field(default=None, description="更新时间")
+
+    @property
+    def pos_long(self) -> int:
+        """多头总持仓"""
+        return self.pos_long_td + self.pos_long_yd
+
+    @property
+    def pos_short(self) -> int:
+        """空头总持仓"""
+        return self.pos_short_td + self.pos_short_yd
+
+    @property
+    def pos_net(self) -> int:
+        """净持仓"""
+        return self.pos_long - self.pos_short
+
+    @property
+    def total_pos(self) -> int:
+        """总持仓（双向合计）"""
+        return self.pos_long + self.pos_short
+
+    def update_from_trade(
+        self, direction: Direction, offset: Offset, volume: int, price: float
+    ) -> None:
+        """
+        根据成交更新持仓
+
+        Args:
+            direction: 买卖方向
+            offset: 开平类型
+            volume: 成交数量
+            price: 成交价格
+        """
+        if offset == Offset.OPEN:
+            # 开仓：增加对应方向的今仓
+            if direction == Direction.BUY:
+                # 开多：增加多头今仓
+                cost = self.pos_long * self.avg_price_long + volume * price
+                self.pos_long_td += volume
+                self.avg_price_long = cost / self.pos_long if self.pos_long > 0 else 0
+            else:
+                # 开空：增加空头今仓
+                cost = self.pos_short * self.avg_price_short + volume * price
+                self.pos_short_td += volume
+                self.avg_price_short = cost / self.pos_short if self.pos_short > 0 else 0
+        else:
+            # 平仓：减少对应方向的持仓
+            if direction == Direction.SELL:
+                # 平多：优先平昨仓，再平今仓
+                close_yd = min(self.pos_long_yd, volume)
+                close_td = min(self.pos_long_td, volume - close_yd)
+                self.pos_long_yd -= close_yd
+                self.pos_long_td -= close_td
+
+                # 计算平仓盈亏
+                if self.pos_long > 0:
+                    profit = (price - self.avg_price_long) * volume
+                    self.close_profit += profit
+            else:
+                # 平空：优先平昨仓，再平今仓
+                close_yd = min(self.pos_short_yd, volume)
+                close_td = min(self.pos_short_td, volume - close_yd)
+                self.pos_short_yd -= close_yd
+                self.pos_short_td -= close_td
+
+                # 计算平仓盈亏
+                if self.pos_short > 0:
+                    profit = (self.avg_price_short - price) * volume
+                    self.close_profit += profit
+
+        self.updated_at = DateTime.now()
+
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典"""
+        return {
+            "strategy_id": self.strategy_id,
+            "symbol": self.symbol,
+            "account_id": self.account_id,
+            "pos_long": self.pos_long,
+            "pos_long_td": self.pos_long_td,
+            "pos_long_yd": self.pos_long_yd,
+            "pos_short": self.pos_short,
+            "pos_short_td": self.pos_short_td,
+            "pos_short_yd": self.pos_short_yd,
+            "pos_net": self.pos_net,
+            "avg_price_long": self.avg_price_long,
+            "avg_price_short": self.avg_price_short,
+            "position_profit": self.position_profit,
+            "close_profit": self.close_profit,
+        }
+
+    def __repr__(self) -> str:
+        return (
+            f"<StrategyPosition({self.strategy_id}, {self.symbol}, "
+            f"long={self.pos_long}({self.pos_long_td}/{self.pos_long_yd}), "
+            f"short={self.pos_short}({self.pos_short_td}/{self.pos_short_yd}), "
+            f"net={self.pos_net})>"
+        )

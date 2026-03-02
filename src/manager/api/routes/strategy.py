@@ -772,3 +772,89 @@ async def send_strategy_order_cmd(
     except Exception as e:
         logger.error(f"发送策略报单指令失败: {e}")
         return error_response(message=f"发送报单指令失败: {str(e)}")
+
+
+@router.post("/{strategy_id}/update-position-detail")
+async def update_strategy_position_detail(
+    strategy_id: str,
+    position: dict = Body(..., description="持仓详情数据 {symbol, pos_long_td, pos_long_yd, pos_short_td, pos_short_yd, avg_price_long, avg_price_short, close_profit}"),
+    account_id: str = Query(..., description="账户ID"),
+    trading_manager: TradingManager = Depends(get_trading_manager),
+):
+    """
+    更新策略持仓详情（单个合约）
+
+    Args:
+        strategy_id: 策略ID
+        position: 持仓详情数据
+        account_id: 账户ID
+
+    Returns:
+        操作结果
+    """
+    try:
+        trader = trading_manager.get_trader(account_id)
+        if not trader:
+            _handle_trader_not_found(account_id)
+
+        result = await trader.send_request(
+            "update_strategy_position_detail",
+            {"strategy_id": strategy_id, "position": position},
+            timeout=10.0,
+        )
+
+        if result and result.get("success"):
+            return success_response(message=f"策略 {strategy_id} 持仓更新成功")
+        else:
+            return error_response(
+                message=result.get("message", "更新持仓失败") if result else "更新持仓失败"
+            )
+
+    except Exception as e:
+        logger.error(f"更新策略持仓详情失败: {e}")
+        return error_response(message=f"更新持仓详情失败: {str(e)}")
+
+
+@router.post("/{strategy_id}/delete-position")
+async def delete_strategy_position(
+    strategy_id: str,
+    data: dict = Body(..., description="{symbol: 合约代码}"),
+    account_id: str = Query(..., description="账户ID"),
+    trading_manager: TradingManager = Depends(get_trading_manager),
+):
+    """
+    删除策略持仓（清空单个合约持仓）
+
+    Args:
+        strategy_id: 策略ID
+        data: {symbol: 合约代码}
+        account_id: 账户ID
+
+    Returns:
+        操作结果
+    """
+    try:
+        trader = trading_manager.get_trader(account_id)
+        if not trader:
+            _handle_trader_not_found(account_id)
+
+        symbol = data.get("symbol")
+        if not symbol:
+            return error_response(message="合约代码不能为空")
+
+        result = await trader.send_request(
+            "delete_strategy_position",
+            {"strategy_id": strategy_id, "symbol": symbol},
+            timeout=10.0,
+        )
+
+        if result and result.get("success"):
+            return success_response(message=f"策略 {strategy_id} {symbol} 持仓已删除")
+        else:
+            return error_response(
+                message=result.get("message", "删除持仓失败") if result else "删除持仓失败"
+            )
+
+    except Exception as e:
+        logger.error(f"删除策略持仓失败: {e}")
+        return error_response(message=f"删除持仓失败: {str(e)}")

@@ -61,6 +61,7 @@ conda activate qts
 
 # 安装依赖
 pip install -r requirements.txt
+
 ```
 
 ### 2. 配置文件
@@ -122,6 +123,11 @@ npm run dev
 - **Web 界面**: http://localhost:3000
 
 
+## 常见问题
+* 启动报错：locale::facet::_S_create_c_locale name not valid  
+结局方案：安装字符集
+locale-gen zh_CN.GB18030
+
 ## 文档
 
 * 系统文档
@@ -130,6 +136,7 @@ npm run dev
 
 * 参考文档
 - **tqsdk**: https://doc.shinnytech.com/tqsdk/latest/usage/
+
 
 ## 许可证
 

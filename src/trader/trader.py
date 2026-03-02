@@ -678,7 +678,7 @@ class Trader:
         """处理获取策略列表请求"""
         if self.strategy_manager is None:
             return []
-        from src.manager.api.schemas import StrategyRes
+        from src.manager.api.schemas import StrategyPositionRes, StrategyRes
 
         result = []
         for strategy in self.strategy_manager.strategies.values():
@@ -686,6 +686,28 @@ class Trader:
             base_fields = set[str](BaseParam.model_fields.keys())
             ext_params = [p for p in params if p["key"] not in base_fields]
             base_params = [p for p in params if p["key"] in base_fields]
+
+            # 构建多合约持仓列表
+            positions = []
+            for symbol, pos in strategy.get_all_positions().items():
+                if pos.total_pos > 0:  # 只返回有持仓的
+                    positions.append(
+                        StrategyPositionRes(
+                            symbol=symbol,
+                            pos_long=pos.pos_long,
+                            pos_long_td=pos.pos_long_td,
+                            pos_long_yd=pos.pos_long_yd,
+                            pos_short=pos.pos_short,
+                            pos_short_td=pos.pos_short_td,
+                            pos_short_yd=pos.pos_short_yd,
+                            pos_net=pos.pos_net,
+                            avg_price_long=pos.avg_price_long,
+                            avg_price_short=pos.avg_price_short,
+                            position_profit=pos.position_profit,
+                            close_profit=pos.close_profit,
+                        )
+                    )
+
             strategy_res = StrategyRes(
                 strategy_id=strategy.strategy_id,
                 enabled=strategy.enabled,
@@ -700,6 +722,7 @@ class Trader:
                 pos_short=strategy.pos_short,
                 pos_volume=strategy.pos_long - strategy.pos_short,
                 pos_price=strategy.pos_price,
+                positions=positions,
                 trading_status=strategy.get_trading_status(),
             )
             result.append(strategy_res.model_dump())
@@ -710,7 +733,7 @@ class Trader:
         """处理获取指定策略状态请求"""
         if self.strategy_manager is None:
             return None
-        from src.manager.api.schemas import StrategyRes
+        from src.manager.api.schemas import StrategyPositionRes, StrategyRes
 
         strategy_id = data.get("strategy_id")
         if strategy_id and strategy_id in self.strategy_manager.strategies:
@@ -719,6 +742,28 @@ class Trader:
             base_fields = set[str](BaseParam.model_fields.keys())
             ext_params = [p for p in params if p["key"] not in base_fields]
             base_params = [p for p in params if p["key"] in base_fields]
+
+            # 构建多合约持仓列表
+            positions = []
+            for symbol, pos in strategy.get_all_positions().items():
+                if pos.total_pos > 0:  # 只返回有持仓的
+                    positions.append(
+                        StrategyPositionRes(
+                            symbol=symbol,
+                            pos_long=pos.pos_long,
+                            pos_long_td=pos.pos_long_td,
+                            pos_long_yd=pos.pos_long_yd,
+                            pos_short=pos.pos_short,
+                            pos_short_td=pos.pos_short_td,
+                            pos_short_yd=pos.pos_short_yd,
+                            pos_net=pos.pos_net,
+                            avg_price_long=pos.avg_price_long,
+                            avg_price_short=pos.avg_price_short,
+                            position_profit=pos.position_profit,
+                            close_profit=pos.close_profit,
+                        )
+                    )
+
             result = StrategyRes(
                 strategy_id=strategy.strategy_id,
                 enabled=strategy.enabled,
@@ -733,6 +778,7 @@ class Trader:
                 pos_short=strategy.pos_short,
                 pos_volume=strategy.pos_long - strategy.pos_short,
                 pos_price=strategy.pos_price,
+                positions=positions,
                 trading_status=strategy.get_trading_status(),
             )
             return result.model_dump()
@@ -847,6 +893,84 @@ class Trader:
         except Exception as e:
             logger.exception(f"更新策略持仓失败: {e}")
             return {"success": False, "message": f"更新失败: {str(e)}"}
+
+    @request("update_strategy_position_detail")
+    async def _req_update_strategy_position_detail(self, data: dict) -> dict:
+        """处理更新策略持仓详情请求（单个合约）"""
+        if self.strategy_manager is None:
+            return {"success": False, "message": "策略管理器未初始化"}
+
+        strategy_id = data.get("strategy_id")
+        if not strategy_id:
+            return {"success": False, "message": "缺少 strategy_id"}
+
+        strategy = self.strategy_manager.strategies.get(strategy_id)
+        if not strategy:
+            return {"success": False, "message": f"策略 {strategy_id} 不存在"}
+
+        try:
+            position_data = data.get("position", {})
+            symbol = position_data.get("symbol")
+            if not symbol:
+                return {"success": False, "message": "合约代码不能为空"}
+
+            # 获取或创建持仓对象
+            position = strategy._get_or_create_position(symbol)
+
+            # 更新持仓字段
+            position.pos_long_td = position_data.get("pos_long_td", 0)
+            position.pos_long_yd = position_data.get("pos_long_yd", 0)
+            position.pos_short_td = position_data.get("pos_short_td", 0)
+            position.pos_short_yd = position_data.get("pos_short_yd", 0)
+            position.avg_price_long = position_data.get("avg_price_long", 0.0)
+            position.avg_price_short = position_data.get("avg_price_short", 0.0)
+            position.close_profit = position_data.get("close_profit", 0.0)
+
+            # 保存到数据库
+            strategy.save_positions()
+
+            logger.info(f"策略 [{strategy_id}] {symbol} 持仓已更新: 多{position.pos_long} 空{position.pos_short}")
+            return {"success": True, "message": "持仓更新成功"}
+        except Exception as e:
+            logger.exception(f"更新策略持仓详情失败: {e}")
+            return {"success": False, "message": f"更新失败: {str(e)}"}
+
+    @request("delete_strategy_position")
+    async def _req_delete_strategy_position(self, data: dict) -> dict:
+        """处理删除策略持仓请求（清空单个合约持仓）"""
+        if self.strategy_manager is None:
+            return {"success": False, "message": "策略管理器未初始化"}
+
+        strategy_id = data.get("strategy_id")
+        if not strategy_id:
+            return {"success": False, "message": "缺少 strategy_id"}
+
+        strategy = self.strategy_manager.strategies.get(strategy_id)
+        if not strategy:
+            return {"success": False, "message": f"策略 {strategy_id} 不存在"}
+
+        try:
+            symbol = data.get("symbol")
+            if not symbol:
+                return {"success": False, "message": "合约代码不能为空"}
+
+            # 从内存中删除持仓
+            if symbol in strategy._positions:
+                del strategy._positions[symbol]
+
+            # 从数据库中删除持仓
+            if strategy.strategy_manager:
+                account_id = strategy.strategy_manager.trading_engine.account_id if strategy.strategy_manager.trading_engine else None
+                if account_id:
+                    from src.trader.dao.position_dao import StrategyPositionService
+                    service = StrategyPositionService()
+                    service.clear_position(account_id, strategy_id, symbol)
+
+            logger.info(f"策略 [{strategy_id}] {symbol} 持仓已删除")
+            return {"success": True, "message": "持仓已删除"}
+        except Exception as e:
+            logger.exception(f"删除策略持仓失败: {e}")
+            return {"success": False, "message": f"删除失败: {str(e)}"}
 
     @request("set_strategy_trading_status")
     async def _req_set_strategy_trading_status(self, data: dict) -> dict:
