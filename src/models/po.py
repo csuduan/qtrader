@@ -65,6 +65,7 @@ class PositionPo(Base):
     pos_short = Column(Integer, nullable=False, default=0)
     open_price_long = Column(Numeric(20, 4), default=0)
     open_price_short = Column(Numeric(20, 4), default=0)
+    last_price = Column(Numeric(20, 4), default=0)  # 最新价（收盘价）
     float_profit = Column(Numeric(20, 2), default=0)
     margin = Column(Numeric(20, 2), default=0)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)

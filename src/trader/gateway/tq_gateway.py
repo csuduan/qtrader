@@ -311,11 +311,10 @@ class TqGateway(BaseGateway):
                 if not contract:
                     logger.error(f"未获取到合约信息: {s}")
                     continue
-                symbol = contract.exchange.value + "." + contract.symbol
                 if self.api is None:
                     continue
-                quote = self.api.get_quote(symbol)
-                self._quotes[symbol] = quote
+                quote = self.api.get_quote(contract.exchange.value + "." + contract.symbol)
+                self._quotes[contract.symbol] = quote
             logger.info(f"订阅行情: {subscribe_symbols}")
 
             return True
@@ -368,7 +367,7 @@ class TqGateway(BaseGateway):
                 logger.error(f"未获取到合约信息: {req.symbol}")
                 raise Exception(f"未获取到合约信息: {req.symbol}")
 
-            symbol = contract.exchange.value + "." + req.symbol
+            symbol = contract.symbol
             tick_price: float = 0.0
             if req.slip is not None and req.slip > 0 and contract.pricetick is not None:
                 tick_price = contract.pricetick * req.slip
@@ -387,7 +386,7 @@ class TqGateway(BaseGateway):
                     price = quote.bid_price1 - tick_price
 
             order = self.api.insert_order(
-                symbol=symbol,
+                symbol=contract.exchange.value + "." + req.symbol,
                 direction=req.direction.value,
                 offset=req.offset.value,
                 volume=req.volume,
@@ -637,7 +636,7 @@ class TqGateway(BaseGateway):
 
     def _convert_position(self, pos: Position) -> PositionData:
         """转换持仓数据"""
-        return PositionData(
+        position =  PositionData(
             account_id=self.account_id,
             symbol=pos.instrument_id,
             exchange=self._parse_exchange(pos.exchange_id),
@@ -660,6 +659,9 @@ class TqGateway(BaseGateway):
             margin_long=float(pos.margin_long) or 0,
             margin_short=float(pos.margin_short) or 0,
         )
+        if position.symbol in self._quotes:
+            position.last_price = self._quotes[position.symbol].last_price or 0
+        return position
 
     def _convert_order(self, order: Order) -> OrderData:
         """转换订单数据"""

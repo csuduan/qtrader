@@ -52,6 +52,7 @@ class BaseGateway(ABC):
         self.connected: bool = False
         self.trading_day: Optional[str] = None
         self.contracts: Dict[str, ContractData] = {}
+        self.positions: Dict[str, PositionData] = {}
         # 合约更新日期，用于判断是否需要重新查询
         self._contracts_update_date: Optional[str] = None
         logger.info(f"{self.gateway_name} Gateway 初始化完成")

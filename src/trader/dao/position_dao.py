@@ -51,7 +51,7 @@ class StrategyPositionService:
                     existing.pos_short_yd = position.pos_short_yd
                     existing.avg_price_long = position.avg_price_long
                     existing.avg_price_short = position.avg_price_short
-                    existing.position_profit = position.position_profit
+                    existing.position_profit = position.hold_profit
                     existing.close_profit = position.close_profit
                     logger.debug(
                         f"更新策略持仓: {position.account_id}/{position.strategy_id}/{position.symbol}"
@@ -68,7 +68,7 @@ class StrategyPositionService:
                         pos_short_yd=position.pos_short_yd,
                         avg_price_long=position.avg_price_long,
                         avg_price_short=position.avg_price_short,
-                        position_profit=position.position_profit,
+                        position_profit=position.hold_profit,
                         close_profit=position.close_profit,
                     )
                     session.add(po)
@@ -125,7 +125,7 @@ class StrategyPositionService:
                             pos_short_yd=record.pos_short_yd or 0,
                             avg_price_long=float(record.avg_price_long or 0),
                             avg_price_short=float(record.avg_price_short or 0),
-                            position_profit=float(record.position_profit or 0),
+                            hold_profit=float(record.position_profit or 0),
                             close_profit=float(record.close_profit or 0),
                             created_at=record.created_at,
                             updated_at=record.updated_at,
@@ -183,7 +183,7 @@ class StrategyPositionService:
                         pos_short_yd=record.pos_short_yd or 0,
                         avg_price_long=float(record.avg_price_long or 0),
                         avg_price_short=float(record.avg_price_short or 0),
-                        position_profit=float(record.position_profit or 0),
+                        hold_profit=float(record.position_profit or 0),
                         close_profit=float(record.close_profit or 0),
                         created_at=record.created_at,
                         updated_at=record.updated_at,

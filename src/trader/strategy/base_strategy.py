@@ -308,36 +308,6 @@ class BaseStrategy:
             f"空仓={pos.pos_short}({pos.pos_short_td}/{pos.pos_short_yd})"
         )
 
-    def load_positions(self, positions: List[Dict[str, Any]]) -> None:
-        """
-        从数据库加载持仓数据
-
-        Args:
-            positions: 持仓数据列表
-        """
-        self._positions.clear()
-        for pos_data in positions:
-            symbol = pos_data.get("symbol")
-            if not symbol:
-                continue
-            position = StrategyPosition(
-                strategy_id=self.strategy_id,
-                symbol=symbol,
-                account_id=pos_data.get("account_id"),
-                pos_long_td=pos_data.get("pos_long_td", 0),
-                pos_long_yd=pos_data.get("pos_long_yd", 0),
-                pos_short_td=pos_data.get("pos_short_td", 0),
-                pos_short_yd=pos_data.get("pos_short_yd", 0),
-                avg_price_long=pos_data.get("avg_price_long", 0.0),
-                avg_price_short=pos_data.get("avg_price_short", 0.0),
-                position_profit=pos_data.get("position_profit", 0.0),
-                close_profit=pos_data.get("close_profit", 0.0),
-            )
-            self._positions[symbol] = position
-            logger.info(
-                f"策略 [{self.strategy_id}] 加载持仓: {symbol} "
-                f"多仓={position.pos_long}, 空仓={position.pos_short}"
-            )
 
     def save_positions(self) -> None:
         """保存持仓到数据库"""
@@ -347,60 +317,6 @@ class BaseStrategy:
             if position.total_pos > 0:  # 只保存有持仓的记录
                 self.strategy_manager.save_strategy_position(position)
 
-    # ==================== Backward Compatibility Properties ====================
-
-    @property
-    def pos_long(self) -> int:
-        """多头持仓（主合约）- 兼容旧接口"""
-        pos = self._positions.get(self.symbol)
-        return pos.pos_long if pos else 0
-
-    @pos_long.setter
-    def pos_long(self, value: int) -> None:
-        """设置多头持仓（主合约）- 兼容旧接口"""
-        pos = self._get_or_create_position(self.symbol)
-        # 默认分配到昨仓
-        pos.pos_long_yd = value
-        pos.pos_long_td = 0
-
-    @property
-    def pos_short(self) -> int:
-        """空头持仓（主合约）- 兼容旧接口"""
-        pos = self._positions.get(self.symbol)
-        return pos.pos_short if pos else 0
-
-    @pos_short.setter
-    def pos_short(self, value: int) -> None:
-        """设置空头持仓（主合约）- 兼容旧接口"""
-        pos = self._get_or_create_position(self.symbol)
-        # 默认分配到昨仓
-        pos.pos_short_yd = value
-        pos.pos_short_td = 0
-
-    @property
-    def pos_price(self) -> float:
-        """持仓均价（主合约多头）- 兼容旧接口"""
-        pos = self._positions.get(self.symbol)
-        return pos.avg_price_long if pos else 0.0
-
-    @pos_price.setter
-    def pos_price(self, value: float) -> None:
-        """设置持仓均价（主合约）- 兼容旧接口"""
-        pos = self._get_or_create_position(self.symbol)
-        pos.avg_price_long = value
-        pos.avg_price_short = value
-
-    @property
-    def close_profit(self) -> float:
-        """平仓盈亏（主合约）- 兼容旧接口"""
-        pos = self._positions.get(self.symbol)
-        return pos.close_profit if pos else 0.0
-
-    @close_profit.setter
-    def close_profit(self, value: float) -> None:
-        """设置平仓盈亏（主合约）- 兼容旧接口"""
-        pos = self._get_or_create_position(self.symbol)
-        pos.close_profit = value
 
     async def execute_signal(self) -> None:
         """执行信号（支持锁仓模式）"""
@@ -423,17 +339,16 @@ class BaseStrategy:
 
     async def _handle_normal_close(self, signal: Signal) -> None:
         """正常模式平仓处理"""
-        if self._has_pending_open_cmd():
-            # 有未完成的开仓操作，先撤单
-            logger.info(f"策略 [{self.strategy_id}] 有未完成的开仓指令，先取消指令")
-            await self._cancel_pending_cmds()
-            return
-
         if self._has_pending_close_cmd():
             # 已有进行中的平仓指令
             return
 
-        pos = self.pos_long if signal.side == 1 else self.pos_short
+        position = self.get_position(self.symbol)
+        if not position:
+            logger.error(f"策略 [{self.strategy_id}] 未找到持仓信息: {self.symbol}")
+            return
+
+        pos = position.pos_long if signal.side == 1 else position.pos_short
         if pos > 0:
             exit_cmd = OrderCmd(
                 symbol=self.param.symbol,
@@ -450,7 +365,8 @@ class BaseStrategy:
             # 已有进行中的平仓指令
             return
 
-        pos_net = self.pos_long - self.pos_short
+        position = self._get_or_create_position(self.symbol)
+        pos_net = position.pos_net
         if pos_net > 0:
             # 锁仓：净头寸为多，需要开空
             lock_cmd = OrderCmd(
@@ -477,7 +393,8 @@ class BaseStrategy:
         if self._has_pending_cmd():
             return
 
-        pos = self.pos_long if signal.side == 1 else self.pos_short
+        position = self._get_or_create_position(self.symbol)
+        pos = position.pos_long if signal.side == 1 else position.pos_short
         if pos < self.volume:
             entry_cmd = OrderCmd(
                 symbol=self.symbol,
@@ -493,11 +410,11 @@ class BaseStrategy:
         if self._has_pending_cmd():
             return
 
-        position = self.get_position(self.symbol)
+        position = self._get_or_create_position(self.symbol)
         cmds: List[OrderCmd] = []    
 
         if signal.side == 1:
-            pos_net = self.pos_long - self.pos_short
+            pos_net = position.pos_net
             if pos_net > self.volume:
                 #净多超过目标手数了，优先平多(昨)，剩余开空
                 target_volume = pos_net - self.volume
@@ -530,7 +447,7 @@ class BaseStrategy:
             elif pos_net < self.volume:
                 #净多不足目标手数了，优先平空(昨)，剩余开多
                 target_volume = self.volume - pos_net
-                pos_short_yd = min(position.pos_short_yd or 0,self.pos_short) if position else 0
+                pos_short_yd = min(position.pos_short_yd or 0,position.pos_short) if position else 0
                 close_volume  = min(target_volume, pos_short_yd)
                 open_volume = target_volume - close_volume
                 logger.info(f"开多，净多头[{pos_net}]不足目标手数[{self.volume}]，优先平空(昨)[{close_volume}]手，剩余开多[{open_volume}]手")
@@ -555,7 +472,7 @@ class BaseStrategy:
                         )
                     )
         if signal.side == -1:
-            pos_net = self.pos_short - self.pos_long
+            pos_net = -position.pos_net
             if pos_net > self.volume:
                 #净空超过目标手数了，优先平空(昨)，剩余开多
                 target_volume = pos_net - self.volume
@@ -776,17 +693,3 @@ class BaseStrategy:
         self.closing_paused = paused
         status = "暂停" if paused else "恢复"
         logger.info(f"策略 [{self.strategy_id}] 平仓已{status}")
-
-    def get_position(self, symbol: str) -> Optional["PositionData"]:
-        """
-        获取指定合约的持仓信息
-
-        Args:
-            symbol: 合约代码
-
-        Returns:
-            PositionData: 持仓数据，如果不存在则返回None
-        """
-        if self.strategy_manager and self.strategy_manager.trading_engine:
-            return self.strategy_manager.get_position(symbol)
-        return None

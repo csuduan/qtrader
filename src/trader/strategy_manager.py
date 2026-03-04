@@ -259,6 +259,10 @@ class StrategyManager:
         for name, strategy in self.strategies.items():
             if strategy.enabled and strategy.symbol == tick.symbol:
                 try:
+                    # 检查是否有持仓
+                    position = strategy.get_position(tick.symbol)
+                    if position:
+                        position.last_price = tick.last_price
                     await strategy.on_tick(tick)
                 except Exception as e:
                     logger.exception(f"策略 {name} on_tick 失败: {e}")
@@ -319,6 +323,16 @@ class StrategyManager:
         trading_day = self.trading_engine.trading_day
         for strategy in self.strategies.values():
             strategy.init(trading_day)
+    
+    def settle_positions(self) -> None:
+        """结算所有持仓"""
+        for strategy in self.strategies.values():
+            positions = strategy.get_all_positions()
+            for symbol, position in positions.items():
+                if position.pos_long > 0:
+                    position.avg_price_long = position.last_price
+                if position.pos_short > 0:
+                    position.avg_price_short = position.last_price
 
     # ==================== 交易接口 ====================
     async def _insert_order(

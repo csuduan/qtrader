@@ -688,7 +688,7 @@ class Trader:
             base_params = [p for p in params if p["key"] in base_fields]
 
             # 构建多合约持仓列表
-            positions = []
+            positions:list[StrategyPositionRes] = []
             for symbol, pos in strategy.get_all_positions().items():
                 if pos.total_pos > 0:  # 只返回有持仓的
                     positions.append(
@@ -703,7 +703,7 @@ class Trader:
                             pos_net=pos.pos_net,
                             avg_price_long=pos.avg_price_long,
                             avg_price_short=pos.avg_price_short,
-                            position_profit=pos.position_profit,
+                            position_profit=pos.hold_profit,
                             close_profit=pos.close_profit,
                         )
                     )
@@ -718,10 +718,8 @@ class Trader:
                 base_params=base_params,
                 ext_params=ext_params,
                 signal=strategy.get_signal(),
-                pos_long=strategy.pos_long,
-                pos_short=strategy.pos_short,
-                pos_volume=strategy.pos_long - strategy.pos_short,
-                pos_price=strategy.pos_price,
+                pos_long=sum(pos.pos_long for pos in positions),
+                pos_short=sum(pos.pos_short for pos in positions),
                 positions=positions,
                 trading_status=strategy.get_trading_status(),
             )
@@ -744,7 +742,7 @@ class Trader:
             base_params = [p for p in params if p["key"] in base_fields]
 
             # 构建多合约持仓列表
-            positions = []
+            positions:list[StrategyPositionRes] = []
             for symbol, pos in strategy.get_all_positions().items():
                 if pos.total_pos > 0:  # 只返回有持仓的
                     positions.append(
@@ -759,7 +757,7 @@ class Trader:
                             pos_net=pos.pos_net,
                             avg_price_long=pos.avg_price_long,
                             avg_price_short=pos.avg_price_short,
-                            position_profit=pos.position_profit,
+                            position_profit=pos.hold_profit,
                             close_profit=pos.close_profit,
                         )
                     )
@@ -774,10 +772,8 @@ class Trader:
                 base_params=base_params,
                 ext_params=ext_params,
                 signal=strategy.get_signal(),
-                pos_long=strategy.pos_long,
-                pos_short=strategy.pos_short,
-                pos_volume=strategy.pos_long - strategy.pos_short,
-                pos_price=strategy.pos_price,
+                pos_long=sum(pos.pos_long for pos in positions),
+                pos_short=sum(pos.pos_short for pos in positions),
                 positions=positions,
                 trading_status=strategy.get_trading_status(),
             )

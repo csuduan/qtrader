@@ -596,7 +596,7 @@ class CtpGateway(BaseGateway):
 
     def _update_hold_profit(self, tick: TickData) -> None:
         """
-        根据最新行情更新持仓盈亏
+        根据最新行情更新持仓盈亏和最新价
 
         Args:
             tick: 最新tick数据
@@ -610,6 +610,9 @@ class CtpGateway(BaseGateway):
         last_price = tick.last_price
         hold_price_long = position.hold_price_long or 0.0
         hold_price_short = position.hold_price_short or 0.0
+
+        # 更新最新价
+        position.last_price = last_price
 
         # 更新多头浮动盈亏
         if position.pos_long > 0:

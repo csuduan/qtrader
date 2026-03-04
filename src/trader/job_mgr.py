@@ -479,8 +479,10 @@ class JobManager:
         处理项：
         1. 导出持仓到 CSV（使用现有的 post_market_export）
         2. 确保交易记录持久化（事件驱动已自动完成）
-        3. 持久化策略持仓状态（占位功能）
+        3. 更新持仓均价为收盘价
+        4. 持久化策略持仓状态
         """
+        from src.app_context import get_app_context
         logger.info("开始执行收盘处理任务")
 
         try:
@@ -490,13 +492,19 @@ class JobManager:
             # 2. 确保交易记录持久化（事件驱动已自动完成）
             logger.info("交易记录由事件驱动自动持久化，无需额外处理")
 
-            # 3. 持久化策略持仓状态（占位功能）
+            # 3. 策略持仓结算
+            app_context = get_app_context()
+            strategy_manager: StrategyManager = app_context.get_strategy_manager()
+            strategy_manager.settle_positions()
+
+            # 4. 持久化策略持仓状态     
             await self._persist_strategy_positions()
 
             logger.info("收盘处理任务完成")
 
         except Exception as e:
             logger.exception(f"收盘处理任务执行失败: {e}")
+
 
     async def _persist_strategy_positions(self) -> None:
         """

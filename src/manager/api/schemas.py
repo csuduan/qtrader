@@ -235,12 +235,8 @@ class StrategyRes(BaseModel):
     ext_params: List = []  # 扩展参数定义
     # 信号信息（从策略的get_signal()获取）
     signal: dict | None = None
-    # 持仓信息（区分多头和空头）- 主合约持仓，保持兼容
-    pos_long: int = 0  # 多头持仓量
-    pos_short: int = 0  # 空头持仓量
-    pos_price: Optional[float] = None  # 持仓均价
-    # 保留旧字段以兼容前端（net position）
-    pos_volume: int = 0  # 净持仓量（pos_long - pos_short）
+    pos_long: int = 0  # 总多头持仓量
+    pos_short: int = 0  # 总空头持仓量
     # 多合约持仓详情（新增）
     positions: List[StrategyPositionRes] = []  # 所有合约持仓
     trading_status: str | None = None

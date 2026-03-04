@@ -339,9 +339,15 @@ class PositionData(BaseModel):
 
     # 账号标识（多账号支持）
     account_id: Optional[str] = Field(None, description="账户ID")
+    last_price: Optional[float] = Field(None, description="最新价格")
 
     # 扩展字段
     extras: Dict[str, Any] = Field(default_factory=dict)
+
+    def update_price(self, last_price: float):
+        """更新最新价格"""
+        self.last_price = last_price
+
 
 
 class AccountData(BaseModel):
@@ -496,8 +502,11 @@ class StrategyPosition(BaseModel):
     avg_price_short: float = Field(default=0.0, description="空头持仓均价")
 
     # 盈亏
-    position_profit: float = Field(default=0.0, description="持仓盈亏")
+    hold_profit: float = Field(default=0.0, description="持仓盈亏")
     close_profit: float = Field(default=0.0, description="平仓盈亏")
+
+    # 最新价
+    last_price: float = Field(default=0.0, description="最新价格")
 
     # 时间戳
     created_at: Optional[DateTime] = Field(default=None, description="创建时间")
@@ -589,7 +598,7 @@ class StrategyPosition(BaseModel):
             "pos_net": self.pos_net,
             "avg_price_long": self.avg_price_long,
             "avg_price_short": self.avg_price_short,
-            "position_profit": self.position_profit,
+            "position_profit": self.hold_profit,
             "close_profit": self.close_profit,
         }
 
