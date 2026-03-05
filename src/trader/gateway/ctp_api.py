@@ -15,9 +15,17 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from xxlimited import Str
+from src.app_context import get_app_context
+from src.utils.config_loader import TraderConfig
 
-from openctp_ctp import mdapi, tdapi
-from tqsdk.ins_schema import cont
+ctx = get_app_context()
+config:TraderConfig =ctx.get_config()
+
+ctp_type = config.gateway.broker.type
+if ctp_type == "rohon":
+    from pyctp.rohon import mdapi, tdapi
+else:
+    from pyctp.ctp import mdapi, tdapi
 
 from src.models.object import (
     AccountData,

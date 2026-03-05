@@ -345,20 +345,25 @@ class RsiStrategy(BaseStrategy):
         Returns:
             退出原因 ("TP"/"SL"/None)
         """
+        
         open_price = self.pos_price or signal.entry_price or current_price
         if signal.side == 1:
             # 多头仓位
             profit_pct = (current_price - open_price) / open_price
             if profit_pct >= self.param.take_profit_pct:
+                logger.info(f"策略 [{self.strategy_id}] 多头止盈:  当前价格={current_price:.2f}, 开仓价格={open_price:.2f}, 盈利率={profit_pct:.2}")
                 return "TP"
             if profit_pct <= -self.param.stop_loss_pct:
+                logger.info(f"策略 [{self.strategy_id}] 多头止损:  当前价格={current_price:.2f}, 开仓价格={open_price:.2f}, 亏损率={profit_pct:.2}")
                 return "SL"
         else:
             # 空头仓位
             profit_pct = (open_price - current_price) / open_price
             if profit_pct >= self.param.take_profit_pct:
+                logger.info(f"策略 [{self.strategy_id}] 空头止盈:  当前价格={current_price:.2f}, 开仓价格={open_price:.2f}, 盈利率={profit_pct:.2}")
                 return "TP"
             if profit_pct <= -self.param.stop_loss_pct:
+                logger.info(f"策略 [{self.strategy_id}] 空头止损:  当前价格={current_price:.2f}, 开仓价格={open_price:.2f}, 亏损率={profit_pct:.2}")
                 return "SL"
 
         return None
