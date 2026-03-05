@@ -346,7 +346,7 @@ class RsiStrategy(BaseStrategy):
             退出原因 ("TP"/"SL"/None)
         """
         
-        open_price = self.pos_price or signal.entry_price or current_price
+        open_price = signal.entry_price or current_price
         if signal.side == 1:
             # 多头仓位
             profit_pct = (current_price - open_price) / open_price
