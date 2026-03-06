@@ -9,7 +9,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from src.app_context import get_app_context
 from src.models.po import AlarmPo as AlarmModel
+from src.trader.dao.position_dao import StrategyPositionService
 from src.trader.strategy_manager import StrategyManager
 from src.trader.switch_mgr import SwitchPosManager
 from src.trader.trading_engine import TradingEngine
@@ -511,75 +513,35 @@ class JobManager:
         持久化策略持仓状态
 
         获取所有策略的持仓信息并保存到数据库
-        保存字段：交易日、策略编号、多头、空头、持仓均价、更新时间
-
-        注：这是占位功能，实际数据结构和持久化方式待完善
+        结算后今仓变昨仓，持仓均价更新为收盘价
         """
         try:
-            from src.app_context import get_app_context
-
             ctx = get_app_context()
             strategy_manager: StrategyManager = ctx.get_strategy_manager()
-
             if not strategy_manager:
                 logger.warning("策略管理器未初始化，跳过策略持仓持久化")
                 return
 
-            session = get_session()
-            if not session:
-                logger.warning("无法获取数据库会话，跳过策略持仓持久化")
-                return
+            # 持久化服务
+            position_service = StrategyPositionService()
+            persist_count = 0
 
-            try:
-                from datetime import date
-
-                from src.models.po import StrategyPositionPo
-
-                today = date.today()
-                trading_date_str = today.strftime("%Y-%m-%d")
-
-                persist_count = 0
-                for strategy_id, strategy in strategy_manager.strategies.items():
-                    if not strategy.enabled:
+            for strategy_id, strategy in strategy_manager.strategies.items():
+                if not strategy.enabled:
+                    continue
+                # 遍历策略的所有合约持仓
+                for symbol, position in strategy.get_all_positions().items():
+                    if position.total_pos <= 0:
                         continue
+                    # 设置 account_id
+                    position.account_id = self.config.account_id
+                    # 使用服务保存
+                    if position_service.save_position(position):
+                        persist_count += 1
 
-                    # 检查是否已有今日记录
-                    existing = (
-                        session.query(StrategyPositionPo)
-                        .filter(
-                            StrategyPositionPo.account_id == self.config.account_id,
-                            StrategyPositionPo.trading_date == trading_date_str,
-                            StrategyPositionPo.strategy_id == strategy_id,
-                        )
-                        .first()
-                    )
-
-                    pos_data = {
-                        "account_id": self.config.account_id,
-                        "trading_date": trading_date_str,
-                        "strategy_id": strategy_id,
-                        "long_volume": strategy.pos_long,
-                        "short_volume": strategy.pos_short,
-                        "avg_price": strategy.pos_price,
-                    }
-
-                    if existing:
-                        # 更新现有记录
-                        existing.long_volume = pos_data["long_volume"]
-                        existing.short_volume = pos_data["short_volume"]
-                        existing.avg_price = pos_data["avg_price"]
-                    else:
-                        # 创建新记录
-                        new_record = StrategyPositionPo(**pos_data)
-                        session.add(new_record)
-
-                    persist_count += 1
-
-                session.commit()
-                logger.info(f"已持久化 {persist_count} 个策略的持仓状态")
-
-            finally:
-                session.close()
-
+            if persist_count > 0:
+                logger.info(f"已持久化 {persist_count} 条策略持仓记录")
+            else:
+                logger.info("没有需要持久化的策略持仓")
         except Exception as e:
-            logger.warning(f"持久化策略持仓失败: {e}")
+            logger.exception(f"持久化策略持仓失败: {e}")
