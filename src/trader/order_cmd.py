@@ -205,7 +205,7 @@ class OrderCmd:
         """拆单"""
         self._strategy = SimpleSplitStrategy(self)
         count = self._strategy.split(pos)
-        self._left_retry_times = 2 * count + 1
+        self._left_retry_times = max(2 * count + 1,5)
 
     def _load_next_split_order(self) -> Optional[SplitOrder]:
         """加载下一个拆单"""
@@ -261,7 +261,8 @@ class OrderCmd:
             insert_time = self._pending_order.insert_time
             if insert_time is not None:
                 elapsed = now - insert_time
-                if elapsed.total_seconds() >= self.order_timeout:
+                # 当前报单已超时且剩余次数>0,撤单
+                if elapsed.total_seconds() >= self.order_timeout and self._left_retry_times > 0:
                     return self._pending_order
 
         # 重试处理

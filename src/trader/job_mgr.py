@@ -166,7 +166,7 @@ class JobManager:
         """测试日志任务（每5秒执行）"""
         logger.info("这是一条测试日志 - 定时任务运行中")
 
-    async def execute_position_rotation(self, instruction: Optional[str] = "") -> None:
+    async def auto_rotation(self, instruction: Optional[str] = "") -> None:
         """执行换仓操作"""
         logger.info("开始执行换仓任务")
         try:
@@ -221,7 +221,7 @@ class JobManager:
         strategy_manager: StrategyManager = ctx.get_strategy_manager()
         logger.info("开始重置所有策略")
         try:
-            strategy_manager.reset_all_for_new_day()
+            strategy_manager.reset_strategies()
             logger.info("所有策略已重置")
         except Exception as e:
             logger.exception(f"重置策略失败: {e}")

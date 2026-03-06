@@ -129,14 +129,6 @@ export const strategyApi = {
   },
 
   /**
-   * 重载策略参数
-   */
-  reloadStrategyParams: async (strategyId: string, accountId?: string): Promise<any> => {
-    const config = accountId ? { params: { account_id: accountId } } : undefined
-    return api.post<any>(`/strategies/${strategyId}/reload-params`, null, config)
-  },
-
-  /**
    * 初始化策略
    */
   initStrategy: async (strategyId: string, accountId?: string): Promise<void> => {

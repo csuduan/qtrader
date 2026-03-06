@@ -161,7 +161,8 @@ class TaskScheduler:
             Callable: 执行函数
         """
         # 去掉前缀下划线
-        method_name = job_method.lstrip("_")
+        #method_name = job_method.lstrip("_")
+        method_name = job_method.strip()
 
         # 优先从 JobManager 获取
         job_func = getattr(self.job_manager, method_name, None)

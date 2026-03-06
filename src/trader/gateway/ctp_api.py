@@ -113,6 +113,22 @@ PRODUCT_CTP2VT = {
 # CTP 常用常量
 MIN_VOLUME = 1
 
+error_msg = [
+            "拒绝",
+            "取消",
+            "不足",
+            "暂停",
+            "禁止",
+            "错误",
+            "闭市",
+            "未连接",
+            "最小单位",
+            "失败",
+            "不",
+            "超过",
+            "没有",
+]
+
 
 def adjust_price(price: float, max_value: float = 1e308) -> float:
     """调整异常价格（CTP 无效价格转换为 0）"""
@@ -767,6 +783,9 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
         if not order:
             logger.warning(f"CTP 找不到订单: {order_ref}")
             return
+
+        if pOrder.StatusMsg and pOrder.StatusMsg in error_msg:
+            status = OrderStatus.REJECTED
 
         order.status = status
         order.status_msg = pOrder.StatusMsg

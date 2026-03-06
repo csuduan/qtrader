@@ -142,6 +142,11 @@ class BaseStrategy:
         self.signal = None
         self.trading_day = trading_day
 
+        # 重新加载参数文件（TTLCache会自动处理过期）
+        if self.strategy_manager:
+            from src.trader.strategy_manager import load_strategy_params
+            load_strategy_params(self.config, self.strategy_id)
+
         # 解析参数
         if self.config.params:
             self.param = BaseParam.model_validate(self.config.params)
@@ -418,8 +423,7 @@ class BaseStrategy:
             if pos_net > self.volume:
                 #净多超过目标手数了，优先平多(昨)，剩余开空
                 target_volume = pos_net - self.volume
-                pos_long_yd = min(position.pos_long_yd or 0,self.pos_long) if position else 0
-                close_volume  = min(target_volume, pos_long_yd)
+                close_volume  = min(target_volume, position.pos_long_yd)
                 open_volume = target_volume - close_volume
                 logger.info(f"开多，净多头[{pos_net}]超过目标手数[{self.volume}]，优先平多(昨)[{close_volume}]手，剩余开空[{open_volume}]手")
                 if close_volume >0:
@@ -447,8 +451,7 @@ class BaseStrategy:
             elif pos_net < self.volume:
                 #净多不足目标手数了，优先平空(昨)，剩余开多
                 target_volume = self.volume - pos_net
-                pos_short_yd = min(position.pos_short_yd or 0,position.pos_short) if position else 0
-                close_volume  = min(target_volume, pos_short_yd)
+                close_volume  = min(target_volume, position.pos_short_yd)
                 open_volume = target_volume - close_volume
                 logger.info(f"开多，净多头[{pos_net}]不足目标手数[{self.volume}]，优先平空(昨)[{close_volume}]手，剩余开多[{open_volume}]手")
                 if close_volume >0:
@@ -476,8 +479,7 @@ class BaseStrategy:
             if pos_net > self.volume:
                 #净空超过目标手数了，优先平空(昨)，剩余开多
                 target_volume = pos_net - self.volume
-                pos_short_yd = min(position.pos_short_yd or 0,self.pos_short) if position else 0
-                close_volume  = min(target_volume, pos_short_yd)
+                close_volume  = min(target_volume, position.pos_short_yd)
                 open_volume = target_volume - close_volume
                 logger.info(f"开空，净空头[{pos_net}]超过目标手数[{self.volume}]，优先平空(昨)[{close_volume}]手，剩余开多[{open_volume}]手")
                 if close_volume >0:
@@ -503,8 +505,7 @@ class BaseStrategy:
             elif pos_net < self.volume:
                 #净空不足目标手数了，优先平多(昨)，剩余开空
                 target_volume = self.volume - pos_net
-                pos_long_yd = min(position.pos_long_yd or 0,self.pos_long) if position else 0
-                close_volume  = min(target_volume, pos_long_yd)
+                close_volume  = min(target_volume, position.pos_long_yd)
                 open_volume = target_volume - close_volume
                 logger.info(f"开空，净空头[{pos_net}]不足目标手数[{self.volume}]，优先平多(昨)[{close_volume}]手，剩余开空[{open_volume}]手")
                 if close_volume >0:

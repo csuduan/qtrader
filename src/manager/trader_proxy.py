@@ -1002,30 +1002,6 @@ class TraderProxy:
             logger.error(f"TraderProxy [{self.account_id}] 禁用策略请求失败: {e}")
             return {"success": False, "message": f"请求失败: {str(e)}"}
 
-    async def reload_strategy_params(self, strategy_id: str) -> dict:
-        """
-        重载策略参数
-        从配置文件重新加载策略参数
-
-        Args:
-            strategy_id: 策略ID
-
-        Returns:
-            操作结果
-        """
-        if not self.socket_client or not self.socket_client.is_connected():
-            logger.error(f"TraderProxy [{self.account_id}] 未连接到Trader，无法发送请求")
-            return {"success": False, "message": "未连接"}
-
-        try:
-            response = await self.socket_client.request(
-                "reload_strategy_params", {"strategy_id": strategy_id}, timeout=10.0
-            )
-            return response or {"success": False, "message": "无响应"}
-        except Exception as e:
-            logger.error(f"TraderProxy [{self.account_id}] 重载策略参数请求失败: {e}")
-            return {"success": False, "message": f"请求失败: {str(e)}"}
-
     async def init_strategy(self, strategy_id: str) -> dict:
         """
         初始化策略

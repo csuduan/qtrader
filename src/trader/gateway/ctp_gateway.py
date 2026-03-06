@@ -156,10 +156,14 @@ class CtpGateway(BaseGateway):
             logger.warning(f"CTP 下单失败，未找到合约信息，合约: {req.symbol}")
             raise ValueError(f"未找到合约信息，合约: {req.symbol}")
         req.exchange = contract.exchange
+        tick_price: float = 0.0
+        if req.slip is not None and req.slip > 0 and contract.pricetick is not None:
+            tick_price = contract.pricetick * req.slip
+
         if not req.price or req.price <= 0:
             tick = self._quotes.get(req.symbol)
             if tick and tick.last_price is not None and tick.last_price > 0:
-                req.price = tick.bid_price1 if req.direction == Direction.BUY else tick.ask_price1
+                req.price = tick.bid_price1 +tick_price if req.direction == Direction.BUY else tick.ask_price1 - tick_price
             else:
                 logger.warning(f"CTP 下单失败，未获取到有效价格，合约: {req.symbol}")
                 raise ValueError(f"未获取到有效价格，合约: {req.symbol}")

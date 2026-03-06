@@ -98,7 +98,6 @@
         <el-form-item>
           <el-space>
             <el-button type="primary" @click="handleSaveParams" :loading="saveLoading">保存参数</el-button>
-            <el-button @click="handleReloadParams" :loading="actionLoading">重载参数</el-button>
             <el-button @click="handleInitStrategy" :loading="actionLoading">初始化策略</el-button>
           </el-space>
         </el-form-item>
@@ -615,19 +614,6 @@ async function handleTradingStatusChange() {
   } catch (error: any) {
     ElMessage.error(`更新交易状态失败: ${error.message}`)
     await loadStrategy()
-  } finally {
-    actionLoading.value = false
-  }
-}
-
-async function handleReloadParams() {
-  actionLoading.value = true
-  try {
-    await strategyApi.reloadStrategyParams(strategyId, store.selectedAccountId || undefined)
-    ElMessage.success('参数重载成功')
-    await loadStrategy()
-  } catch (error: any) {
-    ElMessage.error(`重载参数失败: ${error.message}`)
   } finally {
     actionLoading.value = false
   }

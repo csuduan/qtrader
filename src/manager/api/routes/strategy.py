@@ -601,33 +601,6 @@ async def disable_strategy(
         return error_response(message=f"禁用策略失败: {str(e)}")
 
 
-@router.post("/{strategy_id}/reload-params")
-async def reload_strategy_params(
-    strategy_id: str,
-    account_id: str = Query(..., description="账户ID"),
-    trading_manager: TradingManager = Depends(get_trading_manager),
-):
-    """
-    重载策略参数
-    从配置文件重新加载策略参数
-    """
-    try:
-        trader = trading_manager.get_trader(account_id)
-        if not trader:
-            _handle_trader_not_found(account_id)
-
-        result = await trader.reload_strategy_params(strategy_id)
-        if result.get("success"):
-            return success_response(
-                message=f"策略 {strategy_id} 参数重载成功", data=result.get("params")
-            )
-        else:
-            return error_response(message=result.get("message", "重载参数失败"))
-    except Exception as e:
-        logger.error(f"重载策略参数失败: {e}")
-        return error_response(message=f"重载参数失败: {str(e)}")
-
-
 @router.post("/{strategy_id}/init")
 async def init_strategy(
     strategy_id: str,

@@ -1044,38 +1044,6 @@ class Trader:
             logger.exception(f"禁用策略失败: {e}")
             return {"success": False, "message": f"操作失败: {str(e)}"}
 
-    @request("reload_strategy_params")
-    async def _req_reload_strategy_params(self, data: dict) -> dict:
-        """
-        处理重载策略参数请求
-        从配置文件重新加载策略参数
-        """
-        if self.strategy_manager is None:
-            return {"success": False, "message": "策略管理器未初始化"}
-
-        strategy_id = data.get("strategy_id")
-        if not strategy_id:
-            return {"success": False, "message": "缺少 strategy_id"}
-
-        strategy = self.strategy_manager.strategies.get(strategy_id)
-        if not strategy:
-            return {"success": False, "message": f"策略 {strategy_id} 不存在"}
-
-        try:
-            from src.trader.strategy_manager import load_strategy_params
-
-            # 从配置文件重新加载参数
-            new_params = load_strategy_params(strategy.config, strategy_id)
-            if new_params:
-                strategy.update_params(new_params)
-                logger.info(f"策略 [{strategy_id}] 参数已重载: {new_params}")
-                return {"success": True, "message": "参数重载成功", "params": new_params}
-            else:
-                return {"success": False, "message": "未找到参数配置"}
-        except Exception as e:
-            logger.exception(f"重载策略参数失败: {e}")
-            return {"success": False, "message": f"操作失败: {str(e)}"}
-
     @request("init_strategy")
     async def _req_init_strategy(self, data: dict) -> dict:
         """
@@ -1089,17 +1057,13 @@ class Trader:
         if not strategy_id:
             return {"success": False, "message": "缺少 strategy_id"}
 
-        strategy = self.strategy_manager.strategies.get(strategy_id)
-        if not strategy:
-            return {"success": False, "message": f"策略 {strategy_id} 不存在"}
-
         try:
-            result = strategy.init(self.trading_engine.trading_day)
-            if result:
-                logger.info(f"策略 [{strategy_id}] 初始化成功")
-                return {"success": True, "message": "策略初始化成功"}
-            else:
-                return {"success": False, "message": "策略初始化失败"}
+            strategy = self.strategy_manager.strategies.get(strategy_id)
+            if not strategy:
+                return {"success": False, "message": f"策略 {strategy_id} 不存在"}
+            self.strategy_manager.init_strategy(strategy)
+            logger.info(f"策略 [{strategy_id}] 初始化成功")
+            return {"success": True, "message": "策略初始化成功"}
         except Exception as e:
             logger.exception(f"初始化策略失败: {e}")
             return {"success": False, "message": f"操作失败: {str(e)}"}

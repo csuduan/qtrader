@@ -9,6 +9,8 @@ import os
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
+from cachetools import TTLCache
+
 from src.app_context import get_app_context
 from src.models.object import (
     BarData,
@@ -34,12 +36,12 @@ ctx = get_app_context()
 
 logger = get_logger(__name__)
 
-# 全局CSV缓存：{csv_path: {strategy_id: params_dict}}
-_csv_cache: Dict[str, Dict[str, dict]] = {}
+# 全局CSV缓存：TTLCache，默认1分钟过期，最多存储100个文件
+_csv_cache: TTLCache = TTLCache(maxsize=100, ttl=60)
 
 
 def load_csv_file(csv_path: str) -> Dict[str, dict]:
-    """加载CSV文件到缓存"""
+    """加载CSV文件到缓存（使用TTLCache自动过期）"""
     if csv_path in _csv_cache:
         return _csv_cache[csv_path]
 
@@ -67,7 +69,7 @@ def load_strategy_params(config: StrategyConfig, strategy_id: str) -> dict:
     加载策略参数
 
     Args:
-        yaml_config: 从YAML加载的策略配置
+        config: 策略配置对象
         strategy_id: 策略ID
 
     Returns:
@@ -87,7 +89,7 @@ def load_strategy_params(config: StrategyConfig, strategy_id: str) -> dict:
     app_config = get_app_context().get_config()
     csv_path = os.path.join(app_config.paths.params, params_file)
 
-    # 加载CSV参数
+    # 加载CSV参数（使用TTLCache自动过期，默认5分钟）
     csv_data = load_csv_file(csv_path)
     csv_params = csv_data.get(strategy_id, {})
     if not csv_params:
@@ -150,35 +152,30 @@ class StrategyManager:
         from src.trader.strategy import get_strategy_class
 
         # 获取账户ID
-        account_id = self._get_account_id()
-
+        account_id = ctx.get_config().account_id
         for name, config in self.strategies_configs.items():
             if not config.enabled:
                 logger.info(f"策略 {name} 未启用，跳过")
                 continue
-
-            strategy_type = config.type
-            strategy_class = get_strategy_class(strategy_type)
-            if strategy_class is None:
-                logger.warning(f"未找到策略类: {strategy_type}")
-                continue
-
-            # 加载参数（YAML默认参数 + CSV覆盖）
-            load_strategy_params(config, name)
-
-            # 创建策略实例
             try:
+                #创建策略
+                strategy_type = config.type
+                strategy_class = get_strategy_class(strategy_type)
+                if strategy_class is None:
+                    logger.warning(f"未找到策略类: {strategy_type}")
+                    continue
                 strategy: BaseStrategy = strategy_class(name, config)
                 strategy.strategy_manager = self
                 self.strategies[name] = strategy
-                strategy.init(self.trading_engine.trading_day)
+
+                #初始化策略
+                self.init_strategy(strategy)
 
                 # 从数据库加载策略持仓
-                if account_id:
-                    positions = self._position_service.load_positions(account_id, name)
-                    if positions:
-                        strategy.init_positions(positions)
-                        logger.info(f"策略 {name} 加载了 {len(positions)} 个合约的持仓")
+                positions = self._position_service.load_positions(account_id, name)
+                if positions:
+                    strategy.init_positions(positions)
+                    logger.info(f"策略 {name} 加载了 {len(positions)} 个合约的持仓")
 
                 logger.info(f"添加策略: {name}")
 
@@ -189,6 +186,14 @@ class StrategyManager:
                     strategy.bar_subscriptions.append(f"{symbol}-{config.bar}")
             except Exception as e:
                 logger.exception(f"创建策略 {name} 失败: {e}", exc_info=True)
+
+    
+    def init_strategy(self, strategy: BaseStrategy) -> None:
+        """初始化策略"""
+        if strategy:
+            # 重新加载参数
+            load_strategy_params(strategy.config, strategy.strategy_id)
+            strategy.init(self.trading_engine.trading_day)
 
     def _get_account_id(self) -> Optional[str]:
         """获取当前账户ID"""
@@ -318,11 +323,11 @@ class StrategyManager:
             self.trading_engine.subscribe_bars(symbol, interval)
         return True
 
-    def reset_all_for_new_day(self) -> None:
+    def reset_strategies(self) -> None:
         """重置所有策略状态"""
         trading_day = self.trading_engine.trading_day
         for strategy in self.strategies.values():
-            strategy.init(trading_day)
+            self.init_strategy(strategy)
     
     def settle_positions(self) -> None:
         """结算所有持仓"""
@@ -331,8 +336,12 @@ class StrategyManager:
             for symbol, position in positions.items():
                 if position.pos_long > 0:
                     position.avg_price_long = position.last_price
+                    position.pos_long_yd = position.pos_long
+                    position.pos_long_td = 0
                 if position.pos_short > 0:
                     position.avg_price_short = position.last_price
+                    position.pos_short_yd = position.pos_short
+                    position.pos_short_td = 0
 
     # ==================== 交易接口 ====================
     async def _insert_order(
