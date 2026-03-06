@@ -182,7 +182,21 @@ class CtpGateway(BaseGateway):
 
     def get_account(self) -> Optional[AccountData]:
         """获取账户数据"""
-        return self._account
+        if self._account :
+            return self._account
+        
+        default_account = AccountData(
+            account_id=self.account_id,
+            currency="CNY",
+            balance=0.0,
+            frozen_balance=0.0,
+            available=0.0,
+            gateway_connected=False,
+            user_id=self.config.broker.user_id or "--",
+            broker_name = self.config.broker.broker_name or "--",
+            broker_type=self.config.broker.type or "--",
+        )
+        return default_account
 
     def get_positions(self) -> Dict[str, PositionData]:
         """获取持仓数据"""
