@@ -41,6 +41,7 @@ env/
 
 # 数据文件
 data/*
+logs
 
 # Claude
 .claude/

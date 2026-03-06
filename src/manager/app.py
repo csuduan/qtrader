@@ -41,6 +41,9 @@ ctx = get_app_context()
 _app_config = get_config_loader().load_config()
 ctx.set(AppContext.KEY_CONFIG, _app_config)
 
+# Manager PID 文件路径
+_manager_pid_file: Optional[Path] = None
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -280,17 +283,107 @@ def _register_routes(app: FastAPI) -> None:
     logger.info(f"动态注册完成，共注册 {registered_count} 个路由模块")
 
 
+def _check_manager_pid(socket_dir: str) -> bool:
+    """
+    检查 Manager 进程是否已在运行
+
+    Args:
+        socket_dir: socket 目录路径
+
+    Returns:
+        True 表示进程已在运行，False 表示可以启动
+    """
+    global _manager_pid_file
+    socket_dir_abs = Path(socket_dir).expanduser().resolve()
+    pid_file = socket_dir_abs / "qtrader_manager.pid"
+
+    if pid_file.exists():
+        try:
+            with open(pid_file, "r") as f:
+                pid = int(f.read().strip())
+            # 检查进程是否存在
+            try:
+                os.kill(pid, 0)  # 检查进程是否存在，不发送信号
+                logger.error(f"检测到已有 Manager 进程运行 (PID: {pid})，请先停止该进程")
+                return True
+            except OSError:
+                # 进程不存在，清理过期的PID文件
+                pid_file.unlink(missing_ok=True)
+                logger.info(f"清理过期的 PID 文件: {pid_file}")
+                return False
+        except Exception as e:
+            logger.warning(f"检查 PID 文件失败: {e}")
+            pid_file.unlink(missing_ok=True)
+            return False
+
+    _manager_pid_file = pid_file
+    return False
+
+
+def _write_manager_pid(socket_dir: str) -> None:
+    """
+    写入 Manager PID 文件
+
+    Args:
+        socket_dir: socket 目录路径
+    """
+    global _manager_pid_file
+    socket_dir_abs = Path(socket_dir).expanduser().resolve()
+    pid_file = socket_dir_abs / "qtrader_manager.pid"
+
+    pid_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(pid_file, "w") as f:
+        f.write(str(os.getpid()))
+    logger.info(f"已写入 PID 文件: {pid_file} (PID: {os.getpid()})")
+    _manager_pid_file = pid_file
+
+
+def _cleanup_manager_pid() -> None:
+    """清理 Manager PID 文件"""
+    global _manager_pid_file
+    if _manager_pid_file:
+        try:
+            _manager_pid_file.unlink(missing_ok=True)
+            logger.info(f"已清理 PID 文件: {_manager_pid_file}")
+        except Exception as e:
+            logger.warning(f"清理 PID 文件失败: {e}")
+
+
 def signal_handler(signum, frame):
     """信号处理器"""
     logger.info(f"收到信号 {signum}，准备退出...")
+    _cleanup_manager_pid()
     sys.exit(0)
 
 
 def main():
     """主函数"""
+    # 获取 socket 目录（使用第一个启用账户的 socket_dir）
+    socket_dir = None
+    active_accounts = [acc for acc in _app_config.accounts if acc.enabled]
+    if active_accounts:
+        # 从账户配置中获取 socket_dir
+        from src.utils.config_loader import get_config_loader
+
+        first_account_id = active_accounts[0].account_id
+        account_config = get_config_loader().load_trader_config(first_account_id)
+        if account_config:
+            socket_dir = account_config.paths.socket_dir
+
+    if not socket_dir:
+        # 默认使用项目根目录下的 socks 目录
+        socket_dir = "data/socks"
+
+    # 检查是否已有 Manager 进程运行
+    if _check_manager_pid(socket_dir):
+        sys.exit(1)
+
     # 设置信号处理
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
+
+    # 写入 PID 文件
+    _write_manager_pid(socket_dir)
 
     # 创建并运行应用
     app = create_app()
@@ -305,6 +398,7 @@ def main():
     except KeyboardInterrupt:
         logger.info("收到键盘中断信号")
     finally:
+        _cleanup_manager_pid()
         logger.info("程序已退出")
 
 

@@ -16,3 +16,4 @@ apscheduler>=3.10.4
 requests>=2.31.0
 tqsdk_zq_otg
 openctp-ctp
+cachetools
