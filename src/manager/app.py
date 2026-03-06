@@ -31,7 +31,13 @@ from src.manager.api.responses import (
 from src.manager.api.websocket_manager import websocket_manager
 from src.manager.manager import TradingManager
 from src.utils.async_event_engine import AsyncEventEngine, Event
-from src.utils.config_loader import AccountConfig, DatabaseConfig, get_config_loader
+from src.utils.config_loader import (
+    AccountConfig,
+    DatabaseConfig,
+    get_config_loader,
+    get_database_path,
+    get_log_dir,
+)
 from src.utils.database import Database, get_database, init_database
 from src.utils.logger import get_logger, setup_logger
 
@@ -64,14 +70,18 @@ async def lifespan(app: FastAPI):
     logger.info(f"已加载 {len(_app_config.accounts)} 个账户配置")
 
     # 设置日志
+    log_dir = Path(_app_config.paths.logs) / "manager"
+    log_dir.mkdir(parents=True, exist_ok=True)
     setup_logger(
         app_name="manager",
-        log_dir=_app_config.paths.logs,
+        log_dir=str(log_dir),
         log_level="INFO",
     )
 
     # 初始化 Manager 本地数据库
-    manager_db_path = Path(_app_config.paths.database).expanduser().resolve()
+    db_dir = Path(_app_config.paths.database).expanduser().resolve()
+    db_dir.mkdir(parents=True, exist_ok=True)
+    manager_db_path = db_dir / "q-manager.db"
     logger.info(f"Manager 数据库路径: {manager_db_path}")
     _manager_db: Database = init_database(str(manager_db_path), account_id="manager", echo=False)
     logger.info(f"Manager 数据库已初始化: {_manager_db}")
@@ -358,21 +368,8 @@ def signal_handler(signum, frame):
 
 def main():
     """主函数"""
-    # 获取 socket 目录（使用第一个启用账户的 socket_dir）
-    socket_dir = None
-    active_accounts = [acc for acc in _app_config.accounts if acc.enabled]
-    if active_accounts:
-        # 从账户配置中获取 socket_dir
-        from src.utils.config_loader import get_config_loader
-
-        first_account_id = active_accounts[0].account_id
-        account_config = get_config_loader().load_trader_config(first_account_id)
-        if account_config:
-            socket_dir = account_config.paths.socket_dir
-
-    if not socket_dir:
-        # 默认使用项目根目录下的 socks 目录
-        socket_dir = "data/socks"
+    # 获取 socket 目录（从全局配置）
+    socket_dir = _app_config.paths.socket_dir
 
     # 检查是否已有 Manager 进程运行
     if _check_manager_pid(socket_dir):

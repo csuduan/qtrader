@@ -19,7 +19,13 @@ sys.path.insert(0, str(project_root))
 from src.app_context import AppContext, get_app_context
 from src.trader.trader import Trader
 from src.utils.async_event_engine import AsyncEventEngine
-from src.utils.config_loader import AppConfig, TraderConfig, get_config_loader
+from src.utils.config_loader import (
+    AppConfig,
+    TraderConfig,
+    get_config_loader,
+    get_database_path,
+    get_log_dir,
+)
 from src.utils.logger import get_logger, setup_logger
 
 logger = get_logger(__name__)
@@ -49,8 +55,10 @@ async def main_async(args):
         logger.error(f"未找到账户 [{args.account_id}] 的配置")
         sys.exit(1)
 
-    # 检查是否已有进程运行
-    socket_dir_abs = Path(config.paths.socket_dir).expanduser().resolve()
+    # 从全局配置获取路径
+    app_config = get_config_loader()._load_app_config()
+    socket_dir_abs = Path(config.socket.socket_dir).expanduser().resolve()
+    socket_dir_abs.mkdir(parents=True, exist_ok=True)
     pid_file = socket_dir_abs / f"qtrader_{account_id}.pid"
 
     if pid_file.exists():
@@ -71,7 +79,9 @@ async def main_async(args):
 
     # 设置日志
     log_level = "DEBUG" if args.debug else "INFO"
-    setup_logger(app_name=f"trader-{account_id}", log_dir=config.paths.logs, log_level=log_level)
+    log_dir = Path(get_log_dir(app_config.paths.logs, account_id))
+    log_dir.mkdir(parents=True, exist_ok=True)
+    setup_logger(app_name=f"trader-{account_id}", log_dir=str(log_dir), log_level=log_level)
 
     logger.info("=" * 60)
     logger.info(f"Q-Trader Trader[{account_id}] 启动")

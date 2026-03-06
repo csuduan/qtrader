@@ -14,7 +14,7 @@ from src.manager.api.dependencies import get_trading_manager
 from src.manager.api.responses import error_response, success_response
 from src.manager.manager import TradingManager
 from src.models.po import ContractPo
-from src.utils.config_loader import get_config_loader
+from src.utils.config_loader import get_config_loader, get_database_path
 from src.utils.database import Database, get_database
 from src.utils.logger import get_logger
 
@@ -43,13 +43,11 @@ def _get_trader_database_path(account_id: str) -> Optional[str]:
     """
     try:
         config = get_config_loader().load_config()
-        # 使用账户配置中的数据库路径
-        for acc_config in config.accounts:
-            if acc_config.account_id == account_id:
-                db_path = Path(acc_config.paths.database).expanduser().resolve()
-                if db_path.exists():
-                    return str(db_path)
-                break
+        # 使用全局配置中的数据库目录构建路径
+        db_dir = Path(config.paths.database).expanduser().resolve()
+        db_file = db_dir / f"q-trader-{account_id}.db"
+        if db_file.exists():
+            return str(db_file)
         return None
     except Exception as e:
         logger.error(f"获取账户 [{account_id}] 数据库路径失败: {e}")

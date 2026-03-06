@@ -2,16 +2,6 @@ account_id: "xxx"
 account_type: "kq"
 alert_wechat: false
 
-
-# 目录配置
-paths:
-  socket_dir: "/opt/data/qtrader/xxx/socks"
-  switchPos_files: "/opt/data/qtrader/xxx/switch_pos"
-  logs: "/opt/data/qtrader/xxx/logs"
-  database: "/opt/data/qtrader/xxx/db/q-trader.db"
-  params: "/opt/data/qtrader/xxx/params"
-  export: "/opt/data/qtrader/xxx/export"
-
 gateway:
   type: "TQSDK"
   tianqin:

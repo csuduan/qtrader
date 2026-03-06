@@ -2,8 +2,12 @@ account_ids:
   - "xxx"
 
 paths:
-  logs: "/opt/data/qtrader/manager/logs"
-  database: "/opt/data/qtrader/manager/q-manager.db"
+  database: "/opt/data/qtrader/db"
+  socket_dir: "/opt/data/qtrader/socks"
+  logs: "/opt/data/qtrader/logs"
+  switchPos_files: "/opt/data/qtrader/switch_pos"
+  params: "/opt/data/qtrader/params"
+  export: "/opt/data/qtrader/export"
 
 
 # API服务配置

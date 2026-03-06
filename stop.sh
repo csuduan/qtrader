@@ -69,12 +69,16 @@ log_error() {
 
 # 获取 socket 目录
 get_socket_dir() {
-    local account_id="$1"
-    local config_file="config/account-${account_id}.yaml"
+    local config_file="config/config.yaml"
 
     if [ -f "$config_file" ]; then
-        local socket_dir=$(grep "socket_dir:" "$config_file" | sed 's/.*socket_dir:[[:space:]]*"\(.*\)".*/\1/')
-        echo "$socket_dir"
+        # 提取 socket_dir（在 paths 段中）
+        local socket_dir=$(grep -A10 "^paths:" "$config_file" | grep "socket_dir:" | sed 's/.*socket_dir:[[:space:]]*"\(.*\)".*/\1/')
+        if [ -z "$socket_dir" ]; then
+            echo "data/socks"
+        else
+            echo "$socket_dir"
+        fi
     else
         echo "data/socks"
     fi
@@ -120,11 +124,11 @@ stop_manager() {
     log_info "检查 Manager 进程..."
 
     # 获取 socket 目录
-    local socket_dir=$(get_socket_dir "DQ")
+    local socket_dir=$(get_socket_dir)
     local pid_file="${socket_dir}/qtrader_manager.pid"
 
     if [ ! -f "$pid_file" ]; then
-        log_warning "Manager PID 文件不存在"
+        log_warning "Manager PID 文件不存在,$pid_file"
         return 0
     fi
 
@@ -150,7 +154,7 @@ stop_trader() {
     log_info "检查 Trader[$account_id] 进程..."
 
     # 获取 socket 目录
-    local socket_dir=$(get_socket_dir "$account_id")
+    local socket_dir=$(get_socket_dir)
     local pid_file="${socket_dir}/qtrader_${account_id}.pid"
 
     if [ ! -f "$pid_file" ]; then
@@ -241,7 +245,7 @@ main() {
 
             # 先停止所有 Trader
             for account in "${AVAILABLE_ACCOUNTS[@]}"; do
-                stop_trader "$account"
+                stop_trader "$account" || true
             done
 
             # 再停止 Manager
@@ -262,7 +266,7 @@ main() {
                     fi
                 done
                 if [ "$valid" = true ]; then
-                    stop_trader "$acc"
+                    stop_trader "$acc" || true
                 else
                     log_warning "未知账户: $acc (已跳过)"
                 fi

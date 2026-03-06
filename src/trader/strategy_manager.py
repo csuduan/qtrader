@@ -27,7 +27,7 @@ from src.trader.order_cmd import OrderCmd
 from src.trader.strategy.base_strategy import BaseStrategy
 from src.trader.trading_engine import TradingEngine
 from src.utils.bar_generator import MultiSymbolBarGenerator, parse_interval
-from src.utils.config_loader import StrategyConfig
+from src.utils.config_loader import StrategyConfig, get_config_loader
 from src.utils.event_engine import EventEngine, EventTypes
 from src.utils.logger import get_logger
 
@@ -86,7 +86,7 @@ def load_strategy_params(config: StrategyConfig, strategy_id: str) -> dict:
     params_file = params_file.replace("{date}", today_str)
 
     # 构建完整路径
-    app_config = get_app_context().get_config()
+    app_config = get_config_loader()._load_app_config()
     csv_path = os.path.join(app_config.paths.params, params_file)
 
     # 加载CSV参数（使用TTLCache自动过期，默认5分钟）

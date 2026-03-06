@@ -24,7 +24,7 @@ from typing import Any, Callable, Dict, List, Optional, cast
 
 from src.app_context import AppContext, get_app_context
 from src.models.object import AccountData, OrderData, PositionData, TickData, TradeData, TraderState
-from src.utils.config_loader import AccountConfig, AppConfig
+from src.utils.config_loader import AccountConfig, AppConfig, get_config_loader
 from src.utils.event_engine import EventTypes
 from src.utils.ipc import SocketClient
 from src.utils.logger import get_logger
@@ -75,7 +75,9 @@ class TraderProxy:
         # ==================== 进程管理 ====================
         self._created_process: bool = False
         self.process: Optional[asyncio.subprocess.Process] = None
-        socket_dir = self.account_config.paths.socket_dir if self.account_config.paths else "/tmp"
+        # 从全局配置获取 socket_dir
+        app_config = get_config_loader()._load_app_config()
+        socket_dir = app_config.paths.socket_dir
         socket_dir_abs = Path(socket_dir).expanduser().resolve()
         self.socket_path = str(socket_dir_abs / f"qtrader_{self.account_id}.sock")
         self.pid_file = str(socket_dir_abs / f"qtrader_{self.account_id}.pid")

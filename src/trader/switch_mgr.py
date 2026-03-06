@@ -22,7 +22,7 @@ from src.models.po import RotationInstructionPo
 from src.models.po import SwitchPosImportPo as OrderFile
 from src.trader.order_cmd import OrderCmd, SplitStrategyType
 from src.trader.trading_engine import TradingEngine
-from src.utils.config_loader import AccountConfig, AppConfig
+from src.utils.config_loader import AccountConfig, AppConfig, get_config_loader
 from src.utils.database import session_scope
 from src.utils.helpers import parse_symbol
 from src.utils.logger import get_logger
@@ -74,7 +74,9 @@ class SwitchPosManager:
         """
         self.config: AccountConfig = config
         self.trading_engine: TradingEngine = trading_engine
-        self.switchPos_files_dir = config.paths.switchPos_files
+        # 从全局配置获取路径
+        app_config = get_config_loader()._load_app_config()
+        self.switchPos_files_dir = app_config.paths.switch_pos
         self.working = False
         self.running_instructions: Optional[List[RotationInstructionPo]] = None
         self.is_manual = False

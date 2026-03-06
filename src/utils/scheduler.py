@@ -222,8 +222,12 @@ class TaskScheduler:
     def shutdown(self) -> None:
         """关闭调度器"""
         try:
-            self.scheduler.shutdown(wait=False)
-            logger.info("任务调度器已关闭")
+            # 检查调度器是否正在运行（state=1 表示运行中）
+            if self.scheduler.state != 0:  # 不是停止状态才关闭
+                self.scheduler.shutdown(wait=False)
+                logger.info("任务调度器已关闭")
+            else:
+                logger.debug("任务调度器未运行，跳过关闭")
         except Exception as e:
             logger.error(f"关闭任务调度器时出错: {e}")
 

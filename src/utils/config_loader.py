@@ -71,9 +71,9 @@ class PathsConfig(BaseModel):
     """目录配置"""
 
     socket_dir: str = "./data/socks"
-    switchPos_files: str = "./data/orders"
+    switch_pos: str = "./data/switch_pos"
     logs: str = "./data/logs"
-    database: str = "./data/trading.db"
+    database: str = "./data/db"
     export: str = "./data/export"
     params: str = "./data/params"
 
@@ -148,7 +148,6 @@ class AccountConfig(BaseModel):
 
     gateway: Optional[GatewayConfig] = None
     trading: TradingConfig | None = Field(default_factory=TradingConfig)
-    paths: Optional[PathsConfig] = None
     strategies: Optional[Dict[str, StrategyConfig]] = None
 
     class Config:
@@ -277,7 +276,14 @@ class ConfigLoader:
 
         with open(config_path, "r", encoding="utf-8") as f:
             config_data = yaml.safe_load(f)
-        return AppConfig(**config_data)
+
+        app_config = AppConfig(**config_data)
+
+        # 如果 socket.socket_dir 未设置，使用 paths.socket_dir 的值
+        if not app_config.socket.socket_dir or app_config.socket.socket_dir == "./data/socks":
+            app_config.socket.socket_dir = app_config.paths.socket_dir
+
+        return app_config
 
     def _load_account_config(self, account_id: str) -> AccountConfig:
         """
@@ -297,9 +303,6 @@ class ConfigLoader:
             config_data = yaml.safe_load(f)
 
         account = AccountConfig(**config_data)
-        # 确保目录存在
-        if account.paths:
-            self._ensure_directories(account.paths)
         return account
 
     def load_account_config(self, account: AccountConfig) -> None:
@@ -321,26 +324,6 @@ class ConfigLoader:
             config_data = yaml.safe_load(f)
 
         account = AccountConfig(**config_data)
-        # 确保目录存在
-        if account.paths:
-            self._ensure_directories(account.paths)
-
-    def _ensure_directories(self, paths: PathsConfig) -> None:
-        """确保所需的目录存在"""
-        directories = [
-            paths.switchPos_files,
-            paths.logs,
-            (
-                os.path.dirname(paths.database)
-                if paths.database and os.path.dirname(paths.database)
-                else "./storage"
-            ),
-            paths.params,
-        ]
-
-        for directory in directories:
-            if directory:
-                Path(directory).mkdir(parents=True, exist_ok=True)
 
 
 # 全局配置加载器实例
@@ -353,6 +336,35 @@ def get_config_loader() -> ConfigLoader:
     if _config_loader is None:
         _config_loader = ConfigLoader()
     return _config_loader
+
+
+def get_database_path(base_dir: str, account_id: str) -> str:
+    """获取数据库文件路径
+
+    Args:
+        base_dir: 数据库目录（来自 config.yaml paths.database）
+        account_id: 账户ID（"manager" 或具体账户ID）
+
+    Returns:
+        完整数据库文件路径
+    """
+    if account_id == "manager":
+        return f"{base_dir}/q-manager.db"
+    else:
+        return f"{base_dir}/q-trader-{account_id}.db"
+
+
+def get_log_dir(base_dir: str, app_name: str) -> str:
+    """获取日志目录
+
+    Args:
+        base_dir: 日志基础目录（来自 config.yaml paths.logs）
+        app_name: 应用名称（"manager" 或账户ID）
+
+    Returns:
+        日志目录路径
+    """
+    return f"{base_dir}/{app_name}"
 
 
 # 数据库配置

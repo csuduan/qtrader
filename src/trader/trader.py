@@ -159,11 +159,17 @@ class Trader:
         from pathlib import Path
 
         from src.models.po import SystemParamPo
-        from src.utils.config_loader import RiskControlConfig
+        from src.utils.config_loader import RiskControlConfig, get_config_loader, get_database_path
         from src.utils.database import get_database, init_database
 
+        # 从全局配置获取数据库目录
+        loader = get_config_loader()
+        app_config = loader._load_app_config()
+        db_dir = Path(app_config.paths.database).expanduser().resolve()
+        db_dir.mkdir(parents=True, exist_ok=True)
+
         # 构建数据库文件路径
-        db_file = self.account_config.paths.database
+        db_file = db_dir / f"q-trader-{self.account_id}.db"
         # 检查数据库文件是否存在
         path = Path(db_file)
         if not path.exists():

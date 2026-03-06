@@ -15,7 +15,7 @@ from src.trader.dao.position_dao import StrategyPositionService
 from src.trader.strategy_manager import StrategyManager
 from src.trader.switch_mgr import SwitchPosManager
 from src.trader.trading_engine import TradingEngine
-from src.utils.config_loader import TraderConfig
+from src.utils.config_loader import TraderConfig, get_config_loader
 from src.utils.database import get_session
 from src.utils.logger import get_logger
 
@@ -117,7 +117,8 @@ class JobManager:
                 return
 
             # 准备导出目录
-            export_dir = Path(self.config.paths.export)
+            app_config = get_config_loader()._load_app_config()
+            export_dir = Path(app_config.paths.export)
             export_dir.mkdir(parents=True, exist_ok=True)
 
             # 生成文件名
@@ -348,11 +349,12 @@ class JobManager:
                 logger.info("开盘检查：交易接口已连接")
 
             # 2. 换仓文件导入检查（如果配置了换仓目录）
-            if self.config.paths and self.config.paths.switchPos_files:
+            app_config = get_config_loader()._load_app_config()
+            if app_config.paths.switch_pos:
                 await self._check_switchpos_import(now)
 
             # 3. 参数文件更新检查（如果配置了参数目录）
-            if self.config.paths and self.config.paths.params:
+            if app_config.paths.params:
                 missing_files = await self._check_param_files()
                 if missing_files:
                     await self._send_opening_alarm(
@@ -422,7 +424,8 @@ class JobManager:
             return missing_files
 
         try:
-            params_dir = Path(self.config.paths.params)
+            app_config = get_config_loader()._load_app_config()
+            params_dir = Path(app_config.paths.params)
 
             for strategy_id, strategy_config in self.config.strategies.items():
                 if not strategy_config.enabled:

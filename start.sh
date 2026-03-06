@@ -95,16 +95,35 @@ activate_conda() {
 
 # 获取 socket 目录
 get_socket_dir() {
-    # 读取第一个启用账户的配置获取 socket_dir
-    local account_id="$1"
-    local config_file="config/account-${account_id}.yaml"
+    local config_file="config/config.yaml"
 
     if [ -f "$config_file" ]; then
-        # 使用 grep 和 sed 提取 socket_dir
-        local socket_dir=$(grep "socket_dir:" "$config_file" | sed 's/.*socket_dir:[[:space:]]*"\(.*\)".*/\1/')
-        echo "$socket_dir"
+        # 提取 socket_dir（在 paths 段中）
+        local socket_dir=$(grep -A10 "^paths:" "$config_file" | grep "socket_dir:" | sed 's/.*socket_dir:[[:space:]]*"\(.*\)".*/\1/')
+        if [ -z "$socket_dir" ]; then
+            echo "data/socks"
+        else
+            echo "$socket_dir"
+        fi
     else
         echo "data/socks"
+    fi
+}
+
+# 获取日志目录
+get_log_dir() {
+    local config_file="config/config.yaml"
+
+    if [ -f "$config_file" ]; then
+        # 提取 logs（在 paths 段中）
+        local logs_dir=$(grep -A10 "^paths:" "$config_file" | grep "logs:" | sed 's/.*logs:[[:space:]]*"\(.*\)".*/\1/')
+        if [ -z "$logs_dir" ]; then
+            echo "logs"
+        else
+            echo "$logs_dir"
+        fi
+    else
+        echo "logs"
     fi
 }
 
@@ -131,7 +150,7 @@ start_manager() {
     log_info "检查 Manager 进程..."
 
     # 获取 socket 目录
-    local socket_dir=$(get_socket_dir "DQ")
+    local socket_dir=$(get_socket_dir)
     local pid_file="${socket_dir}/qtrader_manager.pid"
 
     if [ -f "$pid_file" ]; then
@@ -146,7 +165,9 @@ start_manager() {
     fi
 
     log_info "启动 Manager..."
-    nohup python -m src.run_manager > logs/manager.log 2>&1 &
+    local log_dir=$(get_log_dir)
+    mkdir -p "$log_dir"
+    nohup python -m src.run_manager > "$log_dir/manager.log" 2>&1 &
     local pid=$!
 
     # 等待并检查
@@ -166,7 +187,7 @@ start_trader() {
     log_info "检查 Trader[$account_id] 进程..."
 
     # 获取 socket 目录
-    local socket_dir=$(get_socket_dir "$account_id")
+    local socket_dir=$(get_socket_dir)
     local pid_file="${socket_dir}/qtrader_${account_id}.pid"
 
     if [ -f "$pid_file" ]; then
@@ -182,7 +203,9 @@ start_trader() {
     fi
 
     log_info "启动 Trader[$account_id]..."
-    nohup python -m src.run_trader --account-id "$account_id" > "logs/trader-${account_id}.log" 2>&1 &
+    local log_dir=$(get_log_dir)
+    mkdir -p "$log_dir"
+    nohup python -m src.run_trader --account-id "$account_id" > "$log_dir/trader-${account_id}.log" 2>&1 &
     local pid=$!
 
     # 等待并检查
@@ -208,7 +231,7 @@ print_report() {
         echo -e "${GREEN}✓${NC} Manager: 已启动"
     else
         # 检查是否本来就运行中
-        local socket_dir=$(get_socket_dir "DQ")
+        local socket_dir=$(get_socket_dir)
         local pid_file="${socket_dir}/qtrader_manager.pid"
         if [ -f "$pid_file" ]; then
             local pid=$(cat "$pid_file")
@@ -313,7 +336,7 @@ main() {
 
         # 再启动 Trader
         for account in "${accounts_to_start[@]}"; do
-            start_trader "$account"
+            start_trader "$account" || true
         done
     fi
 
