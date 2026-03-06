@@ -42,3 +42,69 @@ scheduler:
       cron_expression: "0 0 3 * * *"  # 每天凌晨 3:00
       job_method: "cleanup_logs"
       enabled: true
+
+# 账户定时任务配置（所有Trader进程共享）
+account_scheduler:
+  jobs:
+    # 连接任务
+    - job_id: pre_market_connect
+      job_name: 盘前连接网关
+      job_group: 交易
+      job_description: 开盘前自动连接交易
+      cron_expression: "50 8,20 * * *"
+      enabled: true
+      job_method: pre_market_connect
+
+    # 断开连接任务
+    - job_id: post_market_disconnect
+      job_name: 盘后断开网关
+      job_group: 交易
+      job_description: 收盘后断开交易连接
+      cron_expression: "35 2,15 * * *"
+      enabled: true
+      job_method: post_market_disconnect
+
+    # 换仓任务
+    - job_id: auto_rotation
+      job_name: 自动换仓
+      job_group: 换仓
+      job_description: 自动执行换仓
+      cron_expression: "5,8,35,38 9,21 * * *"
+      enabled: true
+      job_method: auto_rotation
+
+    # 换仓结果检查任务
+    - job_id: rotation_check
+      job_name: 换仓结果检查
+      job_group: 换仓
+      job_description: 每天检查换仓结果
+      cron_expression: "10,40 9,21 * * *"
+      job_method: check_rotation_result
+      enabled: true
+
+    # 换仓文件扫描任务
+    - job_id: scan_orders
+      job_name: 扫描换仓文件
+      job_group: 换仓
+      job_description: 扫描换仓文件
+      cron_expression: "*/10 * * * * *"
+      job_method: scan_orders
+      enabled: true
+
+    # 收盘后处理
+    - job_id: closing_process
+      job_name: 收盘后处理
+      job_group: 交易
+      job_description: 收盘后处理
+      cron_expression: "35 15 * * *"
+      enabled: true
+      job_method: closing_process
+
+    # 策略任务
+    - job_id: strategy_reset
+      job_name: 策略每日重置
+      job_group: 策略
+      job_description: 每日20:55重置所有策略状态
+      cron_expression: "0 55 20 * * *"
+      job_method: reset_strategies
+      enabled: true

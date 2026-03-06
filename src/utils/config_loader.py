@@ -149,7 +149,6 @@ class AccountConfig(BaseModel):
     gateway: Optional[GatewayConfig] = None
     trading: TradingConfig | None = Field(default_factory=TradingConfig)
     paths: Optional[PathsConfig] = None
-    scheduler: Optional[SchedulerConfig] = None
     strategies: Optional[Dict[str, StrategyConfig]] = None
 
     class Config:
@@ -182,7 +181,8 @@ class AppConfig(BaseModel):
     paths: PathsConfig = Field(default_factory=PathsConfig)
     socket: SocketConfig = Field(default_factory=SocketConfig)
     api: ApiConfig = Field(default_factory=ApiConfig)
-    scheduler: Optional[SchedulerConfig] = None
+    scheduler: Optional[SchedulerConfig] = None  # Manager 定时任务
+    account_scheduler: Optional[SchedulerConfig] = None  # 账户定时任务
 
     class Config:
         extra = "allow"  # 允许额外字段

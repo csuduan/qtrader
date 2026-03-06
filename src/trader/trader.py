@@ -117,8 +117,19 @@ class Trader:
         self.job_manager = JobManager(
             self.account_config, self.trading_engine, self.switchPos_manager, self.socket_server
         )
-        if self.account_config.scheduler:
-            self.task_scheduler = TaskScheduler(self.account_config.scheduler, self.job_manager)
+
+        # 从全局配置获取账户定时任务
+        scheduler_config = None
+        try:
+            from src.utils.config_loader import get_config_loader
+            loader = get_config_loader()
+            app_config = loader._load_app_config()
+            scheduler_config = app_config.account_scheduler
+        except Exception as e:
+            logger.warning(f"Trader [{self.account_id}] 无法加载全局定时任务配置: {e}")
+
+        if scheduler_config and scheduler_config.jobs:
+            self.task_scheduler = TaskScheduler(scheduler_config, self.job_manager)
             self.task_scheduler.start()
             logger.info(f"Trader [{self.account_id}] 任务调度器已启动")
         else:
