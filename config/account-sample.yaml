@@ -1,0 +1,73 @@
+account_id: "xxx"
+account_type: "kq"
+alert_wechat: false
+
+gateway:
+  type: "TQSDK"
+  tianqin:
+    username: "xxx"
+    password: "xxx"
+  broker:
+    type: "sim"
+    broker_name: "H徽商期货"
+    user_id: "xxx"
+    password: "xxx"
+  subscribe_symbols:
+    - "IC2603"
+    - "IM2603"
+    - "RB2605"
+    - "RB2603"
+
+# 交易控制
+trading:
+  auto_trade: true
+  paused: false
+  # 风控参数
+  risk_control:
+    max_daily_orders: 10000
+    max_daily_cancels: 5000
+    max_order_volume: 50
+    max_split_volume: 5
+    order_timeout: 5
+
+# 策略配置文件
+strategies:
+  # 上午IM策略
+  StrRsiInDay-AM-IM01:
+    enabled: true
+    type: rsi_strategy
+    symbol: "IM2603"
+    exchange: "CFFEX"
+    volume: 3
+    bar: "M1"
+    params_file: "param_rsi_DQ.csv"
+
+  # 下午IM策略
+  StrRsiInDay-PM-IM01:
+    enabled: true
+    type: rsi_strategy
+    symbol: "IM2603"
+    exchange: "CFFEX"
+    volume: 1
+    bar: "M1"
+    params_file: "param_rsi_DQ.csv"
+
+  # 上午IC策略
+  StrRsiInDay-AM-IC01:
+    enabled: true
+    type: rsi_strategy
+    symbol: "IC2603"
+    exchange: "CFFEX"
+    volume: 1
+    bar: "M1"
+    params_file: "param_rsi_DQ.csv"
+
+  # 下午IC策略
+  StrRsiInDay-PM-IC01:
+    enabled: true
+    type: rsi_strategy
+    symbol: "IC2603"
+    exchange: "CFFEX"
+    volume: 1
+    bar: "M1"
+    params_file: "param_rsi_DQ.csv"

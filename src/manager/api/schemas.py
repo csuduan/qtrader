@@ -1,0 +1,365 @@
+"""
+API数据模型定义
+使用Pydantic定义请求和响应模型
+"""
+
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, Field
+
+
+class AccountRes(BaseModel):
+    """账户信息响应"""
+
+    account_id: str
+    broker_type: Optional[str] = None
+    broker_name: Optional[str] = None
+    currency: str = "CNY"
+    balance: float
+    pre_balance: float
+    static_balance: float
+    available: float
+    margin: float
+    position_profit: float
+    close_profit: float
+    today_profit: float
+    risk_ratio: float
+    updated_at: datetime
+    user_id: Optional[str] = None
+    risk_status: dict = {}
+    status: Optional[str] = None  # Trader状态: stopped, connecting, connected
+    trade_paused: bool = False  # 是否暂停交易
+    md_connected: bool = False  # 行情连接状态
+    td_connected: bool = False  # 交易连接状态
+
+    class Config:
+        from_attributes = True
+
+
+class PositionRes(BaseModel):
+    """持仓信息响应"""
+
+    id: int
+    account_id: str
+    exchange_id: Optional[str] = None
+    symbol: Optional[str] = None
+    pos_long: int
+    pos_short: int
+    pos_long_yd: Optional[int] = None
+    pos_short_yd: Optional[int] = None
+    pos_long_td: Optional[int] = None
+    pos_short_td: Optional[int] = None
+    hold_price_long: Optional[float] = None
+    hold_price_short: Optional[float] = None
+    hold_profit_long: Optional[float] = None
+    hold_profit_short: Optional[float] = None
+    close_profit_long: Optional[float] = None
+    close_profit_short: Optional[float] = None
+    margin_long: Optional[float] = None
+    margin_short: Optional[float] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class TradeRes(BaseModel):
+    """成交记录响应"""
+
+    id: int
+    account_id: str
+    trade_id: str
+    order_id: Optional[str] = None
+    symbol: str
+    direction: str
+    offset: str
+    price: float
+    volume: int
+    trade_date_time: datetime
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class OrderRes(BaseModel):
+    """委托单响应"""
+
+    id: int
+    account_id: str
+    order_id: str
+    exchange_order_id: Optional[str] = None
+    symbol: str
+    direction: str
+    offset: str
+    volume_orign: int
+    volume_left: int
+    limit_price: Optional[float] = None
+    price_type: str
+    status: str
+    insert_date_time: datetime
+    last_msg: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class QuoteRes(BaseModel):
+    """行情信息响应"""
+
+    symbol: str
+    last_price: float
+    bid_price1: float
+    ask_price1: float
+    volume: int
+    open_interest: int
+    datetime: int
+
+
+class ManualOrderReq(BaseModel):
+    """手动报单请求"""
+
+    account_id: str = Field(..., description="账户ID")
+    symbol: str = Field(..., description="合约代码，如 SHFE.rb2505")
+    direction: str = Field(..., description="买卖方向: BUY/SELL")
+    offset: str = Field(..., description="开平标志: OPEN/CLOSE/CLOSETODAY")
+    volume: int = Field(..., gt=0, description="手数，必须大于0")
+    price: Optional[float] = Field(0, description="价格")
+
+
+class SystemStatusRes(BaseModel):
+    """系统状态响应"""
+
+    connected: bool
+    paused: bool
+    account_id: str
+    daily_orders: int
+    daily_cancels: int
+
+
+class ConnectReq(BaseModel):
+    """连接请求"""
+
+    username: Optional[str] = None
+    password: Optional[str] = None
+
+
+class Message(BaseModel):
+    """WebSocket消息"""
+
+    type: str
+    data: dict
+    timestamp: str
+
+
+class AlarmRes(BaseModel):
+    """告警信息响应"""
+
+    id: int
+    account_id: str
+    alarm_date: str
+    alarm_time: str
+    source: str
+    title: str
+    detail: Optional[str] = None
+    status: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class AlarmStatsRes(BaseModel):
+    """告警统计响应"""
+
+    today_total: int
+    unconfirmed: int
+    last_hour: int
+    last_five_minutes: int
+
+
+class SystemParamRes(BaseModel):
+    """系统参数响应"""
+
+    id: int
+    param_key: str
+    param_value: str | None
+    param_type: str
+    description: str | None
+    group: str
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class SystemParamUpdateReq(BaseModel):
+    """系统参数更新请求"""
+
+    param_key: str
+    param_value: str
+
+
+class StrategyPositionRes(BaseModel):
+    """策略持仓响应"""
+
+    symbol: str  # 合约代码
+    # 多头持仓
+    pos_long: int = 0  # 多头总持仓
+    pos_long_td: int = 0  # 多头今仓
+    pos_long_yd: int = 0  # 多头昨仓
+    # 空头持仓
+    pos_short: int = 0  # 空头总持仓
+    pos_short_td: int = 0  # 空头今仓
+    pos_short_yd: int = 0  # 空头昨仓
+    # 净持仓
+    pos_net: int = 0  # 净持仓（多头 - 空头）
+    # 持仓均价
+    hold_price_long: float = 0.0  # 多头持仓均价
+    hold_price_short: float = 0.0  # 空头持仓均价
+    # 盈亏
+    position_profit: float = 0.0  # 持仓盈亏
+    close_profit: float = 0.0  # 平仓盈亏
+
+
+class StrategyRes(BaseModel):
+    """策略信息响应"""
+
+    strategy_id: str
+    enabled: bool = False
+    opening_paused: bool = False
+    closing_paused: bool = False
+    inited: bool = False
+    config: dict | None = None
+    base_params: List = []  # 基础参数定义
+    ext_params: List = []  # 扩展参数定义
+    # 信号信息（从策略的get_signal()获取）
+    signal: dict | None = None
+    pos_long: int = 0  # 总多头持仓量
+    pos_short: int = 0  # 总空头持仓量
+    # 多合约持仓详情（新增）
+    positions: List[StrategyPositionRes] = []  # 所有合约持仓
+    trading_status: str | None = None
+    # 时间戳
+    updated_at: datetime = Field(default_factory=datetime.now)
+
+
+class StrategyConfig(BaseModel):
+    """策略配置"""
+
+    enabled: bool
+    strategy_type: str
+    symbol: str
+    exchange: str
+    volume_per_trade: int
+    max_position: int
+    bar: str | None = None
+    params_file: str | None = None
+    take_profit_pct: float | None = None
+    stop_profit_pct: float | None = None  # 别名
+    stop_loss_pct: float | None = None
+    fee_rate: float | None = None
+    trade_start_time: str | None = None
+    trade_end_time: str | None = None
+    force_exit_time: str | None = None
+    one_trade_per_day: bool | None = None
+    # RSI策略参数（兼容新旧命名）
+    rsi_period: int | None = None
+    rsi_n: int | None = None  # 别名
+    long_threshold: float | None = None  # 新命名
+    short_threshold: float | None = None  # 新命名
+    rsi_long_threshold: float | None = None  # 旧命名
+    rsi_short_threshold: float | None = None  # 旧命名
+    short_kline_period: int | None = None
+    long_kline_period: int | None = None
+    dir_threshold: float | None = None
+    used_signal: bool | None = None
+
+    model_config = {"populate_by_name": True}
+
+
+class StrategyUpdateReq(BaseModel):
+    """策略参数更新请求"""
+
+    params: dict = {}  # 要更新的参数字段
+    restart: bool = False  # 是否重启策略以应用变更
+
+
+class StrategyBatchOpReq(BaseModel):
+    """策略批量操作请求"""
+
+    strategy_ids: List[str]  # 要操作的策略ID列表
+    operation: str  # 操作类型: start, stop, restart
+
+
+class StrategyParamsRes(BaseModel):
+    """策略参数响应（用于前端显示）"""
+
+    strategy_id: str
+    # 参数文件（默认显示）
+    params_file: Optional[str] = None
+    # 详细参数（悬浮显示）
+    params: dict = {}
+    # 关键参数摘要（用于快速展示）
+    summary: Dict[str, Any] = {}
+
+    model_config = {"populate_by_name": True}
+
+
+class StrategyStatusRes(BaseModel):
+    """策略状态响应"""
+
+    strategy_id: str
+    active: bool
+    enabled: bool
+    inited: bool
+    # 持仓状态
+    holding: bool = False
+    position_side: int = 0
+    entry_price: float = 0.0
+    # 交易统计
+    trade_count: int = 0
+    total_pnl: float = 0.0
+    # 时间戳
+    last_trade_date: Optional[str] = None
+    updated_at: datetime = Field(default_factory=datetime.now)
+
+
+class TraderStatusRes(BaseModel):
+    """Trader状态响应"""
+
+    account_id: str
+    state: str  # stopped/connecting/connected
+    running: bool
+    alive: bool
+    connected: bool
+    connecting: bool
+    created_process: bool
+    pid: Optional[int] = None
+    start_time: Optional[datetime] = None
+    last_heartbeat: Optional[datetime] = None
+    restart_count: int = 0
+    socket_path: Optional[str] = None
+
+
+class OrderCmdRes(BaseModel):
+    """报单指令响应"""
+
+    cmd_id: str
+    status: str
+    symbol: str
+    filled_volume: int
+    volume: int
+    direction: Optional[str] = None
+    offset: Optional[str] = None
+    limit_price: Optional[float] = None
+    source: Optional[str] = None
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    total_orders: int = 0
+    finish_reason: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
