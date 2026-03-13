@@ -246,7 +246,7 @@ class TqGateway(BaseGateway):
             # 加载合约列表：先从数据库加载今天的，如果没有则从API查询
             # if len(self._contracts) <= 0:
             today = datetime.now().strftime("%Y-%m-%d")
-            if self.contracts and self._contracts_update_date != today:
+            if not self.contracts or self._contracts_update_date != today:
                 self._query_and_save_contracts(today)
 
             self.trading_day = self.get_trading_day()
