@@ -24,6 +24,8 @@ config:TraderConfig =ctx.get_config()
 ctp_type = config.gateway.broker.type
 if ctp_type == "rohon":
     from pyctp.rohon import mdapi, tdapi
+elif ctp_type == "jees":
+    from pyctp.jees import mdapi, tdapi
 else:
     from pyctp.ctp import mdapi, tdapi
 
