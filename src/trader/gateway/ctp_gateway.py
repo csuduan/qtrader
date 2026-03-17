@@ -116,6 +116,8 @@ class CtpGateway(BaseGateway):
             self._positions.clear()
             self._trades.clear()
             self._orders.clear()
+            # 先停止轮询
+            self._running = False
 
             # 创建 API 实例
             self.md_api = CtpMdApi(self)

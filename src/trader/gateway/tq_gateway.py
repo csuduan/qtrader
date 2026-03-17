@@ -118,9 +118,12 @@ class TqGateway(BaseGateway):
         连接到TqSdk
         """
         try:
-            if self._running:
-                logger.warning("TqSdk已启动，无需重复启动")
+            if self.connected:
+                logger.warning("TqSdk已连接，无需重复连接")
                 return True
+            
+            # 先停止轮询
+            self.running = False
 
             # 启动tq主线程
             self._tq_thead = threading.Thread(
