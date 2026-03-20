@@ -22,7 +22,7 @@
           <el-empty description="暂无策略" />
         </template>
         <el-table-column prop="strategy_id" label="策略ID" width="180" fixed />
-        <el-table-column prop="config.symbol" label="合约" width="120" />
+        <el-table-column prop="symbol" label="合约" width="120" />
         <el-table-column prop="config.bar" label="K线" width="100">
           <template #default="{ row }">
             <el-tag size="small" type="info">{{ row.config.bar || '-' }}</el-tag>

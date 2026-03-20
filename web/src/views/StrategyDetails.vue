@@ -12,7 +12,7 @@
         </template>
         <el-descriptions :column="3" border v-if="strategy">
           <el-descriptions-item label="策略ID">{{ strategy.strategy_id }}</el-descriptions-item>
-          <el-descriptions-item label="合约">{{ strategy.params?.symbol || strategy.config?.symbol || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="合约">{{ strategy.symbol || '-' }}</el-descriptions-item>
           <el-descriptions-item label="启用开关">
             <el-switch
               v-model="strategy.enabled"
@@ -678,7 +678,7 @@ function initEditablePositions() {
   } else if (strategy.value?.pos_long || strategy.value?.pos_short) {
     // 兼容旧数据：使用主合约持仓创建一条记录
     editablePositions.value = [{
-      symbol: strategy.value.params?.symbol || strategy.value.config?.symbol || '',
+      symbol: strategy.value?.symbol || '',
       pos_long: strategy.value.pos_long || 0,
       pos_long_td: strategy.value.pos_long || 0,
       pos_long_yd: 0,
@@ -704,7 +704,7 @@ function handleAddPosition() {
   // 打开添加持仓对话框
   positionDialogIsEdit.value = false
   positionDialogForm.value = {
-    symbol: strategy.value?.params?.symbol || strategy.value?.config?.symbol || '',
+    symbol: strategy.value?.symbol || '',
     pos_long_td: 0,
     pos_long_yd: 0,
     pos_short_td: 0,
@@ -805,10 +805,8 @@ async function handleDeletePosition(row: any, index: number) {
 
 function showAddOrderCmdDialog() {
   // 预填充合约代码
-  if (strategy.value?.params?.symbol) {
-    orderCmdForm.value.symbol = `${strategy.value.params.symbol}`
-  } else if (strategy.value?.config?.symbol) {
-    orderCmdForm.value.symbol = `${strategy.value.config.symbol}`
+  if (strategy.value?.symbol) {
+    orderCmdForm.value.symbol = strategy.value.symbol
   }
   // 重置表单
   orderCmdForm.value.direction = 'BUY'

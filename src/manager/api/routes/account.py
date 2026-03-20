@@ -135,6 +135,26 @@ async def get_all_accounts(
         return error_response(code=500, message=f"获取所有账户信息失败: {str(e)}")
 
 
+@router.get("/list")
+async def get_account_list(
+    trading_manager: TradingManager = Depends(get_trading_manager),
+):
+    """
+    获取账户ID列表
+
+    只返回账户ID列表，按配置文件中的顺序排列，用于前端初始化时获取账户列表
+    """
+    from src.utils.config_loader import get_config_loader
+
+    try:
+        config = get_config_loader().load_config()
+        account_ids = config.account_ids
+        return success_response(data=account_ids, message="获取成功")
+    except Exception as e:
+        logger.exception(f"获取账户列表失败: {e}")
+        return error_response(code=500, message=f"获取账户列表失败: {str(e)}")
+
+
 @router.get("/traders/status")
 async def get_traders_status(
     trading_manager: TradingManager = Depends(get_trading_manager),

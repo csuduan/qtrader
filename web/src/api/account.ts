@@ -20,6 +20,13 @@ export const accountApi = {
   },
 
   /**
+   * 获取账户ID列表
+   */
+  getAccountList: async (): Promise<string[]> => {
+    return api.get<string[]>('/account/list')
+  },
+
+  /**
    * 获取所有Trader状态
    */
   getTradersStatus: async (): Promise<TraderStatus[]> => {

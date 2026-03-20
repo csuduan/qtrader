@@ -233,6 +233,8 @@ class StrategyRes(BaseModel):
     opening_paused: bool = False
     closing_paused: bool = False
     inited: bool = False
+    # 运行时实际生效的合约代码（优先从params取，否则从config取）
+    symbol: str = ""
     config: dict | None = None
     base_params: List = []  # 基础参数定义
     ext_params: List = []  # 扩展参数定义

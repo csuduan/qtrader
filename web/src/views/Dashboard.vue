@@ -443,7 +443,8 @@ async function handleSelectAccount(accountId: string) {
 }
 
 onMounted(async () => {
-  // App.vue 已经在 loadAllData 中加载了账户列表，这里不需要重复加载
+  // 总览页需要加载所有账户的完整信息
+  await store.loadAllAccounts()
   loadAlarmStats()
 })
 

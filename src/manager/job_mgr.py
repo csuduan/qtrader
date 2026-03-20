@@ -173,6 +173,79 @@ class ManagerJobManager:
         except Exception as e:
             logger.exception(f"清理日志文件失败: {e}")
 
+    def pre_market_check(self) -> None:
+        """
+        开盘前检查任务
+
+        检查项：
+        1. 检查网关是否都已连接
+        2. [预留] 其他检查项（待补充）
+        """
+        logger.info("开始执行开盘前检查任务")
+        session = get_session()
+        if not session:
+            logger.error("无法获取数据库会话")
+            return
+
+        try:
+            now = datetime.now()
+            all_issues = []
+
+            # ========== 检查项 1: 网关连接状态 ==========
+            disconnected_gateways = self._check_gateway_connection()
+            for account_id in disconnected_gateways:
+                all_issues.append({
+                    "account_id": account_id,
+                    "source": "PRE_MARKET_CHECK",
+                    "title": f"账户 {account_id} 网关未连接",
+                    "detail": "开盘前检查：网关未连接，请检查Trader进程和网关状态",
+                })
+
+            # ========== 检查项 2: [预留] ==========
+            # TODO: 添加其他开盘前检查项
+            # 示例：检查策略状态、检查资金充足性、检查持仓一致性等
+
+            # 创建告警
+            for issue in all_issues:
+                self._create_alarm(
+                    session=session,
+                    account_id=issue["account_id"],
+                    source=issue["source"],
+                    title=issue["title"],
+                    detail=issue["detail"],
+                    now=now,
+                )
+
+            if not all_issues:
+                logger.info("开盘前检查完成：所有检查项通过")
+            else:
+                logger.warning(f"开盘前检查完成：发现 {len(all_issues)} 个问题")
+
+        except Exception as e:
+            logger.exception(f"开盘前检查任务执行失败: {e}")
+        finally:
+            session.close()
+
+    def _check_gateway_connection(self) -> list:
+        """
+        检查网关连接状态
+
+        Returns:
+            未连接网关的账户ID列表
+        """
+        disconnected = []
+        for account_id, trader_proxy in self.trading_manager.traders.items():
+            # 检查账户是否启用
+            account_config = self.trading_manager.account_configs_map.get(account_id)
+            if not account_config or not account_config.enabled:
+                continue
+
+            # 检查网关连接状态
+            if not trader_proxy.gateway.connected:
+                disconnected.append(account_id)
+
+        return disconnected
+
     def _create_alarm(
         self,
         session,

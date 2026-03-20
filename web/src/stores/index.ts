@@ -146,6 +146,62 @@ export const useStore = defineStore('main', () => {
   }
 
   /**
+   * 加载账户ID列表（轻量级，只返回ID列表）
+   */
+  async function loadAccountList(): Promise<string[]> {
+    try {
+      const accountIds = await accountApi.getAccountList()
+      // 初始化 accounts 数组，只包含 account_id
+      accounts.value = accountIds.map(id => ({
+        account_id: id,
+        broker_type: '--',
+        broker_name: '--',
+        currency: 'CNY',
+        balance: 0,
+        available: 0,
+        margin: 0,
+        pre_balance: 0,
+        static_balance: 0,
+        position_profit: 0,
+        close_profit: 0,
+        today_profit: 0,
+        risk_ratio: 0,
+        updated_at: new Date().toISOString(),
+        user_id: '--',
+        status: 'stopped'
+      } as Account))
+
+      // 如果有账户但还没选中，默认选中第一个
+      if (!selectedAccountId.value && accountIds.length > 0) {
+        selectedAccountId.value = accountIds[0]
+      }
+      return accountIds
+    } catch (error) {
+      console.error('加载账户ID列表失败:', error)
+      return []
+    }
+  }
+
+  /**
+   * 加载当前选中账户的详情
+   */
+  async function loadCurrentAccount() {
+    try {
+      if (!selectedAccountId.value) {
+        return
+      }
+      const accountData = await accountApi.getAccount(selectedAccountId.value)
+      // 更新账户列表中的对应账户
+      const index = accounts.value.findIndex(acc => acc.account_id === accountData.account_id)
+      if (index > -1) {
+        accounts.value[index] = accountData
+      }
+    } catch (error) {
+      console.error('加载当前账户详情失败:', error)
+    }
+  }
+
+  /**
    * 切换账户
    */
   function switchAccount(accountId: string) {
@@ -203,10 +259,14 @@ export const useStore = defineStore('main', () => {
 
   /**
    * 加载所有数据
+   * 优化：先加载账户列表（轻量级），再加载当前账户详情
    */
   async function loadAllData() {
-    // 统一使用 account/all 接口加载所有账户
-    await loadAllAccounts()
+    // 先加载账户ID列表（轻量级）
+    await loadAccountList()
+
+    // 加载当前选中账户的详情
+    await loadCurrentAccount()
 
     // 如果有账户数据，加载持仓、成交、订单
     if (accounts.value.length > 0) {
@@ -345,6 +405,8 @@ export const useStore = defineStore('main', () => {
     // 方法
     loadAccount,
     loadAllAccounts,
+    loadAccountList,
+    loadCurrentAccount,
     switchAccount,
     loadPositions,
     loadTrades,

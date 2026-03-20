@@ -395,6 +395,8 @@ export interface StrategyRes {
   active: boolean
   enabled: boolean
   inited: boolean
+  // 运行时实际生效的合约代码（优先从params取，否则从config取）
+  symbol: string
   config: StrategyConfig
   params?: StrategyParams
   base_params?: ParamDefinition[]
