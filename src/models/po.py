@@ -311,8 +311,12 @@ class ContractPo(Base):
     option_underlying = Column(String(80), nullable=True)
     option_type = Column(String(20), nullable=True)
     update_date = Column(String(10), nullable=False, index=True)  # YYYY-MM-DD
+    # 数据来源：tq（天勤）、ctp（中泰CTP）等
+    data_source = Column(String(20), nullable=True, index=True)
+    # 是否活跃合约（当日可交易）
+    is_active = Column(Boolean, nullable=False, default=True, index=True)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     def __repr__(self):
-        return f"<ContractPo(symbol={self.symbol}, exchange_id={self.exchange_id}, update_date={self.update_date})>"
+        return f"<ContractPo(symbol={self.symbol}, exchange_id={self.exchange_id}, update_date={self.update_date}, data_source={self.data_source})>"

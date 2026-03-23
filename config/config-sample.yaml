@@ -9,6 +9,19 @@ paths:
   params: "/opt/data/qtrader/params"
   export: "/opt/data/qtrader/export"
 
+# 数据库配置
+database:
+  # 公共数据库（共享合约信息，Manager写，Trader读）
+  # 路径相对于 paths.database 目录，文件名固定为 q-public.db
+  public_data:
+    enabled: true  # 是否启用公共数据共享机制
+
+# Trader初始化配置
+trader_init:
+  # 等待 Manager 推送公共数据的超时时间（秒）
+  # 超时后 Trader 将自行从网关加载合约信息
+  public_data_timeout: 30
+
 
 # API服务配置
 api:

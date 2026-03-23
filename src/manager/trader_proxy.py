@@ -1278,6 +1278,34 @@ class TraderProxy:
             logger.error(f"TraderProxy [{self.account_id}] 刷新合约信息请求失败: {e}")
             return {"success": False, "message": f"请求失败: {str(e)}"}
 
+    async def push_public_data(self, contracts: list) -> bool:
+        """
+        推送公共数据（合约信息）给 Trader 进程
+
+        Manager 在检测到 Trader 启动后调用此方法，将共享数据库中的
+        合约信息主动推送给 Trader，使 Trader 无需自行从网关拉取。
+
+        Args:
+            contracts: 合约信息字典列表
+
+        Returns:
+            是否推送成功
+        """
+        if not self.socket_client or not self.socket_client.is_connected():
+            logger.error(f"TraderProxy [{self.account_id}] 未连接到Trader，无法推送公共数据")
+            return False
+
+        try:
+            response = await self.socket_client.request(
+                "init_public_data",
+                {"contracts": contracts},
+                timeout=30.0,
+            )
+            return bool(response)
+        except Exception as e:
+            logger.error(f"TraderProxy [{self.account_id}] 推送公共数据失败: {e}")
+            return False
+
     async def get_contracts(self) -> list:
         """
         获取合约列表

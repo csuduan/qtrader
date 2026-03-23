@@ -146,15 +146,77 @@ class BaseGateway(ABC):
         """
         从数据库加载指定更新日期的合约信息
 
-        Args:
-            update_date: 更新日期 (YYYY-MM-DD)
+        优先从共享数据库（q-public.db）读取，该数据库由 Manager 进程维护。
+        若共享数据库不可用，则回退到当前账户的私有数据库。
+
         Returns:
             合约信息字典，如果没有则返回None
+        """
+        update_date = datetime.now().strftime("%Y-%m-%d")
+
+        # 优先尝试从共享数据库读取
+        result = self._load_contracts_from_shared_db(update_date)
+        if result is not None:
+            return result
+
+        # 回退到账户私有数据库
+        return self._load_contracts_from_private_db(update_date)
+
+    def _load_contracts_from_shared_db(
+        self, update_date: str
+    ) -> Optional[dict[str, ContractData]]:
+        """
+        从共享数据库读取合约信息
+
+        Args:
+            update_date: 更新日期 (YYYY-MM-DD)
+
+        Returns:
+            合约信息字典，如果共享数据库不可用或无数据则返回None
+        """
+        try:
+            from src.utils.shared_database import get_shared_database
+
+            shared_db = get_shared_database()
+            if shared_db is None:
+                return None
+
+            from src.models.po import ContractPo
+
+            with shared_db.get_session() as session:
+                contract_pos = (
+                    session.query(ContractPo).filter(ContractPo.update_date == update_date).all()
+                )
+
+                if not contract_pos:
+                    logger.debug(f"共享数据库中没有更新日期为 {update_date} 的合约信息")
+                    return None
+
+                loaded_count = self._parse_contract_pos(contract_pos)
+                self._contracts_update_date = update_date
+                logger.info(
+                    f"从共享数据库加载了 {loaded_count} 个合约信息 (更新日期: {update_date})"
+                )
+                return self.contracts
+        except Exception as e:
+            logger.warning(f"从共享数据库加载合约信息失败，将尝试私有数据库: {e}")
+            return None
+
+    def _load_contracts_from_private_db(
+        self, update_date: str
+    ) -> Optional[dict[str, ContractData]]:
+        """
+        从账户私有数据库读取合约信息（回退方案）
+
+        Args:
+            update_date: 更新日期 (YYYY-MM-DD)
+
+        Returns:
+            合约信息字典，如果没有数据则返回None
         """
         from src.models.po import ContractPo
         from src.utils.database import session_scope
 
-        update_date = datetime.now().strftime("%Y-%m-%d")
         try:
             with session_scope() as session:
                 contract_pos = (
@@ -162,40 +224,110 @@ class BaseGateway(ABC):
                 )
 
                 if not contract_pos:
-                    logger.info(f"数据库中没有更新日期为 {update_date} 的合约信息")
+                    logger.info(f"私有数据库中没有更新日期为 {update_date} 的合约信息")
                     return None
 
-                loaded_count = 0
-                for po in contract_pos:
-                    symbol = po.symbol.split(".")[1] if "." in po.symbol else po.symbol  # type: ignore[union-attr]
-                    exchange = Exchange.from_str(po.exchange_id)  # type: ignore[arg-type]
-                    if exchange == Exchange.NONE:
-                        continue
-                    contract = ContractData(
-                        symbol=symbol,  # type: ignore[arg-type]
-                        exchange=exchange,
-                        name=po.instrument_name or po.symbol,  # type: ignore[arg-type]
-                        product_type=ProductType.FUTURES,
-                        multiple=po.volume_multiple,  # type: ignore[arg-type]
-                        pricetick=float(po.price_tick),
-                        min_volume=po.min_volume,  # type: ignore[arg-type]
-                        option_strike=float(po.option_strike) if po.option_strike else None,
-                        option_underlying=po.option_underlying,  # type: ignore[arg-type]
-                        option_type=po.option_type,  # type: ignore[arg-type]
-                    )  # type: ignore[call-arg]
-                    # 应用开仓限制配置
-                    self._fill_open_limit(contract)
-                    self.contracts[contract.symbol] = contract
-                    # self._upper_symbols[contract.symbol.rsplit(".")[1].upper()] = contract.exchange.value
-                    loaded_count += 1
-
-                # 记录合约更新日期
+                loaded_count = self._parse_contract_pos(contract_pos)
                 self._contracts_update_date = update_date
-                logger.info(f"从数据库加载了 {loaded_count} 个合约信息 (更新日期: {update_date})")
+                logger.info(
+                    f"从私有数据库加载了 {loaded_count} 个合约信息 (更新日期: {update_date})"
+                )
                 return self.contracts
         except Exception as e:
-            logger.error(f"从数据库加载合约信息失败: {e}")
+            logger.error(f"从私有数据库加载合约信息失败: {e}")
             return None
+
+    def _parse_contract_pos(self, contract_pos: list) -> int:
+        """
+        解析合约PO对象列表并写入内存缓存
+
+        Args:
+            contract_pos: ContractPo 对象列表
+
+        Returns:
+            成功加载的合约数量
+        """
+        loaded_count = 0
+        for po in contract_pos:
+            symbol = po.symbol.split(".")[1] if "." in po.symbol else po.symbol  # type: ignore[union-attr]
+            exchange = Exchange.from_str(po.exchange_id)  # type: ignore[arg-type]
+            if exchange == Exchange.NONE:
+                continue
+            contract = ContractData(
+                symbol=symbol,  # type: ignore[arg-type]
+                exchange=exchange,
+                name=po.instrument_name or po.symbol,  # type: ignore[arg-type]
+                product_type=ProductType.FUTURES,
+                multiple=po.volume_multiple,  # type: ignore[arg-type]
+                pricetick=float(po.price_tick),
+                min_volume=po.min_volume,  # type: ignore[arg-type]
+                option_strike=float(po.option_strike) if po.option_strike else None,
+                option_underlying=po.option_underlying,  # type: ignore[arg-type]
+                option_type=po.option_type,  # type: ignore[arg-type]
+            )  # type: ignore[call-arg]
+            self._fill_open_limit(contract)
+            self.contracts[contract.symbol] = contract
+            loaded_count += 1
+        return loaded_count
+
+    def load_contracts_from_init_data(self, contracts: list) -> int:
+        """
+        从 Manager 推送的公共数据中加载合约信息
+
+        此方法由 Trader 在收到 init_public_data 消息时调用，
+        将 Manager 推送的合约字典列表直接转换为 ContractData 对象存入缓存，
+        无需访问数据库。
+
+        Args:
+            contracts: 合约信息字典列表，格式与 ContractInfo.to_dict() 一致
+
+        Returns:
+            成功加载的合约数量
+        """
+        loaded_count = 0
+        update_date = datetime.now().strftime("%Y-%m-%d")
+
+        for contract_dict in contracts:
+            try:
+                symbol_full = contract_dict.get("symbol", "")
+                # symbol 可能为 "rb2505" 或 "SHFE.rb2505"
+                symbol = symbol_full.split(".")[1] if "." in symbol_full else symbol_full
+
+                exchange_id = contract_dict.get("exchange_id", "")
+                exchange = Exchange.from_str(exchange_id)
+                if exchange == Exchange.NONE:
+                    logger.debug(f"跳过未知交易所合约: {symbol_full} ({exchange_id})")
+                    continue
+
+                contract = ContractData(
+                    symbol=symbol,  # type: ignore[arg-type]
+                    exchange=exchange,
+                    name=contract_dict.get("instrument_name") or symbol,  # type: ignore[arg-type]
+                    product_type=ProductType.FUTURES,
+                    multiple=contract_dict.get("volume_multiple", 1),  # type: ignore[arg-type]
+                    pricetick=float(contract_dict.get("price_tick", 0.01)),
+                    min_volume=contract_dict.get("min_volume", 1),  # type: ignore[arg-type]
+                    option_strike=(
+                        float(contract_dict["option_strike"])
+                        if contract_dict.get("option_strike")
+                        else None
+                    ),
+                    option_underlying=contract_dict.get("option_underlying"),  # type: ignore[arg-type]
+                    option_type=contract_dict.get("option_type"),  # type: ignore[arg-type]
+                )  # type: ignore[call-arg]
+                self._fill_open_limit(contract)
+                self.contracts[contract.symbol] = contract
+                loaded_count += 1
+            except Exception as e:
+                logger.warning(
+                    f"解析合约数据失败 [{contract_dict.get('symbol')}]: {e}"
+                )
+
+        if loaded_count > 0:
+            self._contracts_update_date = update_date
+            logger.info(f"从 Manager 公共数据加载了 {loaded_count} 个合约信息")
+
+        return loaded_count
 
     @abstractmethod
     async def connect(self) -> bool:

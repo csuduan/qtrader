@@ -9,11 +9,14 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from src.app_context import AppContext, get_app_context
+from src.manager.public_data_service import PublicDataService
+from src.manager.trader_monitor import TraderMonitor
 from src.manager.trader_proxy import TraderProxy
 from src.models.object import AccountData, Direction, Offset, OrderData, OrderRequest
 from src.utils.config_loader import AccountConfig, AppConfig, DatabaseConfig, SocketConfig
 from src.utils.logger import get_logger
 from src.utils.scheduler import TaskScheduler
+from src.utils.shared_database import SharedDatabase, init_shared_database
 
 ctx: AppContext = get_app_context()
 
@@ -67,6 +70,15 @@ class TradingManager:
 
         # Scheduler（将在 start() 中初始化）
         self._scheduler: Optional[TaskScheduler] = None
+
+        # 共享数据库（公共数据）
+        self._shared_db: Optional[SharedDatabase] = None
+
+        # 公共数据服务
+        self.public_data_service: Optional[PublicDataService] = None
+
+        # Trader启动监控器
+        self._trader_monitor: Optional[TraderMonitor] = None
 
         logger.info("交易管理器初始化完成")
 
@@ -700,6 +712,12 @@ class TradingManager:
         self._running = True
         logger.info("交易管理器启动中...")
 
+        # 初始化共享数据库和公共数据服务
+        await self._init_public_data()
+
+        # 启动 Trader 启动监控器
+        self._start_trader_monitor()
+
         # 获取所有账号
         accounts = [acc for acc in self.account_configs]
         logger.info(f"识别到账号: {[acc.account_id for acc in accounts]}")
@@ -735,6 +753,106 @@ class TradingManager:
 
         logger.info("交易管理器启动完成")
 
+    async def _init_public_data(self) -> None:
+        """初始化共享数据库和公共数据服务"""
+        try:
+            from src.utils.config_loader import get_config_loader
+
+            loader = get_config_loader()
+            app_config = loader._load_app_config()
+            db_dir = Path(app_config.paths.database).expanduser().resolve()
+            db_dir.mkdir(parents=True, exist_ok=True)
+
+            # 共享数据库路径：独立于各账户的 q-public.db
+            shared_db_path = str(db_dir / "q-public.db")
+            self._shared_db = init_shared_database(shared_db_path)
+
+            # 创建公共数据服务并加载历史数据
+            self.public_data_service = PublicDataService(self._shared_db)
+            count = self.public_data_service.load_from_database()
+            logger.info(f"公共数据服务初始化完成，已加载 {count} 个合约")
+        except Exception as e:
+            logger.exception(f"初始化公共数据服务失败: {e}")
+
+    def _start_trader_monitor(self) -> None:
+        """启动 Trader 启动监控器"""
+        try:
+            from src.utils.config_loader import get_config_loader
+
+            loader = get_config_loader()
+            app_config = loader._load_app_config()
+            socket_dir = Path(app_config.paths.socket_dir).expanduser().resolve()
+
+            loop = asyncio.get_event_loop()
+            self._trader_monitor = TraderMonitor(
+                socket_dir=str(socket_dir),
+                on_trader_started=self._on_trader_started,
+                loop=loop,
+            )
+            self._trader_monitor.start()
+            logger.info("TraderMonitor 已启动")
+        except Exception as e:
+            logger.exception(f"启动 TraderMonitor 失败: {e}")
+
+    async def _on_trader_started(self, account_id: str) -> None:
+        """
+        当检测到 Trader 进程启动时触发
+
+        等待连接就绪后，推送公共数据（合约信息）给该 Trader
+
+        Args:
+            account_id: 启动的 Trader 账户ID
+        """
+        logger.info(f"检测到 Trader [{account_id}] 启动，准备推送公共数据...")
+        trader = self.traders.get(account_id)
+        if not trader:
+            logger.warning(f"Trader [{account_id}] 未在管理器中注册，跳过公共数据推送")
+            return
+
+        # 等待连接建立（最多30秒）
+        for _ in range(30):
+            if trader.socket_client and trader.socket_client.is_connected():
+                break
+            await asyncio.sleep(1)
+        else:
+            logger.warning(f"Trader [{account_id}] 连接超时，跳过公共数据推送")
+            return
+
+        await self._push_public_data_to_trader(account_id)
+
+    async def _push_public_data_to_trader(self, account_id: str) -> bool:
+        """
+        推送公共数据给指定 Trader
+
+        Args:
+            account_id: 目标 Trader 的账户ID
+
+        Returns:
+            是否推送成功
+        """
+        if not self.public_data_service or not self.public_data_service.has_contracts():
+            logger.info(f"公共数据服务无合约数据，跳过推送给 [{account_id}]")
+            return False
+
+        trader = self.traders.get(account_id)
+        if not trader:
+            logger.error(f"Trader [{account_id}] 不存在，无法推送公共数据")
+            return False
+
+        try:
+            contracts = self.public_data_service.get_contracts_for_push()
+            result = await trader.push_public_data(contracts)
+            if result:
+                logger.info(
+                    f"成功推送 {len(contracts)} 个合约数据给 Trader [{account_id}]"
+                )
+            else:
+                logger.warning(f"推送公共数据给 Trader [{account_id}] 失败")
+            return result
+        except Exception as e:
+            logger.exception(f"推送公共数据给 Trader [{account_id}] 出错: {e}")
+            return False
+
     async def stop(self) -> None:
         """停止管理器"""
         if not self._running:
@@ -747,9 +865,19 @@ class TradingManager:
         for account_id in list(self.traders.keys()):
             await self.stop_trader(account_id)
 
+        # 停止 TraderMonitor
+        if self._trader_monitor:
+            self._trader_monitor.stop()
+            self._trader_monitor = None
+
         # 停止 ManagerScheduler
         if self._scheduler:
             self._scheduler.shutdown()
             logger.info("ManagerScheduler 已停止")
+
+        # 关闭共享数据库
+        from src.utils.shared_database import close_shared_database
+
+        close_shared_database()
 
         logger.info("交易管理器已停止")

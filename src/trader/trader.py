@@ -72,6 +72,12 @@ class Trader:
         # 运行状态
         self._running = False
 
+        # 公共数据初始化状态
+        # Manager 启动后会通过 init_public_data 消息推送合约信息
+        self._public_data_initialized: bool = False
+        # 用于等待 Manager 推送公共数据的 Future
+        self._init_data_future: Optional[asyncio.Future] = None
+
     async def start(
         self,
         socket_path: Optional[str] = None,
@@ -247,6 +253,38 @@ class Trader:
     def get_task_scheduler(self) -> Optional[TaskScheduler]:
         """获取任务调度器"""
         return self.task_scheduler
+
+    async def _wait_for_init_data(self, timeout: float = 30.0) -> bool:
+        """
+        等待 Manager 推送公共数据（合约信息）
+
+        Trader 启动后调用此方法阻塞等待 Manager 的 init_public_data 消息。
+        若超时则返回 False，Trader 将自行从网关拉取合约信息。
+
+        Args:
+            timeout: 最大等待时间（秒）
+
+        Returns:
+            是否收到公共数据
+        """
+        if self._public_data_initialized:
+            return True
+
+        loop = asyncio.get_event_loop()
+        self._init_data_future = loop.create_future()
+        logger.info(f"Trader [{self.account_id}] 等待 Manager 推送公共数据（最多 {timeout}s）...")
+
+        try:
+            await asyncio.wait_for(asyncio.shield(self._init_data_future), timeout=timeout)
+            logger.info(f"Trader [{self.account_id}] 已收到 Manager 公共数据")
+            return True
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"Trader [{self.account_id}] 等待公共数据超时，将自行从网关加载合约信息"
+            )
+            return False
+        finally:
+            self._init_data_future = None
 
     async def _heartbeat_loop(self, interval: int = 5) -> None:
         """
@@ -1600,3 +1638,46 @@ class Trader:
         except Exception as e:
             logger.exception(f"Trader [{self.account_id}] 刷新合约信息失败: {e}")
             return {"success": False, "message": f"刷新失败: {str(e)}"}
+
+    @request("init_public_data")
+    async def _req_init_public_data(self, data: dict) -> dict:
+        """
+        接收 Manager 推送的公共数据（合约信息）
+
+        Manager 在检测到本 Trader 进程启动后，会从共享数据库中读取合约信息
+        并通过此请求推送过来，Trader 将数据加载到 Gateway 的合约缓存中。
+
+        Args:
+            data: {"contracts": [{合约信息字典}, ...]}
+
+        Returns:
+            {"success": bool, "message": str, "count": int}
+        """
+        contracts = data.get("contracts", [])
+        if not contracts:
+            logger.info(f"Trader [{self.account_id}] 收到空的公共数据推送")
+            self._public_data_initialized = True
+            if self._init_data_future and not self._init_data_future.done():
+                self._init_data_future.set_result(True)
+            return {"success": True, "message": "无合约数据", "count": 0}
+
+        try:
+            # 将合约数据加载到 Gateway
+            if self.trading_engine and self.trading_engine.gateway:
+                count = self.trading_engine.gateway.load_contracts_from_init_data(contracts)
+                self._public_data_initialized = True
+                # 唤醒等待中的 _wait_for_init_data
+                if self._init_data_future and not self._init_data_future.done():
+                    self._init_data_future.set_result(True)
+                logger.info(
+                    f"Trader [{self.account_id}] 已从 Manager 加载 {count} 个合约信息"
+                )
+                return {"success": True, "message": "合约数据已加载", "count": count}
+            else:
+                logger.warning(
+                    f"Trader [{self.account_id}] 交易引擎或 Gateway 未初始化，无法加载合约数据"
+                )
+                return {"success": False, "message": "交易引擎未初始化", "count": 0}
+        except Exception as e:
+            logger.exception(f"Trader [{self.account_id}] 加载公共数据失败: {e}")
+            return {"success": False, "message": f"加载失败: {str(e)}", "count": 0}

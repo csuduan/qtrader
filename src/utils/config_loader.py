@@ -175,6 +175,25 @@ class ApiConfig(BaseModel):
     )
 
 
+class PublicDataConfig(BaseModel):
+    """公共数据库配置"""
+
+    enabled: bool = True  # 是否启用公共数据共享机制
+
+
+class DatabaseExtConfig(BaseModel):
+    """扩展数据库配置"""
+
+    public_data: PublicDataConfig = Field(default_factory=PublicDataConfig)
+
+
+class TraderInitConfig(BaseModel):
+    """Trader初始化配置"""
+
+    # 等待 Manager 推送公共数据的超时时间（秒）
+    public_data_timeout: int = 30
+
+
 class AppConfig(BaseModel):
     """全局配置（来自config.yaml）"""
 
@@ -186,6 +205,10 @@ class AppConfig(BaseModel):
     scheduler: Optional[SchedulerConfig] = None  # Manager 定时任务
     account_scheduler: Optional[SchedulerConfig] = None  # 账户定时任务
     trading: TradingConfig | None = Field(default_factory=TradingConfig)
+    # 扩展数据库配置（公共数据）
+    database: DatabaseExtConfig = Field(default_factory=DatabaseExtConfig)
+    # Trader初始化配置
+    trader_init: TraderInitConfig = Field(default_factory=TraderInitConfig)
 
     class Config:
         extra = "allow"  # 允许额外字段
