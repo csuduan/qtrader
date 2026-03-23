@@ -1141,37 +1141,14 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
         return temp_dir
     
     def _save_contracts(self) -> None:
-        from src.utils.database import session_scope
-        from src.models.po import ContractPo
+        """
+        合约信息仅加载到内存，不再保存到本地数据库
 
-        """保存合约信息到文件"""
+        注意：合约持久化由Manager统一负责，Manager会将合约写入共享数据库
+        并通过 init_public_data 消息推送给所有Trader
+        """
+        # 合约已加载到 self.gateway.contracts，无需额外操作
         update_date = self.gateway._contracts_update_date
-        contracts_to_save = []
-        for item in self.gateway.contracts.values():
-            symbol = item.symbol
-            contract_po = ContractPo(
-                    symbol=symbol,
-                    exchange_id=item.exchange.value,
-                    instrument_name=item.name,
-                    product_type="FUTURES",
-                    volume_multiple=item.multiple,
-                    price_tick=item.pricetick,
-                    min_volume=1,
-                    option_strike=None,
-                    option_underlying=None,
-                    option_type=None,
-                    update_date=update_date,
-                )
-            contracts_to_save.append(contract_po)
-        if len(contracts_to_save) > 0:
-            try:
-
-                with session_scope() as session:
-                    # 先删除历史数据
-                    deleted_count = session.query(ContractPo).delete(synchronize_session=False)
-                    logger.info(f"删除了 {deleted_count} 条旧合约信息")
-                    # 批量插入新数据
-                    session.add_all(contracts_to_save)
-                    logger.info(f"成功保存 {len(contracts_to_save)} 个合约信息到数据库")
-            except Exception as e:
-                logger.exception(f"保存合约信息到数据库失败: {e}")
+        contract_count = len(self.gateway.contracts)
+        logger.info(f"CTP合约信息已加载到内存: {contract_count} 个 (日期: {update_date})")
+        logger.info("合约持久化由Manager统一处理，不再写入本地数据库")

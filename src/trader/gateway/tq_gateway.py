@@ -35,11 +35,9 @@ from src.models.object import (
     TickData,
     TradeData,
 )
-from src.models.po import ContractPo
 from src.trader.gateway.base_gateway import BaseGateway
 from src.utils.async_event_engine import AsyncEventEngine
 from src.utils.config_loader import GatewayConfig,TraderConfig
-from src.utils.database import session_scope
 from src.utils.logger import get_logger
 
 ctx = get_app_context()
@@ -447,7 +445,7 @@ class TqGateway(BaseGateway):
 
     def _query_and_save_contracts(self, update_date: str) -> None:
         """
-        从API查询合约信息并保存到数据库
+        从API查询合约信息并加载到内存（不再保存到本地数据库，由Manager统一写入共享数据库）
 
         Args:
             update_date: 更新日期 (YYYY-MM-DD)
@@ -462,8 +460,6 @@ class TqGateway(BaseGateway):
             quotes = [x for x in quotes if len(x) <= 12]
             symbol_infos = self.api.query_symbol_info(quotes)
             logger.info(f"从API查询到 {len(symbol_infos)} 个合约")
-
-            contracts_to_save = []
 
             for index, item in symbol_infos.iterrows():
                 symbol = (
@@ -487,42 +483,11 @@ class TqGateway(BaseGateway):
                 # 应用开仓限制配置
                 self._fill_open_limit(contract)
                 self.contracts[contract.symbol] = contract
-                # self._upper_symbols[contract.symbol.rsplit(".")[1].upper()] = contract.exchange.value
 
-                # 准备保存到数据库的数据
-                contract_po = ContractPo(
-                    symbol=symbol,
-                    exchange_id=item.exchange_id,
-                    instrument_name=item.instrument_name,
-                    product_type="FUTURES",
-                    volume_multiple=item.volume_multiple,
-                    price_tick=item.price_tick,
-                    min_volume=1,
-                    option_strike=None,
-                    option_underlying=None,
-                    option_type=None,
-                    update_date=update_date,
-                )
-                contracts_to_save.append(contract_po)
+            logger.info(f"从API加载了 {len(self.contracts)} 个合约信息到内存")
 
-            logger.info(
-                f"从API加载了 {len(self.contracts)} 个合约信息，准备保存 {len(contracts_to_save)} 个到数据库"
-            )
-
-            # 批量保存到数据库
-            if len(contracts_to_save) > 0:
-                try:
-                    with session_scope() as session:
-                        # 先删除历史数据
-                        deleted_count = session.query(ContractPo).delete(synchronize_session=False)
-                        logger.info(f"删除了 {deleted_count} 条旧合约信息")
-                        # 批量插入新数据
-                        session.add_all(contracts_to_save)
-                        logger.info(f"成功保存 {len(contracts_to_save)} 个合约信息到数据库")
-                except Exception as e:
-                    logger.exception(f"保存合约信息到数据库失败: {e}")
-
-            logger.info(f"成功从API加载 {len(self.contracts)} 个合约信息")
+            # 注意：合约不再保存到本地数据库，由Manager统一写入共享数据库
+            # Manager会通过 init_public_data 消息将合约数据推送给所有Trader
 
         except Exception as e:
             logger.error(f"从API查询合约信息失败: {e}", exc_info=True)
