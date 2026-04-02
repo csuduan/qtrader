@@ -19,6 +19,61 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/api/trade", tags=["成交"])
 
 
+def _query_trades_from_db(
+    account_id: Optional[str],
+    date: str,
+) -> List[dict]:
+    """从PG查询历史成交记录
+
+    Args:
+        account_id: 账户ID（可选，None则查全部）
+        date: 查询日期 YYYY-MM-DD
+
+    Returns:
+        成交记录字典列表
+    """
+    from src.models.po import TradePo
+    from src.utils.database import get_database
+
+    db = get_database()
+    if not db:
+        return []
+
+    # 将日期转为时间戳范围
+    try:
+        target_date = datetime.strptime(date, "%Y-%m-%d")
+        start_ts = int(target_date.timestamp())
+        end_ts = int(datetime(target_date.year, target_date.month, target_date.day, 23, 59, 59).timestamp())
+    except ValueError:
+        return []
+
+    with db.get_session() as session:
+        query = session.query(TradePo).filter(
+            TradePo.trade_date_time >= start_ts,
+            TradePo.trade_date_time <= end_ts,
+        )
+        if account_id:
+            query = query.filter(TradePo.account_id == account_id)
+
+        trade_pos = query.order_by(TradePo.trade_date_time.desc()).all()
+
+        result = []
+        for t in trade_pos:
+            result.append({
+                "account_id": t.account_id,
+                "trade_id": t.trade_id,
+                "order_id": t.order_id or "",
+                "symbol": t.symbol,
+                "direction": t.direction,
+                "offset": t.offset,
+                "price": float(t.price) if t.price else 0,
+                "volume": t.volume or 0,
+                "trade_date_time": datetime.fromtimestamp(t.trade_date_time) if t.trade_date_time else datetime.now(),
+                "created_at": t.created_at or datetime.now(),
+            })
+        return result
+
+
 @router.get("")
 async def get_trades(
     account_id: Optional[str] = Query(None, description="账户ID（多账号模式）"),
@@ -28,53 +83,69 @@ async def get_trades(
     """
     获取成交记录
 
-    返回最近的成交记录，支持分页
-    - 今日成交记录自动从内存查询
-    - 历史成交记录自动从数据库查询
-    - 设置from_db=true可强制从数据库查询
-    - account_id: 可选，指定账户ID筛选（多账号模式）
+    - 当日成交记录从内存缓存查询（由Trader实时推送维护）
+    - 历史成交记录从数据库查询
     """
-
     try:
-        # 从内存查询（使用 TradingManager）
-        trades_list: List[TradeData] = await trading_manager.get_trades(account_id=account_id)
+        today = datetime.now().strftime("%Y-%m-%d")
+        query_date = date or today
 
-        # 按成交时间倒序排序
-        trades_list.sort(key=lambda x: x.trade_time or 0, reverse=True)
+        if query_date == today:
+            # 当天：从内存缓存查询
+            trades_list: List[TradeData] = await trading_manager.get_trades(account_id=account_id)
+            trades_list.sort(key=lambda x: x.trade_time or 0, reverse=True)
 
-        data = []
-        for trade in trades_list:
-            # 将 datetime 转换为 Unix 时间戳（秒）
-            trade_time_ts = 0
-            if trade.trade_time:
-                if isinstance(trade.trade_time, datetime):
-                    trade_time_ts = int(trade.trade_time.timestamp())
-                elif isinstance(trade.trade_time, (int, float)):
-                    trade_time_ts = int(trade.trade_time)
+            data = []
+            for trade in trades_list:
+                trade_time_ts = 0
+                if trade.trade_time:
+                    if isinstance(trade.trade_time, datetime):
+                        trade_time_ts = int(trade.trade_time.timestamp())
+                    elif isinstance(trade.trade_time, (int, float)):
+                        trade_time_ts = int(trade.trade_time)
 
-            data.append(
+                data.append(
+                    TradeRes(
+                        id=0,
+                        account_id=trade.account_id,
+                        trade_id=trade.trade_id,
+                        order_id=trade.order_id,
+                        symbol=trade.symbol,
+                        direction=(
+                            trade.direction.value
+                            if hasattr(trade.direction, "value")
+                            else str(trade.direction)
+                        ),
+                        offset=(
+                            trade.offset.value if hasattr(trade.offset, "value") else str(trade.offset)
+                        ),
+                        price=float(trade.price),
+                        volume=trade.volume,
+                        trade_date_time=(
+                            datetime.fromtimestamp(trade_time_ts) if trade_time_ts else datetime.now()
+                        ),
+                        created_at=datetime.now(),
+                    )
+                )
+        else:
+            # 历史：从PG查询
+            db_trades = _query_trades_from_db(account_id, query_date)
+            data = [
                 TradeRes(
                     id=0,
-                    account_id=trade.account_id,
-                    trade_id=trade.trade_id,
-                    order_id=trade.order_id,
-                    symbol=trade.symbol,
-                    direction=(
-                        trade.direction.value
-                        if hasattr(trade.direction, "value")
-                        else str(trade.direction)
-                    ),
-                    offset=(
-                        trade.offset.value if hasattr(trade.offset, "value") else str(trade.offset)
-                    ),
-                    price=float(trade.price),
-                    volume=trade.volume,
-                    trade_date_time=(
-                        datetime.fromtimestamp(trade_time_ts) if trade_time_ts else datetime.now()
-                    ),
-                    created_at=datetime.now(),
+                    account_id=t["account_id"],
+                    trade_id=t["trade_id"],
+                    order_id=t["order_id"],
+                    symbol=t["symbol"],
+                    direction=t["direction"],
+                    offset=t["offset"],
+                    price=float(t["price"]),
+                    volume=t["volume"],
+                    trade_date_time=t["trade_date_time"],
+                    created_at=t["created_at"],
                 )
-            )
+                for t in db_trades
+            ]
 
         return success_response(data=data, message="获取成功")
     except Exception as e:
@@ -95,10 +166,8 @@ async def get_trades_by_order(
     - **account_id**: 可选，指定账户ID筛选（多账号模式）
     """
     try:
-        # 从 TradingManager 获取所有成交记录
         all_trades = await trading_manager.get_trades(account_id)
 
-        # 筛选出指定委托单的成交记录
         order_trades = [
             TradeRes(
                 id=0,

@@ -400,8 +400,6 @@ class CtpGateway(BaseGateway):
 
     def add_contract(self, contract: ContractData) -> None:
         """添加合约"""
-        # 应用开仓限制配置
-        self._fill_open_limit(contract)
         self.contracts[contract.symbol] = contract
 
     # ==================== 处理ctp_api回调 ====================
@@ -443,8 +441,10 @@ class CtpGateway(BaseGateway):
             position = PositionData.default(symbol, trade.exchange, multiple)
             self._positions[symbol] = position
         position.update_position(trade)
-        # 推送更新后的持仓
-        self._push_to_queue(EventTypes.POSITION_UPDATE, position)
+        # 推送更新后的持仓（标记为交易来源）
+        position_data = position.model_dump()
+        position_data["_source"] = "trade"  # 标记来源为交易
+        self._push_to_queue(EventTypes.POSITION_UPDATE, position_data)
 
     def on_account(self, account: AccountData) -> None:
         """处理账户回调"""
@@ -460,12 +460,14 @@ class CtpGateway(BaseGateway):
         )
         self._push_to_queue(EventTypes.ACCOUNT_UPDATE, account)
 
-    def on_status(self) -> None:
+    def on_status(self, ready: bool=False) -> None:
         """处理状态回调"""
         if self.td_api is None or self.md_api is None:
             return
         self.md_connected = self.md_api.connected
-        self.td_connected = self.td_api.is_ready
+        self.td_connected = self.td_api.connected
+
+         
 
         # 推送最新账户信息，确保前端连接状态实时更新
         account = self.get_account()
@@ -473,6 +475,9 @@ class CtpGateway(BaseGateway):
             account.md_connected = self.md_connected
             account.td_connected = self.td_connected
             self._push_to_queue(EventTypes.ACCOUNT_UPDATE, account)
+
+            if ready:
+                self._push_to_queue(EventTypes.ACCOUNT_READY, None)
 
         if self.connected:
             # 订阅行情

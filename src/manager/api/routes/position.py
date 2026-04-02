@@ -39,12 +39,13 @@ async def get_positions(
         )
         filtered_positions = {k: v for k, v in positions_dict.items() if k in enabled_accounts}
 
-        # 转换为列表
-        positions_list = []
-        for acc_id, positions in positions_dict.items():
+        # 转换为列表（保留账户ID信息）
+        positions_with_account = []
+        for acc_id, positions in filtered_positions.items():
             if account_id and acc_id != account_id:
                 continue
-            positions_list.extend(positions)
+            for pos in positions:
+                positions_with_account.append((acc_id, pos))
 
         return success_response(
             data=[
@@ -67,7 +68,7 @@ async def get_positions(
                     margin_short=pos.margin_short,
                     updated_at=pos.updated_at or datetime.now(),
                 )
-                for pos in positions_list
+                for acc_id, pos in positions_with_account
             ],
             message="获取成功",
         )

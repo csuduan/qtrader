@@ -6,10 +6,12 @@ Socket服务器 - V2版本，使用标准协议
 - 退避重连策略
 - 健康检查机制
 - 请求处理器注册表
+- 推送消息缓冲队列（Manager 断线时缓存，重连后重传）
 """
 
 import asyncio
 import uuid
+from collections import deque
 from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set
@@ -176,11 +178,16 @@ class SocketServer:
     - 心跳检测
     - 自动重连退避策略
     - 完善的错误处理
+    - 推送消息缓冲（Manager 断线时缓存，重连后重传）
 
     Attributes:
         socket_path: Socket文件路径
         account_id: 账户ID
     """
+
+    # 推送缓冲队列配置
+    PUSH_QUEUE_MAX_SIZE = 1000  # 最大缓冲条数
+    BUFFERED_PUSH_TYPES = {"account", "order", "trade", "position"}  # 需要缓冲的推送类型
 
     def __init__(
         self,
@@ -201,6 +208,9 @@ class SocketServer:
         self._enable_health_check = enable_health_check
         self._health_check_interval = health_check_interval
         self._health_check_task: Optional[asyncio.Task] = None
+
+        # 推送缓冲队列：Manager 断开时缓存推送消息，重连后自动发送
+        self._push_queue: deque[MessageBody] = deque(maxlen=self.PUSH_QUEUE_MAX_SIZE)
 
         # 统计信息
         self._stats = {
@@ -326,6 +336,9 @@ class SocketServer:
             await conn.send_message(
                 create_response({"account_id": self.account_id, "conn_id": conn_id}, "")
             )
+
+            # 新客户端连接建立，刷新推送缓冲队列
+            await self._flush_push_queue()
 
             # 消息处理循环
             while conn.is_connected() and self._running:
@@ -496,6 +509,9 @@ class SocketServer:
         """
         发送推送消息到所有客户端
 
+        如果没有客户端连接且推送类型需要缓冲，则将消息加入缓冲队列，
+        待 Manager 重连后自动发送。
+
         Args:
             push_type: 推送类型
             data: 推送数据
@@ -503,7 +519,57 @@ class SocketServer:
         Returns:
             是否至少一个客户端发送成功
         """
-        return await self.send_message(create_push(push_type, data))
+        message = create_push(push_type, data)
+
+        async with self._clients_lock:
+            clients = list(self._clients.values())
+
+        if clients:
+            success = False
+            for conn in clients:
+                if conn.is_connected():
+                    if await conn.send_message(message):
+                        success = True
+                        self._stats["messages_sent"] += 1
+            if success:
+                return True
+
+        # 发送失败（无客户端或全部发送失败），且推送类型需要缓冲
+        if push_type in self.BUFFERED_PUSH_TYPES:
+            self._push_queue.append(message)
+            logger.debug(f"推送消息已缓冲 [{push_type}]，队列长度: {len(self._push_queue)}")
+
+        return False
+
+    async def _flush_push_queue(self) -> None:
+        """
+        发送缓冲队列中的所有消息
+
+        在新客户端连接后调用，将 Manager 断线期间缓冲的消息全部发送。
+        """
+        if not self._push_queue:
+            return
+
+        queue_size = len(self._push_queue)
+        logger.info(f"开始发送推送缓冲队列，共 {queue_size} 条消息")
+
+        sent = 0
+        while self._push_queue:
+            message = self._push_queue.popleft()
+            async with self._clients_lock:
+                clients = list(self._clients.values())
+            if not clients:
+                # 客户端又断了，把消息放回去
+                self._push_queue.appendleft(message)
+                logger.warning(f"发送缓冲队列时客户端断开，剩余 {len(self._push_queue)} 条")
+                break
+            for conn in clients:
+                if conn.is_connected():
+                    if await conn.send_message(message):
+                        sent += 1
+                        self._stats["messages_sent"] += 1
+
+        logger.info(f"推送缓冲队列发送完成：已发送 {sent}/{queue_size} 条")
 
     def is_connected(self) -> bool:
         """
@@ -524,6 +590,7 @@ class SocketServer:
             **self._stats,
             "active_connections": self.get_connection_count(),
             "total_clients": len(self._clients),
+            "push_queue_size": len(self._push_queue),
         }
 
     async def send_heartbeat(self) -> bool:

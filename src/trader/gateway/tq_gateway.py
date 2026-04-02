@@ -61,7 +61,6 @@ class TqGateway(BaseGateway):
     def __init__(self, acct_config: TraderConfig):
         super().__init__()
         self._running = False
-        self.is_ready: bool = False
         self.config = acct_config.gateway
         self.account_id = self.config.account_id
         logger.info(f"TqGateway初始化, account_id: {self.account_id}, id: {id(self)}")
@@ -150,7 +149,6 @@ class TqGateway(BaseGateway):
             self._running = False
             self.md_connected = False
             self.td_connected = False
-            self.is_ready = False
             self._push_account(self._convert_account(self._account))
 
             # 取消事件分发协程
@@ -251,7 +249,6 @@ class TqGateway(BaseGateway):
                 self._query_and_save_contracts(today)
 
             self.trading_day = self.get_trading_day()
-            self.is_ready = True
 
             logger.info(f"TqSdk连接成功,交易日: {self.trading_day}")
 
@@ -265,7 +262,7 @@ class TqGateway(BaseGateway):
             # 订阅kline
             for symbol, interval in self.kline_subs:
                 self.subscribe_bars(symbol, interval)
-
+            
             logger.info("TqSdk开始轮询...")
             while self._running:
                 if self.api is None:
@@ -315,7 +312,7 @@ class TqGateway(BaseGateway):
         try:
             # 添加到订阅列表中
             self.hist_subs.update(symbols)
-            if not self.connected or not self.is_ready:
+            if not self.connected:
                 return True
 
             std_symbols = [self.std_symbol(s) for s in symbols]
@@ -480,8 +477,6 @@ class TqGateway(BaseGateway):
                     pricetick=item.price_tick,
                     min_volume=1,
                 )  # type: ignore[call-arg]
-                # 应用开仓限制配置
-                self._fill_open_limit(contract)
                 self.contracts[contract.symbol] = contract
 
             logger.info(f"从API加载了 {len(self.contracts)} 个合约信息到内存")
@@ -642,6 +637,7 @@ class TqGateway(BaseGateway):
             "失败",
             "不",
             "超过",
+            "超限",
             "没有",
         ]
         status_msg = order.get("last_msg", "")
@@ -776,12 +772,12 @@ class TqGateway(BaseGateway):
                         trade_data = self._convert_trade(trade)
                         self._push_trade(trade_data)
 
-            # 检查持仓变化
+            # 检查持仓变化（持仓数量变化，由交易引起）
             if self.api.is_changing(self._positions):
                 for position in self._positions.values():
                     if self.api.is_changing(position, ["pos_long", "pos_short"]):
                         position_data = self._convert_position(position)
-                        self._push_position(position_data)
+                        self._push_position(position_data, source="trade")
 
             # 检查账户变化
             # if self.api.is_changing(self._account):
@@ -826,9 +822,17 @@ class TqGateway(BaseGateway):
         self._push_to_queue("trade", trade_data)
         logger.info(f"成交回报: {trade_data}")
 
-    def _push_position(self, position_data: PositionData):
-        """推送Position数据到同步队列（非阻塞）"""
-        self._push_to_queue("position", position_data)
+    def _push_position(self, position_data: PositionData, source: str = "trade"):
+        """推送Position数据到同步队列（非阻塞）
+
+        Args:
+            position_data: 持仓数据
+            source: 数据来源，"trade"表示交易引起，"tick"表示行情引起
+        """
+        # 将source标记添加到数据中
+        data_dict = position_data.model_dump()
+        data_dict["_source"] = source
+        self._push_to_queue("position", data_dict)
 
     def _push_account(self, account_data: AccountData):
         """推送Account数据到同步队列（非阻塞）"""

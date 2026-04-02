@@ -8,6 +8,7 @@
       </div>
       <el-menu
         :default-active="$route.path"
+        :default-openeds="['/account']"
         router
         class="nav-menu"
         background-color="#304156"
@@ -18,29 +19,45 @@
           <el-icon><DataBoard /></el-icon>
           <span>总览</span>
         </el-menu-item>
-        <el-menu-item index="/account">
-          <el-icon><User /></el-icon>
-          <span>账户</span>
-        </el-menu-item>
-        <el-menu-item index="/trading">
-          <el-icon><Operation /></el-icon>
-          <span>交易</span>
-        </el-menu-item>
-        <el-menu-item index="/strategy">
-          <el-icon><TrendCharts /></el-icon>
-          <span>策略</span>
-        </el-menu-item>
-        <el-menu-item index="/rotation">
-          <el-icon><RefreshRight /></el-icon>
-          <span>换仓</span>
-        </el-menu-item>
-        <el-menu-item index="/system">
-          <el-icon><Setting /></el-icon>
+
+        <!-- 账户子菜单 -->
+        <el-sub-menu index="/account">
+          <template #title>
+            <el-icon><User /></el-icon>
+            <span>账户</span>
+          </template>
+          <el-menu-item index="/account/detail">
+            <el-icon><Document /></el-icon>
+            <span>详情</span>
+          </el-menu-item>
+          <el-menu-item index="/account/trading">
+            <el-icon><Operation /></el-icon>
+            <span>交易</span>
+          </el-menu-item>
+          <el-menu-item index="/account/rotation">
+            <el-icon><RefreshRight /></el-icon>
+            <span>换仓</span>
+          </el-menu-item>
+          <el-menu-item index="/account/strategy">
+            <el-icon><TrendCharts /></el-icon>
+            <span>策略</span>
+          </el-menu-item>
+          <el-menu-item index="/account/setting">
+            <el-icon><Setting /></el-icon>
+            <span>设置</span>
+          </el-menu-item>
+        </el-sub-menu>
+
+        <!-- 系统菜单（一级） -->
+        <el-menu-item index="/admin/system">
+          <el-icon><Monitor /></el-icon>
           <span>系统</span>
         </el-menu-item>
-        <el-menu-item index="/alarms">
-          <el-icon><Warning /></el-icon>
-          <span>告警</span>
+
+        <!-- 监控告警菜单（一级） -->
+        <el-menu-item index="/admin/alarms">
+          <el-icon><Odometer /></el-icon>
+          <span>监控</span>
         </el-menu-item>
       </el-menu>
     </el-aside>
@@ -86,6 +103,12 @@
                   <!-- 已连接状态：显示连接网关、断开网关、暂停交易、恢复交易 -->
                   <template v-if="isAccountConnected(store.currentAccount)">
                     <el-dropdown-item
+                      :command="{ action: 'sync' }"
+                    >
+                      <el-icon><Refresh /></el-icon>
+                      同步数据
+                    </el-dropdown-item>
+                    <el-dropdown-item divided
                       :command="{ action: 'connect_gateway' }"
                       v-if="!store.currentAccount?.md_connected || !store.currentAccount?.td_connected"
                     >
@@ -256,6 +279,12 @@ async function handleAccountAction(cmd: any, accountId: string | undefined) {
         await accountApi.resumeTrading(targetAccountId)
         ElMessage.success('交易已恢复')
         await store.loadAllAccounts()
+        break
+      case 'sync':
+        await accountApi.syncAccount(targetAccountId)
+        ElMessage.success('同步成功')
+        await store.loadAllAccounts()
+        await store.loadPositions(targetAccountId)
         break
     }
   } catch (error: any) {

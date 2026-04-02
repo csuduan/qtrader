@@ -12,6 +12,8 @@ from pydantic import BaseModel
 from src.manager.api.dependencies import get_trading_manager
 from src.manager.api.responses import error_response, success_response
 from src.manager.manager import TradingManager
+from src.models.po import RotationInstructionPo
+from src.utils.database import get_database
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -95,21 +97,75 @@ async def get_rotation_instructions(
     - **enabled**: 是否启用筛选
     """
     try:
-        result = await trading_manager.get_rotation_instructions(
-            account_id, limit=limit, offset=offset, status=status, enabled=enabled
-        )
-        if result is None:
-            return success_response(
-                data={
-                    "instructions": [],
-                    "rotation_status": {"working": False, "is_manual": False},
-                    "total": 0,
-                    "limit": limit,
-                    "offset": offset,
-                },
-                message="获取成功",
+        db = get_database()
+        if not db:
+            return error_response(code=500, message="数据库未初始化")
+
+        with db.get_session() as session:
+            # 构建查询
+            query = session.query(RotationInstructionPo).filter(
+                RotationInstructionPo.account_id == account_id,
+                RotationInstructionPo.is_deleted.is_(False)
             )
-        return success_response(data=result, message="获取成功")
+
+            # 应用状态筛选
+            if status:
+                query = query.filter(RotationInstructionPo.status == status)
+
+            # 应用启用状态筛选
+            if enabled is not None:
+                query = query.filter(RotationInstructionPo.enabled.is_(enabled))
+
+            # 获取总数
+            total = query.count()
+
+            # 排序并分页
+            instructions = query.order_by(
+                RotationInstructionPo.created_at.desc()
+            ).offset(offset).limit(limit).all()
+
+            # 转换为响应格式
+            data = [
+                RotationInstructionResponse(
+                    id=inst.id,
+                    account_id=inst.account_id,
+                    strategy_id=inst.strategy_id,
+                    symbol=inst.symbol,
+                    exchange_id=inst.symbol.split(".")[-1] if inst.symbol and "." in inst.symbol else None,
+                    offset=inst.offset,
+                    direction=inst.direction,
+                    volume=inst.volume,
+                    filled_volume=inst.filled_volume,
+                    price=float(inst.price) if inst.price else 0,
+                    order_time=inst.order_time,
+                    trading_date=inst.trading_date,
+                    enabled=inst.enabled,
+                    status=inst.status,
+                    attempt_count=inst.attempt_count,
+                    remaining_attempts=inst.remaining_attempts,
+                    remaining_volume=inst.remaining_volume,
+                    current_order_id=inst.current_order_id,
+                    order_placed_time=inst.order_placed_time,
+                    last_attempt_time=inst.last_attempt_time,
+                    error_message=inst.error_message,
+                    source=inst.source,
+                    is_deleted=inst.is_deleted,
+                    created_at=inst.created_at,
+                    updated_at=inst.updated_at,
+                )
+                for inst in instructions
+            ]
+
+            # 构造响应
+            result = {
+                "instructions": [item.model_dump() for item in data],
+                "rotation_status": {"working": False, "is_manual": False},
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+            }
+
+            return success_response(data=result, message="获取成功")
     except Exception as e:
         logger.error(f"获取换仓指令列表失败: {e}")
         return error_response(message=f"获取换仓指令列表失败: {str(e)}")
@@ -128,10 +184,49 @@ async def get_rotation_instruction(
     - **instruction_id**: 指令ID
     """
     try:
-        result = await trading_manager.get_rotation_instruction(account_id, instruction_id)
-        if result is None:
-            return error_response(code=404, message="换仓指令不存在")
-        return success_response(data=result, message="获取成功")
+        db = get_database()
+        if not db:
+            return error_response(code=500, message="数据库未初始化")
+
+        with db.get_session() as session:
+            inst = session.query(RotationInstructionPo).filter(
+                RotationInstructionPo.id == instruction_id,
+                RotationInstructionPo.account_id == account_id,
+                RotationInstructionPo.is_deleted.is_(False)
+            ).first()
+
+            if not inst:
+                return error_response(code=404, message="换仓指令不存在")
+
+            result = RotationInstructionResponse(
+                id=inst.id,
+                account_id=inst.account_id,
+                strategy_id=inst.strategy_id,
+                symbol=inst.symbol,
+                exchange_id=inst.symbol.split(".")[-1] if inst.symbol and "." in inst.symbol else None,
+                offset=inst.offset,
+                direction=inst.direction,
+                volume=inst.volume,
+                filled_volume=inst.filled_volume,
+                price=float(inst.price) if inst.price else 0,
+                order_time=inst.order_time,
+                trading_date=inst.trading_date,
+                enabled=inst.enabled,
+                status=inst.status,
+                attempt_count=inst.attempt_count,
+                remaining_attempts=inst.remaining_attempts,
+                remaining_volume=inst.remaining_volume,
+                current_order_id=inst.current_order_id,
+                order_placed_time=inst.order_placed_time,
+                last_attempt_time=inst.last_attempt_time,
+                error_message=inst.error_message,
+                source=inst.source,
+                is_deleted=inst.is_deleted,
+                created_at=inst.created_at,
+                updated_at=inst.updated_at,
+            )
+
+            return success_response(data=result.model_dump(), message="获取成功")
     except Exception as e:
         logger.error(f"获取换仓指令失败: {e}")
         return error_response(message=f"获取换仓指令失败: {str(e)}")

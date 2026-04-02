@@ -36,7 +36,6 @@ from src.utils.database import get_session
 from src.utils.event_engine import EventTypes
 from src.utils.helpers import _get_int_param
 from src.utils.logger import get_logger
-from src.utils.wecomm import send_wechat
 
 logger = get_logger(__name__)
 ctx = get_app_context()
@@ -224,7 +223,7 @@ class TradingEngine:
         """
         加载风控配置
 
-        优先从数据库加载，如果数据库中没有，则使用配置文件中的默认值
+        优先从共享数据库加载，如果没有，则使用配置文件中的默认值
 
         Returns:
             RiskControlConfig: 风控配置对象
@@ -236,7 +235,13 @@ class TradingEngine:
 
         try:
             params = {
-                param.param_key: param.param_value for param in session.query(SystemParamPo).all()
+                param.param_key: param.param_value
+                for param in session.query(SystemParamPo)
+                .filter(
+                    (SystemParamPo.account_id == self.account_id)
+                    | (SystemParamPo.account_id.is_(None))
+                )
+                .all()
             }
 
             risk_control_params = {
@@ -547,10 +552,14 @@ class TradingEngine:
         if self._order_cmd_executor:
             self._order_cmd_executor.register(cmd)
 
-        if "策略-" in cmd.source and self.config.alert_wechat:
-            send_wechat(
-                f"账户[{self.account_id}提醒]：创建新的报单指令{cmd.cmd_id} {cmd.symbol} {cmd.offset} {cmd.direction} {cmd.volume}手"
-            )
+        # 策略报单指令告警 → 通过事件引擎推送，由 Manager 统一处理通知
+        if "策略-" in cmd.source:
+            self._emit_event(EventTypes.ALARM_UPDATE, {
+                "account_id": self.account_id,
+                "source": "ORDER_CMD",
+                "title": f"策略报单指令 {cmd.cmd_id}",
+                "detail": f"{cmd.symbol} {cmd.offset} {cmd.direction} {cmd.volume}手 (来源: {cmd.source})",
+            })
 
         logger.info(f"创建报单指令: {cmd.cmd_id} {cmd.symbol} {cmd.direction} {cmd.volume}手")
         return cmd.cmd_id

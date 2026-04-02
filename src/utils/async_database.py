@@ -1,11 +1,9 @@
 """
-异步数据库操作模块
+异步数据库操作模块（PostgreSQL）
 提供数据库连接、会话管理和初始化功能（异步版本）
-每个Trader进程管理一个独立的数据库
 """
 
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import AsyncGenerator, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -20,30 +18,39 @@ _async_db: Optional["AsyncDatabase"] = None
 
 
 class AsyncDatabase:
-    """异步数据库管理类"""
+    """PostgreSQL 异步数据库管理类"""
 
-    def __init__(self, db_path: str, echo: bool = False):
+    def __init__(self, db_url: str, echo: bool = False,
+                 pool_size: int = 5, max_overflow: int = 10):
         """
         初始化异步数据库连接
 
         Args:
-            db_path: 数据库文件路径
+            db_url: SQLAlchemy 异步数据库 URL（postgresql+asyncpg://...）
             echo: 是否输出SQL语句
+            pool_size: 连接池大小
+            max_overflow: 连接池最大溢出
         """
-        self.db_path = db_path
-        self.db_url = f"sqlite+aiosqlite:///{db_path}"
-        self.engine = create_async_engine(self.db_url, echo=echo)
+        self.db_url = db_url
+        self.engine = create_async_engine(
+            db_url,
+            echo=echo,
+            pool_size=pool_size,
+            max_overflow=max_overflow,
+        )
         self.async_session = async_sessionmaker(
             self.engine,
             class_=AsyncSession,
             expire_on_commit=False,
         )
-        logger.info(f"异步数据库连接已创建: {db_path}")
+
+        db_display = db_url.split("@")[-1] if "@" in db_url else db_url
+        logger.info(f"异步数据库连接已创建: {db_display}")
 
     async def create_tables(self) -> None:
         """创建所有数据表"""
         async with self.engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+            await conn.run_sync(Base.metadata.create_all, checkfirst=True)
         logger.info("数据库表创建完成")
 
     async def drop_tables(self) -> None:
@@ -81,31 +88,28 @@ class AsyncDatabase:
 
 
 async def init_async_database(
-    db_path: str, account_id: str = "default", echo: bool = False
+    db_url: str, account_id: str = "default", echo: bool = False,
+    pool_size: int = 5, max_overflow: int = 10
 ) -> AsyncDatabase:
     """
     初始化异步数据库
 
     Args:
-        db_path: 数据库文件路径
+        db_url: SQLAlchemy 异步数据库 URL（postgresql+asyncpg://...）
         account_id: 账户ID（用于日志记录）
         echo: 是否输出SQL语句
+        pool_size: 连接池大小
+        max_overflow: 连接池最大溢出
 
     Returns:
         AsyncDatabase: 异步数据库实例
     """
     global _async_db
 
-    # 确保数据库目录存在
-    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-
-    # 创建异步数据库实例
-    _async_db = AsyncDatabase(db_path, echo=echo)
-
-    # 创建表（如果不存在）
+    _async_db = AsyncDatabase(db_url, echo=echo, pool_size=pool_size, max_overflow=max_overflow)
     await _async_db.create_tables()
 
-    logger.info(f"账户 [{account_id}] 异步数据库初始化完成: {db_path}")
+    logger.info(f"账户 [{account_id}] 异步数据库初始化完成")
     return _async_db
 
 

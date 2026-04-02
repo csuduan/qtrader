@@ -299,7 +299,9 @@ class SwitchPosManager:
             with session_scope() as session:
                 for csv_file in csv_files:
                     # 检查该文件是否已导入
-                    existing = session.query(OrderFile).filter_by(file_name=csv_file.name).first()
+                    existing = session.query(OrderFile).filter_by(
+                        account_id=self.config.account_id, file_name=csv_file.name
+                    ).first()
                     if existing:
                         continue
 
@@ -313,6 +315,7 @@ class SwitchPosManager:
 
                     # 记录导入成功，写入导入记录
                     record = OrderFile(
+                        account_id=self.config.account_id,
                         file_name=csv_file.name,
                         file_path=str(csv_file.parent),
                         created_at=datetime.now(),

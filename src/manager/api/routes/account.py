@@ -35,6 +35,16 @@ async def get_account_info(
         # 从 TradingManager 获取账户数据
         ctx = get_app_context()
         trading_manager: TradingManager = ctx.get_trading_manager()
+
+        # 如果没有指定 account_id，使用配置中的第一个账户
+        if account_id is None:
+            from src.utils.config_loader import get_config_loader
+            config = get_config_loader().load_config()
+            if config.account_ids:
+                account_id = config.account_ids[0]
+            else:
+                return error_response(code=400, message="没有配置任何账户")
+
         account_data = await trading_manager.get_account(account_id)
         if not account_data:
             return error_response(code=404, message=f"账户 [{account_id}] 不存在")
@@ -232,6 +242,25 @@ async def stop_account_trader(
         return error_response(code=500, message="Trader停止失败")
 
 
+@router.post("/{account_id}/restart")
+async def restart_account_trader(
+    account_id: str,
+    trading_manager: TradingManager = Depends(get_trading_manager),
+):
+    """
+    重启账户Trader
+
+    重启指定账户的Trader进程
+    - **account_id**: 账户ID
+    """
+    success = await trading_manager.restart_trader(account_id)
+
+    if success:
+        return success_response(data={"running": True}, message="Trader已重启")
+    else:
+        return error_response(code=500, message="Trader重启失败")
+
+
 @router.post("/{account_id}/connect")
 async def connect_account_gateway(
     account_id: str,
@@ -319,3 +348,54 @@ async def resume_account_trading(
         return success_response(data={"paused": False}, message="交易已恢复")
     else:
         return error_response(code=500, message="恢复交易失败")
+
+
+@router.post("/sync")
+async def sync_all_accounts(
+    account_id: Optional[str] = Query(None, description="账户ID，不传则同步所有账户"),
+    trading_manager: TradingManager = Depends(get_trading_manager),
+):
+    """
+    手动触发账户数据全量同步
+
+    从Trader进程一次性拉取账户信息、持仓、报单、成交、行情数据，刷新Manager内存缓存。
+    - **account_id**: 可选，指定账户ID（不传则同步所有账户）
+    """
+    try:
+        if account_id:
+            result = await trading_manager.sync_account_data(account_id)
+            if result.get("success"):
+                return success_response(data=result, message="同步成功")
+            else:
+                return error_response(code=500, message=result.get("message", "同步失败"))
+        else:
+            # 同步所有账户
+            results = {}
+            for acc_id in trading_manager.traders.keys():
+                results[acc_id] = await trading_manager.sync_account_data(acc_id)
+            all_success = all(r.get("success", False) for r in results.values())
+            return success_response(
+                data={"results": results, "all_success": all_success},
+                message="全量同步完成" if all_success else "部分账户同步失败"
+            )
+    except Exception as e:
+        logger.exception(f"同步账户数据失败: {e}")
+        return error_response(code=500, message=f"同步失败: {str(e)}")
+
+
+@router.post("/{account_id}/sync")
+async def sync_single_account(
+    account_id: str,
+    trading_manager: TradingManager = Depends(get_trading_manager),
+):
+    """
+    手动触发指定账户数据全量同步
+
+    从Trader进程一次性拉取账户信息、持仓、报单、成交、行情数据，刷新Manager内存缓存。
+    - **account_id**: 账户ID
+    """
+    result = await trading_manager.sync_account_data(account_id)
+    if result.get("success"):
+        return success_response(data=result, message="同步成功")
+    else:
+        return error_response(code=500, message=result.get("message", "同步失败"))

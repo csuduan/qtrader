@@ -1,13 +1,9 @@
 """
-数据库操作模块（同步版本，向后兼容）
-提供数据库连接、会话管理和初始化功能
-每个Trader进程管理一个独立的数据库
-
-注意：新项目应使用 src.utils.async_database 中的异步版本
+数据库操作模块
+提供数据库连接、会话管理和初始化功能（PostgreSQL）
 """
 
 from contextlib import contextmanager
-from pathlib import Path
 from typing import Generator, Optional
 
 from sqlalchemy import create_engine
@@ -23,30 +19,40 @@ _db: Optional["Database"] = None
 
 
 class Database:
-    """数据库管理类"""
+    """PostgreSQL 数据库管理类"""
 
-    def __init__(self, db_path: str, echo: bool = False):
+    def __init__(self, db_url: str, echo: bool = False,
+                 pool_size: int = 5, max_overflow: int = 10):
         """
         初始化数据库连接
 
         Args:
-            db_path: 数据库文件路径
+            db_url: SQLAlchemy 数据库 URL（postgresql://...）
             echo: 是否输出SQL语句
+            pool_size: 连接池大小
+            max_overflow: 连接池最大溢出
         """
-        self.db_path = db_path
-        self.db_url = f"sqlite:///{db_path}"
-        self.engine = create_engine(self.db_url, echo=echo)
+        self.db_url = db_url
+        self.engine = create_engine(
+            db_url,
+            echo=echo,
+            pool_size=pool_size,
+            max_overflow=max_overflow,
+            pool_pre_ping=True,
+        )
         self.SessionLocal = sessionmaker(
             autocommit=False,
             autoflush=False,
             bind=self.engine,
             expire_on_commit=False,
         )
-        logger.info(f"数据库连接已创建: {db_path}")
+
+        db_display = db_url.split("@")[-1] if "@" in db_url else db_url
+        logger.info(f"数据库连接已创建: {db_display}")
 
     def create_tables(self) -> None:
         """创建所有数据表"""
-        Base.metadata.create_all(bind=self.engine)
+        Base.metadata.create_all(bind=self.engine, checkfirst=True)
         logger.info("数据库表创建完成")
 
     def drop_tables(self) -> None:
@@ -93,30 +99,27 @@ class Database:
         logger.info("数据库连接已关闭")
 
 
-def init_database(db_path: str, account_id: str = "default", echo: bool = False) -> Database:
+def init_database(db_url: str, account_id: str = "default", echo: bool = False,
+                  pool_size: int = 5, max_overflow: int = 10) -> Database:
     """
     初始化数据库
 
     Args:
-        db_path: 数据库文件路径
+        db_url: SQLAlchemy 数据库 URL（postgresql://...）
         account_id: 账户ID（用于日志记录）
         echo: 是否输出SQL语句
+        pool_size: 连接池大小
+        max_overflow: 连接池最大溢出
 
     Returns:
         Database: 数据库实例
     """
     global _db
 
-    # 确保数据库目录存在
-    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-
-    # 创建数据库实例
-    _db = Database(db_path, echo=echo)
-
-    # 创建表（如果不存在）
+    _db = Database(db_url, echo=echo, pool_size=pool_size, max_overflow=max_overflow)
     _db.create_tables()
 
-    logger.info(f"账户 [{account_id}] 数据库初始化完成: {db_path}")
+    logger.info(f"账户 [{account_id}] 数据库初始化完成")
     return _db
 
 

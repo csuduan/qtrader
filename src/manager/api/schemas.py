@@ -98,8 +98,8 @@ class OrderRes(BaseModel):
     limit_price: Optional[float] = None
     price_type: str
     status: str
-    insert_date_time: datetime
     last_msg: Optional[str] = None
+    insert_date_time: datetime
     created_at: datetime
     updated_at: datetime
 
@@ -345,6 +345,41 @@ class TraderStatusRes(BaseModel):
     last_heartbeat: Optional[datetime] = None
     restart_count: int = 0
     socket_path: Optional[str] = None
+
+
+class ResourcePoint(BaseModel):
+    """资源监控单个采样点"""
+
+    timestamp: str
+    cpu_percent: float
+    memory_percent: float
+    memory_used_gb: float
+    memory_total_gb: float
+    disk_percent: float
+    disk_used_gb: float
+    disk_total_gb: float
+
+
+class ResourceSnapshot(BaseModel):
+    """服务器资源实时快照"""
+
+    timestamp: str
+    cpu_percent: float
+    memory_percent: float
+    memory_used_gb: float
+    memory_total_gb: float
+    disk_percent: float
+    disk_used_gb: float
+    disk_total_gb: float
+    process_count: int
+    boot_time: str
+
+
+class ResourceHistory(BaseModel):
+    """资源监控历史数据"""
+
+    points: List[ResourcePoint]
+    interval_seconds: int = 5
 
 
 class OrderCmdRes(BaseModel):

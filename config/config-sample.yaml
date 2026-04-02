@@ -9,19 +9,14 @@ paths:
   params: "/opt/data/qtrader/params"
   export: "/opt/data/qtrader/export"
 
-# 数据库配置
-database:
-  # 公共数据库（共享合约信息，Manager写，Trader读）
-  # 路径相对于 paths.database 目录，文件名固定为 q-public.db
-  public_data:
-    enabled: true  # 是否启用公共数据共享机制
-
-# Trader初始化配置
-trader_init:
-  # 等待 Manager 推送公共数据的超时时间（秒）
-  # 超时后 Trader 将自行从网关加载合约信息
-  public_data_timeout: 30
-
+# 全局告警配置（所有账户共享）
+alert:
+  immediate: false     # 即时告警（Trader异常、连接断开等）
+  threshold: false     # 阈值告警（异常日志达到阈值时发送）
+  threshold_count: 5  # 阈值：异常次数
+  threshold_window: 300  # 时间窗口（秒）
+  dnd_start: 23       # 免打扰开始时间（小时，默认23点）
+  dnd_end: 8          # 免打扰结束时间（小时，默认次日8点）
 
 # API服务配置
 api:
@@ -36,11 +31,11 @@ api:
 # Manager 定时任务配置
 scheduler:
   jobs:
-    # Trader 健康检查
+    # Trader 健康检查（每10分钟，故障首次告警后压制，恢复后自动通知）
     - job_id: "trader_health_check"
       job_name: "Trader健康检查"
-      job_description: "检查所有Trader进程的连接状态"
-      cron_expression: "0 0,30 8-22 * * *"  # 每半小时 8:00-22:00
+      job_description: "检查所有Trader进程的连接状态，故障告警后压制直到恢复"
+      cron_expression: "0 */10 * * * *"  # 每10分钟
       job_method: "trader_health_check"
       enabled: true
 

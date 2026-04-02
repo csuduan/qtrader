@@ -129,8 +129,19 @@ class PublicDataService:
         update_date = datetime.now().strftime("%Y-%m-%d")
         count = 0
 
+        # 按 symbol 去重（保留最后一个）
+        seen = {}
+        for contract_dict in contracts:
+            symbol = contract_dict.get("symbol")
+            if symbol:
+                seen[symbol] = contract_dict
+        unique_contracts = list(seen.values())
+
+        if len(unique_contracts) < len(contracts):
+            logger.warning(f"合约列表去重: {len(contracts)} -> {len(unique_contracts)}")
+
         with self.shared_db.get_session() as session:
-            for contract_dict in contracts:
+            for contract_dict in unique_contracts:
                 symbol = contract_dict.get("symbol")
                 if not symbol:
                     continue
@@ -314,3 +325,11 @@ class PublicDataService:
     def has_contracts(self) -> bool:
         """是否有可用的合约数据"""
         return len(self._contracts) > 0
+
+    def has_fresh_contracts(self) -> bool:
+        """检查内存中的合约数据是否为今天的数据"""
+        if not self._contracts:
+            return False
+        today = datetime.now().strftime("%Y-%m-%d")
+        sample = next(iter(self._contracts.values()))
+        return sample.update_date == today

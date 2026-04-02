@@ -2,14 +2,13 @@
 合约信息相关API路由
 """
 
-from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Query, Request
 
-from src.app_context import get_app_context
 from src.manager.api.responses import error_response, success_response
-from src.manager.manager import TradingManager
+from src.models.po import ContractPo
+from src.utils.database import get_database
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -29,41 +28,52 @@ async def get_contracts(
     获取合约列表
 
     支持按交易所、产品类型、合约代码关键词筛选
-    从所有Trader进程的内存中获取合约信息
+    从合约数据库(ContractPo)中查询合约信息
     """
     try:
-        ctx = get_app_context()
-        trading_manager: TradingManager = ctx.get_trading_manager()
+        db = get_database()
+        if not db:
+            return error_response(code=500, message="数据库未初始化")
 
-        if not trading_manager:
-            return error_response(code=500, message="交易管理器未初始化")
+        with db.get_session() as session:
+            query = session.query(ContractPo)
 
-        # 从 Trader 进程获取合约列表
-        contracts = await trading_manager.get_contracts(
-            account_id=account_id,
-            exchange_id=exchange_id,
-            product_type=product_type,
-            symbol_keyword=symbol_keyword,
-        )
+            # 应用筛选条件
+            if exchange_id:
+                query = query.filter(ContractPo.exchange_id == exchange_id)
 
-        # 转换字段名称以兼容前端
-        result = []
-        for c in contracts:
-            result.append({
-                "symbol": c.get("symbol", ""),
-                "exchange_id": c.get("exchange", ""),
-                "name": c.get("name", ""),
-                "product_type": c.get("product_type", "FUTURES"),
-                "volume_multiple": c.get("multiple", 1),
-                "price_tick": c.get("pricetick", 0.01),
-                "min_volume": c.get("min_volume", 1),
-                "min_open_volume": c.get("min_open_volume", 1),
-                "option_strike": c.get("option_strike"),
-                "option_underlying": c.get("option_underlying"),
-                "option_type": c.get("option_type"),
-                "update_date": c.get("update_date", datetime.now().strftime("%Y-%m-%d")),
-                "updated_at": None,
-            })
+            if product_type:
+                query = query.filter(ContractPo.product_type == product_type)
+
+            if symbol_keyword:
+                query = query.filter(ContractPo.symbol.contains(symbol_keyword))
+
+            # 只查询活跃合约
+            query = query.filter(ContractPo.is_active.is_(True))
+
+            # 按交易所和合约代码排序
+            query = query.order_by(ContractPo.exchange_id, ContractPo.symbol)
+
+            contracts = query.all()
+
+            # 转换字段名称以兼容前端
+            result = []
+            for c in contracts:
+                result.append({
+                    "symbol": c.symbol,
+                    "exchange_id": c.exchange_id,
+                    "name": c.instrument_name or "",
+                    "product_type": c.product_type,
+                    "volume_multiple": c.volume_multiple,
+                    "price_tick": float(c.price_tick) if c.price_tick else 0.01,
+                    "min_volume": c.min_volume,
+                    "min_open_volume": c.min_volume,  # 暂时用min_volume
+                    "option_strike": float(c.option_strike) if c.option_strike else None,
+                    "option_underlying": c.option_underlying,
+                    "option_type": c.option_type,
+                    "update_date": c.update_date,
+                    "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+                })
 
         return success_response(data=result, message="获取成功")
     except Exception as e:
@@ -76,24 +86,23 @@ async def get_exchanges(request: Request):
     """
     获取可用的交易所列表
 
-    返回内存中存在的交易所及其合约数量
+    返回数据库中存在的交易所及其合约数量
     """
     try:
-        ctx = get_app_context()
-        trading_manager: TradingManager = ctx.get_trading_manager()
+        db = get_database()
+        if not db:
+            return error_response(code=500, message="数据库未初始化")
 
-        if not trading_manager:
-            return error_response(code=500, message="交易管理器未初始化")
+        with db.get_session() as session:
+            # 从数据库统计每个交易所的活跃合约数量
+            contracts = session.query(ContractPo.exchange_id).filter(
+                ContractPo.is_active.is_(True)
+            ).all()
 
-        # 从 Trader 进程获取所有合约
-        contracts = await trading_manager.get_contracts()
-
-        # 统计每个交易所的合约数量
-        exchange_counts = {}
-        for c in contracts:
-            ex_id = c.get("exchange", "")
-            if ex_id:
-                exchange_counts[ex_id] = exchange_counts.get(ex_id, 0) + 1
+            exchange_counts = {}
+            for (ex_id,) in contracts:
+                if ex_id:
+                    exchange_counts[ex_id] = exchange_counts.get(ex_id, 0) + 1
 
         # 转换为列表格式
         data = [

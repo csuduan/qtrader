@@ -8,8 +8,8 @@ export const accountApi = {
   /**
    * 获取账户信息
    */
-  getAccount: async (): Promise<Account> => {
-    return api.get<Account>('/account')
+  getAccount: async (accountId?: string): Promise<Account> => {
+    return api.get<Account>('/account', { params: { account_id: accountId } })
   },
 
   /**
@@ -48,6 +48,13 @@ export const accountApi = {
   },
 
   /**
+   * 重启账户Trader
+   */
+  restartTrader: async (accountId: string): Promise<{ running: boolean }> => {
+    return api.post<{ running: boolean }>(`/account/${accountId}/restart`)
+  },
+
+  /**
    * 连接账户网关
    */
   connectGateway: async (accountId: string): Promise<{ connected: boolean }> => {
@@ -73,5 +80,17 @@ export const accountApi = {
    */
   resumeTrading: async (accountId: string): Promise<{ paused: boolean }> => {
     return api.post<{ paused: boolean }>(`/account/${accountId}/resume`)
+  },
+
+  /**
+   * 手动同步账户数据（全量拉取账户+持仓+报单+成交）
+   */
+  syncAccount: async (accountId: string): Promise<{
+    success: boolean
+    positions: number
+    orders: number
+    trades: number
+  }> => {
+    return api.post(`/account/${accountId}/sync`)
   }
 }

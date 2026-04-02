@@ -11,7 +11,8 @@ import simplejson as json
 from fastapi import WebSocket
 
 from src.app_context import AppContext, get_app_context
-from src.utils.event_engine import EventEngine, EventTypes
+from src.utils.async_event_engine import AsyncEventEngine
+from src.utils.event_engine import EventTypes
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -25,7 +26,7 @@ class WebSocketManager:
         self.active_connections: set[WebSocket] = set()
 
     def start(self):
-        event_engine: EventEngine = ctx.get(AppContext.KEY_EVENT_ENGINE)
+        event_engine: AsyncEventEngine = ctx.get(AppContext.KEY_EVENT_ENGINE)
         event_engine.register(EventTypes.POSITION_UPDATE, self.broadcast_position)
         event_engine.register(EventTypes.ORDER_UPDATE, self.broadcast_order)
         event_engine.register(EventTypes.TRADE_UPDATE, self.broadcast_trade)

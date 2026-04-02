@@ -129,6 +129,7 @@ error_msg = [
             "失败",
             "不",
             "超过",
+            "超限",
             "没有",
 ]
 
@@ -387,7 +388,6 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
         # 连接状态
         self._running = False
         self.connected = False
-        self.is_ready = False
         self.contract_inited = False
 
         # 请求 ID 和订单引用
@@ -1117,8 +1117,8 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
         self.semaphore.acquire()
         logger.info("CTP 查询完成！")
         self.semaphore.release()
-        self.is_ready = True
-        self.gateway.on_status()
+        self.connected = True
+        self.gateway.on_status(True)
 
     def query_settlement(self) -> None:
         """查询结算单确认"""

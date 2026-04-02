@@ -39,6 +39,7 @@ from src.utils.config_loader import (
     get_log_dir,
 )
 from src.utils.database import Database, get_database, init_database
+from src.utils.db_url import build_db_url
 from src.utils.logger import get_logger, setup_logger
 
 logger = get_logger(__name__)
@@ -78,13 +79,17 @@ async def lifespan(app: FastAPI):
         log_level="INFO",
     )
 
-    # 初始化 Manager 本地数据库
-    db_dir = Path(_app_config.paths.database).expanduser().resolve()
-    db_dir.mkdir(parents=True, exist_ok=True)
-    manager_db_path = db_dir / "q-manager.db"
-    logger.info(f"Manager 数据库路径: {manager_db_path}")
-    _manager_db: Database = init_database(str(manager_db_path), account_id="manager", echo=False)
-    logger.info(f"Manager 数据库已初始化: {_manager_db}")
+    # 初始化统一共享数据库（PostgreSQL）
+    db_config = _app_config.data_base
+    db_url = build_db_url(db_config)
+    _manager_db: Database = init_database(
+        db_url,
+        account_id="manager",
+        echo=False,
+        pool_size=db_config.pg.pool_size,
+        max_overflow=db_config.pg.max_overflow,
+    )
+    logger.info(f"共享数据库已初始化: {_manager_db}")
 
     # 验证全局数据库是否正确设置
     from src.utils.database import get_database
@@ -114,8 +119,8 @@ async def lifespan(app: FastAPI):
     disabled_accounts = [acc for acc in all_accounts if not acc.enabled]
     _event_engine = AsyncEventEngine()
     _event_engine.start()
-    # 创建交易管理器（传入账户配置）
-    _trading_manager = TradingManager(all_accounts)
+    # 创建交易管理器（传入账户配置和全局配置）
+    _trading_manager = TradingManager(all_accounts, _app_config)
 
     # 使用 AppContext 设置全局状态
     ctx.set(AppContext.KEY_EVENT_ENGINE, _event_engine)
@@ -143,6 +148,10 @@ async def lifespan(app: FastAPI):
     # 停止交易管理器
     if _trading_manager:
         await _trading_manager.stop()
+
+    # 停止事件引擎
+    if _event_engine:
+        await _event_engine.stop()
 
     # 关闭数据库
     from src.utils.database import close_database

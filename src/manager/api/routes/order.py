@@ -18,6 +18,69 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/api/order", tags=["委托单"])
 
 
+def _query_orders_from_db(
+    status: str,
+    account_id: Optional[str],
+    limit: int,
+    offset: int,
+):
+    """从PG查询历史委托单（已成交/废单）"""
+    from datetime import datetime
+
+    from src.models.po import OrderPo
+    from src.utils.database import get_database
+
+    db = get_database()
+    if not db:
+        return error_response(code=500, message="数据库未初始化")
+
+    with db.get_session() as session:
+        query = session.query(OrderPo)
+        if account_id:
+            query = query.filter(OrderPo.account_id == account_id)
+
+        if status == "FINISHED":
+            query = query.filter(
+                (OrderPo.status == "FINISHED") & (OrderPo.volume_left < OrderPo.volume_orign)
+                )
+        elif status == "REJECTED":
+            query = query.filter(
+                (OrderPo.status == "REJECTED")
+                | (
+                    (OrderPo.status == "FINISHED")
+                    & (OrderPo.volume_left == OrderPo.volume_orign)
+                )
+            )
+
+        query = query.order_by(OrderPo.insert_date_time.desc())
+        order_pos = query.offset(offset).limit(limit).all()
+
+        return success_response(
+            data=[
+                OrderRes(
+                    id=o.id,
+                    account_id=o.account_id,
+                    order_id=o.order_id,
+                    exchange_order_id=o.exchange_order_id or "",
+                    symbol=o.symbol,
+                    direction=o.direction,
+                    offset=o.offset,
+                    volume_orign=o.volume_orign or 0,
+                    volume_left=o.volume_left or 0,
+                    limit_price=float(o.limit_price) if o.limit_price else None,
+                    price_type=o.price_type or "LIMIT",
+                    status=o.status,
+                    insert_date_time=o.insert_date_time,
+                    last_msg=o.status_msg or "",
+                    created_at=o.created_at or datetime.now(),
+                    updated_at=o.updated_at or datetime.now(),
+                )
+                for o in order_pos
+            ],
+            message="获取成功",
+        )
+
+
 @router.get("")
 async def get_orders(
     status: Optional[str] = Query(None, description="委托单状态: ALIVE/FINISHED/REJECTED"),
@@ -29,32 +92,25 @@ async def get_orders(
     """
     获取委托单列表
 
-    返回委托单记录，支持按状态筛选和分页
-    - ALIVE: 挂单中
-    - FINISHED: 已成交（有实际成交）
-    - REJECTED: 废单（包括REJECTED状态和FINISHED但未成交任何数量的订单）
-    - account_id: 可选，指定账户ID筛选（多账号模式）
+    - ALIVE(挂单): 从Manager内存缓存查询（由Trader实时推送维护）
+    - FINISHED(已成交): 从数据库查询
+    - REJECTED(废单): 从数据库查询
     """
     from datetime import datetime
 
     try:
-        # 从 TradingManager 获取订单数据
+        if status and status != "ALIVE":
+            # 已成交/废单：从PG查询历史数据
+            return _query_orders_from_db(status, account_id, limit, offset)
+
+        # 挂单(ALIVE)或全部：从内存缓存查询
         orders_list = await trading_manager.get_orders(account_id)
 
-        # 按状态筛选
-        if status:
-            if status == "REJECTED":
-                orders_list = [
-                    order for order in orders_list if order.status == OrderStatus.REJECTED
-                ]
-            elif status == "FINISHED":
-                orders_list = [
-                    order for order in orders_list if order.status == OrderStatus.FINISHED
-                ]
-            else:
-                orders_list = [
-                    order for order in orders_list if order.status == OrderStatus.PENDING
-                ]
+        # 按状态筛选（只保留挂单）
+        if status == "ALIVE":
+            orders_list = [
+                order for order in orders_list if order.status == OrderStatus.PENDING
+            ]
 
         total_count = len(orders_list)
         end_index = offset + limit
@@ -66,7 +122,7 @@ async def get_orders(
                     id=0,
                     account_id=order.account_id,
                     order_id=order.order_id,
-                    exchange_order_id=order.exchange.value or "",
+                    exchange_order_id=order.exchange.value if hasattr(order.exchange, "value") else "",
                     symbol=order.symbol,
                     direction=(
                         order.direction.value
@@ -87,8 +143,6 @@ async def get_orders(
                     status=order.status,
                     insert_date_time=order.insert_time or datetime.now(),
                     last_msg=order.status_msg or "",
-                    created_at=datetime.now(),
-                    updated_at=datetime.now(),
                 )
                 for order in paginated_orders
             ],

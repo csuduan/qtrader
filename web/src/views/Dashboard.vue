@@ -39,7 +39,17 @@
                   </el-button>
                   <template #dropdown>
                     <el-dropdown-menu>
-                      <!-- 已连接状态：显示连接网关、断开网关、暂停交易、恢复交易 -->
+                      <!-- 未连接状态：显示启动Trader -->
+                      <template v-if="!isAccountConnected(acc)">
+                        <el-dropdown-item
+                          :command="{ action: 'start_trader', accountId: acc.account_id }"
+                          v-if="isAccountStopped(acc)"
+                        >
+                          <el-icon><VideoPlay /></el-icon>
+                          启动Trader
+                        </el-dropdown-item>
+                      </template>
+                      <!-- 已连接状态：显示连接网关、断开网关、暂停交易、恢复交易、重启、停止 -->
                       <template v-if="isAccountConnected(acc)">
                         <el-dropdown-item
                           :command="{ action: 'connect_gateway', accountId: acc.account_id }"
@@ -68,6 +78,14 @@
                         >
                           <el-icon><CircleCheck /></el-icon>
                           恢复交易
+                        </el-dropdown-item>
+                        <el-dropdown-item divided :command="{ action: 'restart_trader', accountId: acc.account_id }">
+                          <el-icon><RefreshRight /></el-icon>
+                          重启Trader
+                        </el-dropdown-item>
+                        <el-dropdown-item :command="{ action: 'stop_trader', accountId: acc.account_id }">
+                          <el-icon><VideoPause /></el-icon>
+                          停止Trader
                         </el-dropdown-item>
                       </template>
                     </el-dropdown-menu>
@@ -391,6 +409,11 @@ async function handleAccountAction(cmd: any, accountId: string) {
       case 'resume':
         await accountApi.resumeTrading(targetAccountId)
         ElMessage.success('交易已恢复')
+        await store.loadAllAccounts()
+        break
+      case 'restart_trader':
+        await accountApi.restartTrader(targetAccountId)
+        ElMessage.success('Trader已重启')
         await store.loadAllAccounts()
         break
     }

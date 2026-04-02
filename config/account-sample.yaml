@@ -1,6 +1,14 @@
 account_id: "xxx"
 account_type: "kq"
-alert_wechat: false
+
+# 告警通知配置
+alert:
+  immediate: true     # 即时告警（Trader异常、连接断开等）
+  threshold: true     # 阈值告警（异常日志达到阈值时发送）
+  threshold_count: 5  # 阈值：异常次数
+  threshold_window: 300  # 时间窗口（秒）
+  dnd_start: 23       # 免打扰开始时间（小时，默认23点）
+  dnd_end: 8          # 免打扰结束时间（小时，默认次日8点）
 
 gateway:
   type: "TQSDK"

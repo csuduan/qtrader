@@ -52,6 +52,7 @@ Manager 和 Trader 通过 Unix Domain Socket 进行通信：
 ## 快速开始
 
 ### 1. 安装依赖
+* 安装虚拟环境  
 
 ```bash
 # 创建虚拟环境
@@ -62,6 +63,24 @@ conda activate qts
 pip install -r requirements.txt
 
 ```
+
+* 安装数据库(可选)
+```bash
+# 安装官方仓库最新版
+sudo apt update
+sudo apt install postgresql postgresql-contrib
+# 启动服务
+sudo systemctl start postgresql
+sudo systemctl enable postgresql
+# 创建DB
+sudo -u postgres psql
+CREATE USER qtrader WITH PASSWORD 'xxxxxx';
+CREATE DATABASE qtrader OWNER trader;
+GRANT ALL PRIVILEGES ON DATABASE qtrader TO trader;
+# 访问DB
+psql -U trader -d qtrader -h localhost
+```
+
 
 ### 2. 配置文件
 
@@ -95,7 +114,7 @@ gateway:
 ```
 
 
-### 3. 运行系统
+### 3. 启动
 * 启动管理平台
 ```bash
 # 启动 Manager（会自动启动配置中的 Trader）
@@ -128,11 +147,6 @@ npm run dev
 locale-gen zh_CN.GB18030
 
 ## 文档
-
-* 系统文档
-- **开发指南**: [AGENTS.md](AGENTS.md) - 开发规范和指南
-- **测试规范**: [TESTING.md](TESTING.md) - 测试规范和流程
-
 * 参考文档
 - **tqsdk**: https://doc.shinnytech.com/tqsdk/latest/usage/
 

@@ -61,26 +61,6 @@ class BaseGateway(ABC):
         logger.info(f"{self.gateway_name} Gateway 初始化完成")
 
 
-    def _fill_open_limit(self, contract: ContractData) -> None:
-        """
-        填充开仓限制到合约信息
-
-        Args:
-            contract: 合约数据对象
-        """
-        if not self._open_limit:
-            return
-
-        # 匹配品种（合约代码去掉数字）
-        # 提取品种（如 rb2505 -> rb）
-        match = re.match(r'^([a-zA-Z]+)', contract.symbol)
-        if match:
-            product = match.group(1).lower()
-            min_volume = self._open_limit.get(product)
-            if min_volume is not None:
-                contract.min_open_volume = min_volume
-                logger.debug(f"合约 {contract.symbol} 设置最小开仓手数: {min_volume}")
-
     @property
     def connected(self) -> bool:
         """网关是否已连接（行情和交易都连接时为True）"""
@@ -144,97 +124,34 @@ class BaseGateway(ABC):
 
     def load_contracts(self) -> Optional[dict[str, ContractData]]:
         """
-        从数据库加载指定更新日期的合约信息
+        从数据库加载合约信息
 
-        优先从共享数据库（q-public.db）读取，该数据库由 Manager 进程维护。
-        若共享数据库不可用，则回退到当前账户的私有数据库。
+        从共享数据库（qtrader.db）读取合约信息，该数据库由 Manager 进程维护。
 
         Returns:
             合约信息字典，如果没有则返回None
         """
         update_date = datetime.now().strftime("%Y-%m-%d")
 
-        # 优先尝试从共享数据库读取
-        result = self._load_contracts_from_shared_db(update_date)
-        if result is not None:
-            return result
-
-        # 回退到账户私有数据库
-        return self._load_contracts_from_private_db(update_date)
-
-    def _load_contracts_from_shared_db(
-        self, update_date: str
-    ) -> Optional[dict[str, ContractData]]:
-        """
-        从共享数据库读取合约信息
-
-        Args:
-            update_date: 更新日期 (YYYY-MM-DD)
-
-        Returns:
-            合约信息字典，如果共享数据库不可用或无数据则返回None
-        """
         try:
-            from src.utils.shared_database import get_shared_database
-
-            shared_db = get_shared_database()
-            if shared_db is None:
-                return None
-
             from src.models.po import ContractPo
+            from src.utils.database import session_scope
 
-            with shared_db.get_session() as session:
-                contract_pos = (
-                    session.query(ContractPo).filter(ContractPo.update_date == update_date).all()
-                )
-
-                if not contract_pos:
-                    logger.debug(f"共享数据库中没有更新日期为 {update_date} 的合约信息")
-                    return None
-
-                loaded_count = self._parse_contract_pos(contract_pos)
-                self._contracts_update_date = update_date
-                logger.info(
-                    f"从共享数据库加载了 {loaded_count} 个合约信息 (更新日期: {update_date})"
-                )
-                return self.contracts
-        except Exception as e:
-            logger.warning(f"从共享数据库加载合约信息失败，将尝试私有数据库: {e}")
-            return None
-
-    def _load_contracts_from_private_db(
-        self, update_date: str
-    ) -> Optional[dict[str, ContractData]]:
-        """
-        从账户私有数据库读取合约信息（回退方案）
-
-        Args:
-            update_date: 更新日期 (YYYY-MM-DD)
-
-        Returns:
-            合约信息字典，如果没有数据则返回None
-        """
-        from src.models.po import ContractPo
-        from src.utils.database import session_scope
-
-        try:
             with session_scope() as session:
                 contract_pos = (
                     session.query(ContractPo).filter(ContractPo.update_date == update_date).all()
                 )
 
                 if not contract_pos:
-                    logger.info(f"私有数据库中没有更新日期为 {update_date} 的合约信息")
+                    logger.info(f"数据库中没有更新日期为 {update_date} 的合约信息")
                     return None
 
                 loaded_count = self._parse_contract_pos(contract_pos)
                 self._contracts_update_date = update_date
-                logger.info(
-                    f"从私有数据库加载了 {loaded_count} 个合约信息 (更新日期: {update_date})"
-                )
+                logger.info(f"从数据库加载了 {loaded_count} 个合约信息 (更新日期: {update_date})")
                 return self.contracts
         except Exception as e:
-            logger.error(f"从私有数据库加载合约信息失败: {e}")
+            logger.error(f"从数据库加载合约信息失败: {e}")
             return None
 
     def _parse_contract_pos(self, contract_pos: list) -> int:
@@ -265,7 +182,6 @@ class BaseGateway(ABC):
                 option_underlying=po.option_underlying,  # type: ignore[arg-type]
                 option_type=po.option_type,  # type: ignore[arg-type]
             )  # type: ignore[call-arg]
-            self._fill_open_limit(contract)
             self.contracts[contract.symbol] = contract
             loaded_count += 1
         return loaded_count
@@ -315,7 +231,6 @@ class BaseGateway(ABC):
                     option_underlying=contract_dict.get("option_underlying"),  # type: ignore[arg-type]
                     option_type=contract_dict.get("option_type"),  # type: ignore[arg-type]
                 )  # type: ignore[call-arg]
-                self._fill_open_limit(contract)
                 self.contracts[contract.symbol] = contract
                 loaded_count += 1
             except Exception as e:

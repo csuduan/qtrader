@@ -4,10 +4,12 @@
       <template #header>
         <div class="card-header">
           <span>账户信息</span>
-          <el-button type="primary" @click="loadAccountData" :loading="loading">
-            <el-icon><Refresh /></el-icon>
-            刷新
-          </el-button>
+          <div>
+            <el-button type="primary" @click="loadAccountData" :loading="loading">
+              <el-icon><Refresh /></el-icon>
+              刷新
+            </el-button>
+          </div>
         </div>
       </template>
 
@@ -193,11 +195,12 @@
 import { ref, reactive, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useStore } from '@/stores'
-import { positionApi } from '@/api'
+import { accountApi, positionApi } from '@/api'
 import type { Position } from '@/types'
 
 const store = useStore()
 const loading = ref(false)
+const syncLoading = ref(false)
 const showCloseDialog = ref(false)
 
 const closeForm = reactive({
@@ -210,10 +213,28 @@ const closeForm = reactive({
   price: 0
 })
 
+async function handleSync() {
+  if (!store.selectedAccountId) {
+    ElMessage.warning('请先选择账户')
+    return
+  }
+  syncLoading.value = true
+  try {
+    await accountApi.syncAccount(store.selectedAccountId)
+    ElMessage.success('同步成功')
+    await loadAccountData()
+    await loadPositionData()
+  } catch (error: any) {
+    ElMessage.error(`同步失败: ${error.message}`)
+  } finally {
+    syncLoading.value = false
+  }
+}
+
 async function loadAccountData() {
   loading.value = true
   try {
-    await store.loadAllAccounts()
+    await store.loadCurrentAccount()
   } finally {
     loading.value = false
   }
@@ -297,8 +318,13 @@ watch(() => store.selectedAccountId, async (newId) => {
 })
 
 onMounted(async () => {
-  await loadAccountData()
+  // 只加载持仓，账户数据由 App.vue 的 loadAllData 初始化
+  // watch 会处理账户切换时的重新加载
   await loadPositionData()
+  // 如果账户已选中但还没加载详情，则加载一次
+  if (store.selectedAccountId && !store.currentAccount) {
+    await loadAccountData()
+  }
 })
 </script>
 

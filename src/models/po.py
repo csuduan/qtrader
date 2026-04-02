@@ -131,7 +131,7 @@ class TradePo(Base):
     offset = Column(String(20), nullable=False)
     price = Column(Numeric(20, 4), nullable=False)
     volume = Column(Integer, nullable=False)
-    trade_date_time = Column(Integer, nullable=False)
+    trade_date_time = Column(DateTime, nullable=False)
     created_at = Column(DateTime, default=datetime.now)
 
     account = relationship("AccountPo", back_populates="trades")
@@ -157,8 +157,9 @@ class OrderPo(Base):
     limit_price = Column(Numeric(20, 4), nullable=True)
     price_type = Column(String(10), nullable=False)
     status = Column(String(20), nullable=False, index=True)
-    insert_date_time = Column(Integer, nullable=False)
-    last_msg = Column(Text, nullable=True)
+    status_msg = Column(Text, nullable=True)
+    insert_date_time = Column(DateTime, nullable=False)
+    update_date_time = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
@@ -169,14 +170,19 @@ class OrderPo(Base):
 
 
 class SwitchPosImportPo(Base):
-    """订单文件记录表"""
+    """换仓文件导入记录表"""
 
     __tablename__ = "switchPos_import"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    file_name = Column(String(255), nullable=False, unique=True)
+    account_id = Column(String(50), nullable=False, index=True)
+    file_name = Column(String(255), nullable=False)
     file_path = Column(String(500), nullable=False)
     created_at = Column(DateTime, default=datetime.now)
+
+    __table_args__ = (
+        UniqueConstraint("account_id", "file_name", name="uq_switchpos_account_file"),
+    )
 
     def __repr__(self):
         return f"<OrderFilePo(file_name={self.file_name})>"
@@ -283,12 +289,18 @@ class SystemParamPo(Base):
     __tablename__ = "system_params"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    param_key = Column(String(100), unique=True, nullable=False, index=True)
+    account_id = Column(String(50), nullable=True, index=True)  # NULL=全局参数
+    param_key = Column(String(100), nullable=False, index=True)
     param_value = Column(Text, nullable=True)
     param_type = Column(String(20), nullable=False, default="string")
     description = Column(Text, nullable=True)
     group = Column(String(50), nullable=False, default="general")
+    created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    __table_args__ = (
+        UniqueConstraint("account_id", "param_key", name="uq_sysparam_account_key"),
+    )
 
     def __repr__(self):
         return f"<SystemParamPo(key={self.param_key}, type={self.param_type}, value={self.param_value})>"

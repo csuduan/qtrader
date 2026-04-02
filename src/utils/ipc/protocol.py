@@ -197,3 +197,44 @@ def create_push(push_type: str, data: Any, request_id: str = "") -> MessageBody:
 def create_error(error: str, request_id: str = "") -> MessageBody:
     """创建错误消息"""
     return MessageBody(msg_type=MessageType.ERROR, request_id=request_id, data=None, error=error)
+
+
+def create_data_notification(
+    data_type: str,
+    account_id: str,
+    record_id: str,
+    timestamp: Optional[str] = None,
+    extra_data: Optional[Dict[str, Any]] = None,
+) -> MessageBody:
+    """
+    创建数据变更轻量级通知
+
+    Trader 写入 PG 后发送此通知给 Manager，Manager 收到后从 PG 查询完整数据。
+
+    Args:
+        data_type: 数据类型 (account, order, trade, position, rotation_instruction, account_status)
+        account_id: 账户ID
+        record_id: 记录ID (如 order_id, trade_id, symbol 等)
+        timestamp: 时间戳，默认当前时间
+        extra_data: 额外数据字典（如网关连接状态 md_connected/td_connected）
+
+    Returns:
+        轻量级通知消息体
+    """
+    data = {
+        "data_type": data_type,
+        "account_id": account_id,
+        "record_id": record_id,
+        "timestamp": timestamp or datetime.now().isoformat(),
+    }
+    if extra_data:
+        data.update(extra_data)
+
+    return MessageBody(
+        msg_type=MessageType.PUSH,
+        request_id=str(uuid.uuid4()),
+        data={
+            "type": "data_notification",
+            "data": data,
+        },
+    )

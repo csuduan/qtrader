@@ -11,47 +11,81 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/Dashboard.vue'),
     meta: { title: '总览', hideHeader: true }
   },
+  // 账户相关路由（二级菜单）
   {
-    path: '/account',
-    name: 'Account',
+    path: '/account/detail',
+    name: 'AccountDetail',
     component: () => import('@/views/Account.vue'),
-    meta: { title: '账户' }
+    meta: { title: '账户详情' }
   },
   {
-    path: '/trading',
-    name: 'Trading',
+    path: '/account/trading',
+    name: 'AccountTrading',
     component: () => import('@/views/Trading.vue'),
     meta: { title: '交易' }
   },
   {
-    path: '/strategy',
-    name: 'Strategy',
+    path: '/account/rotation',
+    name: 'AccountRotation',
+    component: () => import('@/views/Rotation.vue'),
+    meta: { title: '换仓' }
+  },
+  {
+    path: '/account/strategy',
+    name: 'AccountStrategy',
     component: () => import('@/views/Strategy.vue'),
     meta: { title: '策略' }
   },
+  {
+    path: '/account/setting',
+    name: 'AccountSetting',
+    component: () => import('@/views/account/AccountSetting.vue'),
+    meta: { title: '账户设置' }
+  },
+  // 管理路由（二级菜单）
+  {
+    path: '/admin/system',
+    name: 'SystemAdmin',
+    component: () => import('@/views/admin/SystemAdmin.vue'),
+    meta: { title: '系统管理', hideHeader: true }
+  },
+  {
+    path: '/admin/alarms',
+    name: 'AdminAlarms',
+    component: () => import('@/views/admin/AlarmInfo.vue'),
+    meta: { title: '监控告警', hideHeader: true }
+  },
+  // 策略详情（保留）
   {
     path: '/strategy/:strategyId',
     name: 'StrategyDetails',
     component: () => import('@/views/StrategyDetails.vue'),
     meta: { title: '策略详情' }
   },
+  // 重定向：兼容旧路由
+  {
+    path: '/account',
+    redirect: '/account/detail'
+  },
+  {
+    path: '/trading',
+    redirect: '/account/trading'
+  },
   {
     path: '/rotation',
-    name: 'Rotation',
-    component: () => import('@/views/Rotation.vue'),
-    meta: { title: '换仓' }
+    redirect: '/account/rotation'
+  },
+  {
+    path: '/strategy',
+    redirect: '/account/strategy'
   },
   {
     path: '/system',
-    name: 'System',
-    component: () => import('@/views/System.vue'),
-    meta: { title: '系统' }
+    redirect: '/account/setting'
   },
   {
     path: '/alarms',
-    name: 'Alarms',
-    component: () => import('@/views/Alarm.vue'),
-    meta: { title: '告警' }
+    redirect: '/admin/alarms'
   }
 ]
 

@@ -1,47 +1,119 @@
 # CLAUDE.md
 
 本文件为 Claude Code (claude.ai/code) 在此代码库中工作时提供指导。
-更多项目概况和规则请在 @AGENTS.md 中查看和维护。
+项目概况请查看 @README.md 。
 
-## 启动
+## 原则
+- **第一性原理**: 
+请使用第一性原理思考。你不能总是假设我非常清楚自己想要什么和该怎么得到。请保持审慎，从原始需求和问题触发，如果动机和目标不清晰，停下来和我讨论。如果目标清晰但是路径不是最短，请告诉我，并建议更好的办法。
 
+## 规范与约束
 ### 后端 (Python)
+- **Python版本**: 3.12+，使用 `typing` 模块的类型提示
+- **格式化**: Black 100字符行长度
+- **导入顺序**: 标准库 → 第三方库 → 本地模块
+- **命名规范**: 函数/变量使用 snake_case，类使用 CamelCase
+- **文档字符串**: 中文，三引号，描述 Args/Returns
+- **日志记录**: 使用 `src.utils.logger` 的 `get_logger(__name__)`
+- **错误处理**: Try/except 配合 logger.exception()
+- **数据模型**: SQLAlchemy ORM 使用 `__repr__`，API 模式使用 Pydantic
+- **API开发**: FastAPI 异步端点，Config 中设置 `from_attributes = True`
+- **注释**: 中文，简洁（除非有特殊要求，否则不写行内注释）
+- **事件系统**: 使用事件引擎进行解耦通信，在 `EventTypes` 类中定义事件类型
+- **强类型约束**: 方法的输出及输出应当明确指明类型
+- **规范工具**: 可以使用black和isort格式化代码
 ```bash
-# 激活虚拟环境
-conda activate qts
-# 安装依赖(可选)
-pip install -r requirements.txt
-
-# 运行管理平台 (Manager 进程)
-python -m src.run_manager
-
-# 运行交易账户 (Trader 进程)
-python -m src.run_trader --account-id DQ
-
-# 格式化代码
 black src/ --line-length 100 --target py38
 isort src/ --profile black
-
-# 检查运行进程
-lsof -i :8000  # Manager API 端口
 ```
 
-### 前端 (Vue)
-```bash
-cd web
-npm install
-npm run dev     # 开发服务器 (默认端口5173，代理到8000)
-```
+### 前端 (Vue + TypeScript)
+- **框架**: Vue 3 组合式 API (`<script setup>`)
+- **语言**: TypeScript 严格模式
+- **组件命名**: .vue 文件使用 PascalCase
+- **文件命名**: 组件用 PascalCase，工具函数用 camelCase
+- **状态管理**: Pinia stores 位于 `src/stores/`
+- **API调用**: Axios HTTP 客户端位于 `src/api/`
+- **WebSocket**: 自定义管理器位于 `src/ws.ts`
+- **UI组件**: Element Plus
+- **图表**: ECharts 数据可视化
 
-### 使用 Chrome DevTools 测试
-使用 `chrome-devtools` MCP 工具测试前端：
-1. 启动 Manager (`python -m src.run_manager`) 和前端 (`cd web && npm run dev`)
-2. 使用 `new_page` 导航到 `http://localhost:5173`
-3. 使用 `take_snapshot` 检查页面结构
-4. 使用 `list_console_messages` 检查错误
+
+### 前后端通信规范
+**HTTP API**
+- 基础URL：`/api`
+- 响应包装：`{code: 0, message: "", data: {}}`
+- Axios 拦截器在成功时自动解包 `data`
+- 使用 `src.manager.api.responses` 中的 `success_response()` 和 `error_response()`
+
+**WebSocket** (`/ws`)
+- 消息格式：`{type: "...", data: {...}, timestamp: "..."}`
+- 类型：`connected`, `account_update`, `position_update`, `trade_update`, `order_update`, `quote_update`, `tick_update`
+- 账户信息缓存并每3秒推送一次（根据连接状态自动启动/停止）
+
+### 数据类型约束
+
+**通用字段类型**
+- `id`: 整数（数据库主键）
+- `account_id`: 字符串（交易账户ID）
+- `symbol`: 字符串（合约代码，格式：EXCHANGE.symbol）
+- `created_at/updated_at`: ISO 8601字符串
+- 金额字段：浮点数，保留2位小数
+- 数量字段：整数
+
+**时间字段格式**
+- 默认格式：ISO 8601字符串 (datetime → isoformat())
+- **成交时间字段特殊处理**：`trade_date_time` 支持两种格式
+  - **后端输出**：ISO 8601字符串（自动从 Unix 时间戳或 datetime 对象转换）
+  - **前端接收**：`number | string`（兼容 Unix 时间戳秒或 ISO 字符串）
+  - **后端处理逻辑**：
+    - 支持 datetime 对象转换为 Unix 时间戳
+    - 支持 int/float 类型的时间戳
+    - 最终统一转换为 ISO 格式返回给前端
+  - **前端处理逻辑**：
+    - 排序时兼容两种格式（数字直接比较，字符串转换为 Date）
+    - 显示时使用统一的日期格式化函数
+
+**枚举类型**
+- `direction`: "BUY" | "SELL"
+- `offset`: "OPEN" | "CLOSE" | "CLOSETODAY"
+- `status`: 订单状态字符串（由券商返回）
+- `price_type`: 价格类型字符串
+
+**类型同步规则**
+1. 后端在 `src.manager.api.schemas.py` 定义Pydantic模型
+2. 前端在 `web/src/types/index.ts` 定义对应的TypeScript接口
+3. 字段名称、类型、结构必须保持一致
+4. 可选字段使用Optional (Python) / | null (TypeScript)
+
+### 错误处理规范
+
+**后端错误处理**
+- 全局异常处理器捕获所有未处理异常（`src.manager.api.responses.global_exception_handler`）
+- HTTP异常由 `http_exception_handler` 处理
+- 请求验证错误由 `validation_exception_handler` 处理
+- 所有错误使用 `get_logger(__name__)` 记录日志
+
+**前端错误处理**
+- axios响应拦截器自动捕获code≠0的错误并抛出异常
+- 网络错误统一处理并提示"网络请求失败"
+- 具体业务错误由错误消息显示
+
+### CORS配置
+- 默认允许所有源：`allow_origins=["*"]`
+- 支持自定义源列表：`config.api.cors_origins`
+- 允许所有方法和请求头
+
+### 安全规范
+- 敏感信息（密码、API密钥）禁止在日志中输出
+- WebSocket消息不包含敏感数据
+- 前端不在URL或localStorage中存储敏感信息
+- 错误响应避免暴露内部实现细节
+
+### 测试规范
+测试规范及方法参见 @TESTING.md
 
 ## 架构概览
-
 ### 多进程架构 (Manager-Trader 分离)
 
 **Manager 进程** (`src/run_manager.py`)
@@ -106,35 +178,3 @@ Gateway -> TradingEngine.emit() -> EventTypes -> StrategyManager._dispatch_event
 - Manager 缓存数据并通过 WebSocket 推送给前端
 - 账户信息每3秒批量推送（缓存机制）
 
-### 前后端通信
-
-**HTTP API**
-- 基础URL：`/api`
-- 响应包装：`{code: 0, message: "", data: {}}`
-- Axios 拦截器在成功时自动解包 `data`
-- 使用 `src.manager.api.responses` 中的 `success_response()` 和 `error_response()`
-
-**WebSocket** (`/ws`)
-- 消息格式：`{type: "...", data: {...}, timestamp: "..."}`
-- 类型：`connected`, `account_update`, `position_update`, `trade_update`, `order_update`, `quote_update`, `tick_update`
-- 账户信息缓存并每3秒推送一次（根据连接状态自动启动/停止）
-
-### 关键文件
-
-| 文件 | 用途 |
-|------|------|
-| `src/run_manager.py` | Manager 进程入口 |
-| `src/run_trader.py` | Trader 进程入口 |
-| `src/manager/app.py` | Manager 应用主逻辑 |
-| `src/trader/app.py` | Trader 应用主逻辑 |
-| `src/utils/config_loader.py` | YAML配置解析 (account_type, paths, risk_control) |
-| `src/trader/trading_engine.py` | Trader 中央协调器 |
-| `src/trader/gateway/base_gateway.py` | Gateway接口 |
-| `src/models/object.py` | Pydantic数据模型 |
-| `src/trader/strategy_manager.py` | 策略生命周期和事件路由 |
-| `src/trader/strategy/base_strategy.py` | 策略基类 |
-| `src/manager/manager.py` | TradingManager 交易管理器 |
-| `src/manager/trader_proxy.py` | TraderProxy 代理类 |
-| `src/manager/api/routes/` | FastAPI路由处理器 |
-| `src/utils/scheduler.py` | APScheduler任务管理 |
-| `src/manager/api/schemas.py` | API响应模型 |

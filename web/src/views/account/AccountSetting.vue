@@ -1,5 +1,5 @@
 <template>
-  <div class="system">
+  <div class="account-setting">
     <el-row :gutter="20">
       <!-- 系统状态 -->
       <el-col :span="24">
@@ -100,17 +100,7 @@
                   />
                 </el-form-item>
               </el-col>
-              <el-col :span="12">
-                <el-form-item label="微信告警">
-                  <el-switch
-                    v-model="alertWechat"
-                    :disabled="updatingAlertWechat"
-                    active-text="启用"
-                    inactive-text="禁用"
-                  />
-                  <span class="ml-2" v-if="alertWechat">订单拒绝/策略报单时发送微信通知</span>
-                </el-form-item>
-              </el-col>
+              
             </el-row>
             <el-form-item>
               <el-button
@@ -424,7 +414,7 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.system {
+.account-setting {
   padding: 0;
   width: 100%;
 }

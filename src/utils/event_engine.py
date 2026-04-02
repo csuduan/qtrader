@@ -17,6 +17,8 @@ class EventTypes:
 
     # 账户更新事件
     ACCOUNT_UPDATE = "e:account.update"
+    # 账户就绪通知事件
+    ACCOUNT_READY = "e:account.ready"
     # 账户状态事件
     ACCOUNT_STATUS = "e:account.status"
     # 持仓事件

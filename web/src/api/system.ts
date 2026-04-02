@@ -34,7 +34,14 @@ export const systemApi = {
   },
 
   /**
-   * 更新微信告警配置
+   * 获取微信告警配置（已废弃，请使用 getAlertConfig）
+   */
+  getAlertWechat: async (accountId?: string): Promise<{ alert_wechat: boolean }> => {
+    return api.get<{ alert_wechat: boolean }>('/system/alert-wechat', { params: { account_id: accountId } })
+  },
+
+  /**
+   * 更新微信告警配置（已废弃，请使用 updateAlertConfig）
    */
   updateAlertWechat: async (alertWechat: boolean, accountId?: string) => {
     return api.put('/system/alert-wechat', {
@@ -44,10 +51,45 @@ export const systemApi = {
   },
 
   /**
-   * 获取微信告警配置
+   * 获取告警配置
    */
-  getAlertWechat: async (accountId?: string): Promise<{ alert_wechat: boolean }> => {
-    return api.get<{ alert_wechat: boolean }>('/system/alert-wechat', { params: { account_id: accountId } })
+  getAlertConfig: async (accountId?: string): Promise<{
+    immediate: boolean
+    threshold: boolean
+    threshold_count: number
+    threshold_window: number
+  }> => {
+    return api.get<{
+      immediate: boolean
+      threshold: boolean
+      threshold_count: number
+      threshold_window: number
+    }>('/system/alert-config', { params: { account_id: accountId } })
+  },
+
+  /**
+   * 更新告警配置
+   */
+  updateAlertConfig: async (config: {
+    immediate: boolean
+    threshold: boolean
+    threshold_count?: number
+    threshold_window?: number
+  }, accountId?: string): Promise<{
+    immediate: boolean
+    threshold: boolean
+    threshold_count: number
+    threshold_window: number
+  }> => {
+    return api.put<{
+      immediate: boolean
+      threshold: boolean
+      threshold_count: number
+      threshold_window: number
+    }>('/system/alert-config', {
+      ...config,
+      account_id: accountId
+    })
   },
 
   /**
@@ -134,5 +176,26 @@ export const systemApi = {
    */
   triggerJob: async (jobId: string, accountId?: string) => {
     return api.post<{ job_id: string, job_name: string }>(`/jobs/${jobId}/trigger`, { account_id: accountId })
+  },
+
+  /**
+   * 获取Manager级别的定时任务列表
+   */
+  getManagerSchedulerJobs: async (): Promise<{ tasks: Job[], count: number }> => {
+    return api.get<{ tasks: Job[], count: number }>('/system/scheduler/jobs')
+  },
+
+  /**
+   * 操作Manager级别的定时任务
+   */
+  operateManagerSchedulerJob: async (jobId: string, action: 'pause' | 'resume' | 'trigger'): Promise<void> => {
+    return api.post(`/system/scheduler/jobs/${jobId}/operate`, { action })
+  },
+
+  /**
+   * 切换Manager级别定时任务的启用状态
+   */
+  toggleManagerSchedulerJob: async (jobId: string, enabled: boolean): Promise<void> => {
+    return api.put(`/system/scheduler/jobs/${jobId}/toggle`, { enabled })
   }
 }

@@ -140,13 +140,33 @@ class GatewayConfig(BaseModel):
     subscribe_bars: List[str] = []
 
 
+class AlertConfig(BaseModel):
+    """告警通知配置"""
+
+    # 即时告警：检查到异常立即发送（如Trader异常、连接断开等）
+    immediate: bool = True
+    # 阈值告警：异常日志达到阈值时发送
+    threshold: bool = True
+    # 阈值：单位时间内异常日志数量达到此值触发告警
+    threshold_count: int = 5
+    # 时间窗口：统计异常日志的时间窗口（秒）
+    threshold_window: int = 300  # 5分钟
+    # 免打扰开始时间（小时，默认23点），此时间段内不发送微信/即时告警
+    dnd_start: int = 23
+    # 免打扰结束时间（小时，默认次日8点）
+    dnd_end: int = 8
+
+
 class AccountConfig(BaseModel):
     """完整账户配置（来自account-{ID}.yaml）"""
 
     account_id: Optional[str] = None
     account_type: str | None = "kq"
     enabled: bool | None = True
-    alert_wechat: bool = False
+    # 告警配置（新结构）
+    alert: AlertConfig = Field(default_factory=AlertConfig)
+    # 兼容旧配置：alert_wechat 已废弃，请使用 alert.immediate 和 alert.threshold
+    alert_wechat: bool | None = None
 
     gateway: Optional[GatewayConfig] = None
     paths: PathsConfig | None= None
@@ -155,6 +175,17 @@ class AccountConfig(BaseModel):
 
     class Config:
         extra = "allow"  # 允许额外字段
+
+    def model_post_init(self, __context: Any) -> None:
+        """兼容旧配置：如果设置了 alert_wechat，同步到新的 alert 配置"""
+        if self.alert_wechat is not None:
+            # 如果旧配置存在，同步到新配置
+            self.alert.immediate = self.alert_wechat
+            self.alert.threshold = self.alert_wechat
+            logger.warning(
+                f"account {self.account_id}: alert_wechat 已废弃，"
+                f"请使用 alert.immediate 和 alert.threshold"
+            )
 
 
 class SocketConfig(BaseModel):
@@ -187,6 +218,24 @@ class DatabaseExtConfig(BaseModel):
     public_data: PublicDataConfig = Field(default_factory=PublicDataConfig)
 
 
+class PgConfig(BaseModel):
+    """PostgreSQL 连接配置"""
+
+    host: str = "localhost"
+    port: int = 5432
+    user: str = "qtrader"
+    password: str = ""
+    database: str = "qtrader"
+    pool_size: int = 5
+    max_overflow: int = 10
+
+
+class DataBaseConfig(BaseModel):
+    """数据库配置"""
+
+    pg: PgConfig = Field(default_factory=PgConfig)
+
+
 class TraderInitConfig(BaseModel):
     """Trader初始化配置"""
 
@@ -209,6 +258,10 @@ class AppConfig(BaseModel):
     database: DatabaseExtConfig = Field(default_factory=DatabaseExtConfig)
     # Trader初始化配置
     trader_init: TraderInitConfig = Field(default_factory=TraderInitConfig)
+    # 数据库连接配置
+    data_base: DataBaseConfig = Field(default_factory=DataBaseConfig)
+    # 全局告警配置（所有账户共享）
+    alert: AlertConfig = Field(default_factory=AlertConfig)
 
     class Config:
         extra = "allow"  # 允许额外字段

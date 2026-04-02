@@ -4,6 +4,7 @@
 """
 
 import asyncio
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -13,9 +14,10 @@ from src.manager.public_data_service import PublicDataService
 from src.manager.trader_monitor import TraderMonitor
 from src.manager.trader_proxy import TraderProxy
 from src.models.object import AccountData, Direction, Offset, OrderData, OrderRequest
-from src.utils.config_loader import AccountConfig, AppConfig, DatabaseConfig, SocketConfig
+from src.utils.config_loader import AccountConfig, AppConfig, DatabaseConfig, SocketConfig, get_config_loader
 from src.utils.logger import get_logger
 from src.utils.scheduler import TaskScheduler
+from src.utils.db_url import build_db_url
 from src.utils.shared_database import SharedDatabase, init_shared_database
 
 ctx: AppContext = get_app_context()
@@ -30,24 +32,26 @@ class TradingManager:
     职责：
     1. 启动/停止/重启 Trader（独立进程模式）
     2. 进程健康检查和自动重启
-    3. 事件处理和分发（通过ManagerEventEngine）
+    3. 事件处理和分发（通过 AsyncEventEngine）
     4. API 服务集成（查询Trader获取数据）
 
     运行模式：
     - standalone: 独立模式，Trader作为独立进程运行，Trader作为Socket服务器
     """
 
-    def __init__(self, account_configs: List[AccountConfig]):
+    def __init__(self, account_configs: List[AccountConfig], app_config: Optional[AppConfig] = None):
         """
         初始化交易管理器
 
         Args:
             account_configs: 账户配置列表
+            app_config: 全局配置（包含告警配置等）
         """
         self.account_configs = account_configs
         self.account_configs_map: Dict[str, AccountConfig] = {
             acc.account_id: acc for acc in account_configs if acc.account_id is not None
         }
+        self.app_config = app_config
 
         # 使用默认的 Socket 和 Database 配置（从全局配置获取）
         self.socket_config = SocketConfig()
@@ -79,6 +83,10 @@ class TradingManager:
 
         # Trader启动监控器
         self._trader_monitor: Optional[TraderMonitor] = None
+
+        # 服务器资源监控历史缓存（5秒采样一次，默认保存2880条约4小时）
+        self._resource_history: deque = deque(maxlen=2880)
+        self._resource_sample_task: Optional[asyncio.Task] = None
 
         logger.info("交易管理器初始化完成")
 
@@ -292,6 +300,57 @@ class TradingManager:
         """
         return None
 
+    def get_manager_scheduler_jobs(self) -> List[dict]:
+        """
+        获取Manager级别的定时任务列表
+
+        Returns:
+            任务信息列表
+        """
+        if not self._scheduler:
+            return []
+
+        jobs = self._scheduler.get_jobs()
+        result = []
+        for job in jobs.values():
+            job_dict = job.model_dump()
+            # 补充APScheduler中的下次触发时间
+            aps_job = self._scheduler.scheduler.get_job(job.job_id)
+            if aps_job and aps_job.next_run_time:
+                job_dict["next_trigger_time"] = aps_job.next_run_time.isoformat()
+            result.append(job_dict)
+        return result
+
+    def operate_manager_scheduler_job(self, job_id: str, action: str) -> bool:
+        """
+        操作Manager级别的定时任务
+
+        Args:
+            job_id: 任务ID
+            action: 操作类型 (pause/resume/trigger)
+
+        Returns:
+            是否操作成功
+        """
+        if not self._scheduler:
+            return False
+        return self._scheduler.operate_job(job_id, action)
+
+    def toggle_manager_scheduler_job(self, job_id: str, enabled: bool) -> bool:
+        """
+        切换Manager级别定时任务的启用状态
+
+        Args:
+            job_id: 任务ID
+            enabled: 是否启用
+
+        Returns:
+            是否更新成功
+        """
+        if not self._scheduler:
+            return False
+        return self._scheduler.update_job_status(job_id, enabled)
+
     def get_trader_mode(self, account_id: str) -> Optional[str]:
         """
         获取Trader运行模式
@@ -307,6 +366,13 @@ class TradingManager:
         return None
 
     # ==================== 数据查询接口（查询Trader） ====================
+
+    async def sync_account(self, account_id: str) -> Optional[dict]:
+        """手动触发全量同步：账户+持仓+报单+成交"""
+        trader = self.traders.get(account_id)
+        if trader:
+            return await trader.sync_all()
+        return None
 
     async def get_account(self, account_id: str) -> Optional[AccountData]:
         """获取账户数据"""
@@ -328,6 +394,23 @@ class TradingManager:
     def get_trader(self, account_id: str) -> Optional[TraderProxy]:
         """获取Trader实例"""
         return self.traders.get(account_id)
+
+    async def sync_account_data(self, account_id: str) -> dict:
+        """
+        触发指定账户的全量数据同步
+
+        供前端手动刷新使用
+        """
+        trader = self.traders.get(account_id)
+        if not trader:
+            return {"success": False, "message": f"账户 [{account_id}] 不存在"}
+
+        try:
+            result = await trader.sync_all()
+            return result
+        except Exception as e:
+            logger.exception(f"同步账户 [{account_id}] 数据失败: {e}")
+            return {"success": False, "message": f"同步失败: {str(e)}"}
 
     async def refresh_contracts(self, account_id: Optional[str] = None) -> dict:
         """
@@ -715,6 +798,16 @@ class TradingManager:
         # 初始化共享数据库和公共数据服务
         await self._init_public_data()
 
+        # Note: ManagerPersistence 已禁用 - 新架构下 Trader 直接写入 PG
+        # Manager 只负责查询 PG 并推送到 WebSocket
+        # 如需启用旧模式，取消下面注释：
+        # from src.manager.persistence import init_persistence
+        # event_engine = ctx.get_event_engine()
+        # if event_engine:
+        #     init_persistence(event_engine)
+        #     logger.info("Manager 持久化服务已启动")
+        logger.info("Manager 使用新架构：Trader 直接写入 PG，Manager 只读模式")
+
         # 启动 Trader 启动监控器
         self._start_trader_monitor()
 
@@ -733,6 +826,9 @@ class TradingManager:
                 logger.info(f"Trader Proxy [{account.account_id}] 启动成功")
             else:
                 logger.error(f"Trader Proxy [{account.account_id}] 启动失败")
+
+        # 启动资源采样任务
+        self._start_resource_sampler()
 
         # 初始化并启动 Scheduler（复用 utils/scheduler.py）
         from src.manager.job_mgr import ManagerJobManager
@@ -756,23 +852,103 @@ class TradingManager:
     async def _init_public_data(self) -> None:
         """初始化共享数据库和公共数据服务"""
         try:
-            from src.utils.config_loader import get_config_loader
-
             loader = get_config_loader()
             app_config = loader._load_app_config()
-            db_dir = Path(app_config.paths.database).expanduser().resolve()
-            db_dir.mkdir(parents=True, exist_ok=True)
 
-            # 共享数据库路径：独立于各账户的 q-public.db
-            shared_db_path = str(db_dir / "q-public.db")
-            self._shared_db = init_shared_database(shared_db_path)
+            # 使用 PostgreSQL 数据库
+            db_config = app_config.data_base
+            db_url = build_db_url(db_config)
+            self._shared_db = init_shared_database(
+                db_url,
+                pool_size=db_config.pg.pool_size,
+                max_overflow=db_config.pg.max_overflow,
+            )
 
             # 创建公共数据服务并加载历史数据
             self.public_data_service = PublicDataService(self._shared_db)
             count = self.public_data_service.load_from_database()
-            logger.info(f"公共数据服务初始化完成，已加载 {count} 个合约")
+
+            # 检查合约新鲜度，过期则从 TqSdk + 米筐刷新
+            if not self.public_data_service.has_fresh_contracts():
+                logger.info("数据库合约信息已过期，从 TqSdk + 米筐 API 刷新...")
+                await self._refresh_contracts_from_tq()
+            else:
+                logger.info(f"合约信息新鲜，已加载 {count} 个合约")
         except Exception as e:
             logger.exception(f"初始化公共数据服务失败: {e}")
+
+    async def _refresh_contracts_from_tq(self) -> None:
+        """通过 TqSdk + 米筐 API 刷新合约信息"""
+        try:
+            # 1. TqSdk 获取基础合约信息
+            tq_config = self._get_data_service_config("tq_data")
+            if not tq_config:
+                logger.warning("未找到天勤认证配置(data_service.tq_data)，跳过合约刷新")
+                return
+
+            from src.manager.tq_contract_fetcher import TqContractFetcher
+
+            fetcher = TqContractFetcher(tq_config["user"], tq_config["password"])
+            # TqSdk 连接超时由库内部控制
+            contracts = await asyncio.to_thread(fetcher.fetch_contracts)
+
+            if contracts is None:
+                logger.error("从 TqSdk 获取合约信息失败（连接超时或认证失败）")
+                return
+            if len(contracts) == 0:
+                logger.warning("从 TqSdk 未获取到合约信息（返回空列表）")
+                return
+
+            # 2. 米筐补充最小开仓手数（失败不阻塞）
+            min_order_map: Dict[str, int] = {}
+            rq_config = self._get_data_service_config("rice_data")
+            if rq_config:
+                try:
+                    from src.manager.rq_contract_fetcher import RqContractFetcher
+
+                    rq_fetcher = RqContractFetcher(rq_config["user"], rq_config["password"])
+                    min_order_map = await asyncio.to_thread(rq_fetcher.fetch_min_order_quantities)
+                    logger.info(f"从米筐获取了 {len(min_order_map)} 个合约的最小开仓手数")
+                except Exception as e:
+                    logger.warning(f"从米筐获取最小开仓手数失败（不影响主流程）: {e}")
+
+            # 3. 合并数据：将 min_volume 写入 contracts
+            # 米筐合约代码为大写，匹配时统一转大写
+            min_order_map_upper = {k.upper(): v for k, v in min_order_map.items()}
+            for contract in contracts:
+                raw_symbol = contract["symbol"]  # Tq格式: "rb2505" (无交易所前缀)
+                contract["min_volume"] = min_order_map_upper.get(raw_symbol.upper(), 1)
+
+            # 4. 写入共享库
+            count = self.public_data_service.upsert_contracts(contracts, data_source="tq")
+            logger.info(f"从 TqSdk + 米筐刷新了 {count} 个合约信息")
+        except Exception as e:
+            logger.exception(f"刷新合约信息失败: {e}")
+
+    def _get_data_service_config(self, key: str) -> Optional[dict]:
+        """
+        获取数据服务配置
+
+        从 config.yaml 的 data_service.{key} 读取 user/password。
+        data_service 通过 AppConfig 的 extra="allow" 作为 dict 存入。
+
+        Args:
+            key: 配置键名，如 "tq_data"、"rice_data"
+
+        Returns:
+            配置字典 {"user": ..., "password": ...}，未找到返回 None
+        """
+        from src.utils.config_loader import get_config_loader
+
+        loader = get_config_loader()
+        app_config = loader._load_app_config()
+        data_service = getattr(app_config, "data_service", None)
+        if not data_service or not isinstance(data_service, dict):
+            return None
+        config = data_service.get(key)
+        if config and config.get("user"):
+            return config
+        return None
 
     def _start_trader_monitor(self) -> None:
         """启动 Trader 启动监控器"""
@@ -861,6 +1037,9 @@ class TradingManager:
         self._running = False
         logger.info("交易管理器停止中...")
 
+        # 停止资源采样任务
+        self._stop_resource_sampler()
+
         # 停止所有Trader
         for account_id in list(self.traders.keys()):
             await self.stop_trader(account_id)
@@ -881,3 +1060,66 @@ class TradingManager:
         close_shared_database()
 
         logger.info("交易管理器已停止")
+
+    # ==================== 资源监控采样 ====================
+
+    def _start_resource_sampler(self) -> None:
+        """启动服务器资源采样任务"""
+        if self._resource_sample_task is not None:
+            return
+        self._resource_sample_task = asyncio.create_task(self._sample_resource_loop())
+        logger.info("服务器资源采样任务已启动")
+
+    def _stop_resource_sampler(self) -> None:
+        """停止服务器资源采样任务"""
+        if self._resource_sample_task is not None:
+            self._resource_sample_task.cancel()
+            self._resource_sample_task = None
+            logger.info("服务器资源采样任务已停止")
+
+    async def _sample_resource_loop(self) -> None:
+        """资源采样循环，每 5 秒采集一次"""
+        try:
+            while self._running:
+                self._sample_resource()
+                await asyncio.sleep(5)
+        except asyncio.CancelledError:
+            logger.info("资源采样任务被取消")
+        except Exception as e:
+            logger.exception(f"资源采样任务出错: {e}")
+
+    def _sample_resource(self) -> None:
+        """采集一次服务器资源数据并写入历史缓存"""
+        try:
+            import psutil
+
+            now = datetime.now()
+            cpu_percent = psutil.cpu_percent(interval=None)
+
+            mem = psutil.virtual_memory()
+            memory_used_gb = round(mem.used / (1024 ** 3), 2)
+            memory_total_gb = round(mem.total / (1024 ** 3), 2)
+            memory_percent = round(mem.percent, 2)
+
+            disk = psutil.disk_usage("/")
+            disk_used_gb = round(disk.used / (1024 ** 3), 2)
+            disk_total_gb = round(disk.total / (1024 ** 3), 2)
+            disk_percent = round(disk.percent, 2)
+
+            point = {
+                "timestamp": now.isoformat(),
+                "cpu_percent": cpu_percent,
+                "memory_percent": memory_percent,
+                "memory_used_gb": memory_used_gb,
+                "memory_total_gb": memory_total_gb,
+                "disk_percent": disk_percent,
+                "disk_used_gb": disk_used_gb,
+                "disk_total_gb": disk_total_gb,
+            }
+            self._resource_history.append(point)
+        except Exception as e:
+            logger.exception(f"资源采样失败: {e}")
+
+    def get_resource_history(self, points: int = 60) -> List[dict]:
+        """获取最近 N 个资源采样点"""
+        return list(self._resource_history)[-points:]

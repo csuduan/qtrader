@@ -24,10 +24,10 @@ async def get_subscribed_quotes(
     """
     获取所有已订阅的行情列表
 
-    返回当前订阅的所有合约代码（从 TradingManager 获取实时数据）
+    返回当前订阅的所有合约代码（从Manager内存缓存获取，由Trader实时推送维护）
     """
     try:
-        # 获取行情数据（从所有 trader 聚合）
+        # 从Manager内存缓存获取行情（由Trader tick推送维护）
         all_quotes = []
         if account_id:
             # 获取指定账户的行情

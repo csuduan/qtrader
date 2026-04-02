@@ -127,7 +127,7 @@ async def get_alert_wechat(
     trading_manager=Depends(get_trading_manager),
 ):
     """
-    获取微信告警配置（通过IPC从Trader进程获取）
+    获取微信告警配置（已废弃，请使用 /alert-config）
 
     - **account_id**: 可选，指定账户ID（多账号模式）
     """
@@ -135,12 +135,73 @@ async def get_alert_wechat(
     if not trader:
         return error_response(code=404, message=f"账户 [{account_id}] 不存在")
 
-    # 通过IPC从Trader进程获取
-    alert_wechat = await trader.get_alert_wechat()
-    if alert_wechat is not None:
-        return success_response(data={"alert_wechat": alert_wechat}, message="获取成功")
+    # 通过IPC从Trader进程获取新的告警配置
+    alert_config = await trader.get_alert_config()
+    if alert_config is not None:
+        # 兼容旧接口：返回 immediate 和 threshold 的或运算结果
+        legacy_value = alert_config.get("immediate", False) or alert_config.get("threshold", False)
+        return success_response(data={"alert_wechat": legacy_value}, message="获取成功（已废弃，请使用 /alert-config）")
     else:
-        return error_response(code=500, message="获取微信告警配置失败")
+        return error_response(code=500, message="获取告警配置失败")
+
+
+@router.get("/alert-config")
+async def get_alert_config(
+    account_id: Optional[str] = Query(None, description="账户ID（多账号模式）"),
+    trading_manager=Depends(get_trading_manager),
+):
+    """
+    获取告警配置
+
+    - **account_id**: 可选，指定账户ID（多账号模式）
+    """
+    trader = trading_manager.get_trader(account_id)
+    if not trader:
+        return error_response(code=404, message=f"账户 [{account_id}] 不存在")
+
+    alert_config = await trader.get_alert_config()
+    if alert_config is not None:
+        return success_response(data=alert_config, message="获取成功")
+    else:
+        return error_response(code=500, message="获取告警配置失败")
+
+
+@router.put("/alert-config")
+async def update_alert_config(
+    immediate: bool = Body(..., description="是否启用即时告警"),
+    threshold: bool = Body(..., description="是否启用阈值告警"),
+    threshold_count: Optional[int] = Body(None, description="阈值告警数量"),
+    threshold_window: Optional[int] = Body(None, description="阈值告警时间窗口（秒）"),
+    account_id: Optional[str] = Body(None, description="账户ID（多账号模式）"),
+    trading_manager=Depends(get_trading_manager),
+):
+    """
+    更新告警配置
+
+    - **account_id**: 可选，指定账户ID（多账号模式）
+    - **immediate**: 是否启用即时告警（如Trader异常、连接断开等立即发送）
+    - **threshold**: 是否启用阈值告警（异常日志达到阈值时发送）
+    - **threshold_count**: 阈值告警数量，默认5
+    - **threshold_window**: 阈值告警时间窗口（秒），默认300（5分钟）
+    """
+    trader = trading_manager.get_trader(account_id)
+    if not trader:
+        return error_response(code=404, message=f"账户 [{account_id}] 不存在")
+
+    config = {
+        "immediate": immediate,
+        "threshold": threshold,
+    }
+    if threshold_count is not None:
+        config["threshold_count"] = threshold_count
+    if threshold_window is not None:
+        config["threshold_window"] = threshold_window
+
+    success = await trader.update_alert_config(config)
+    if success:
+        return success_response(data=config, message="告警配置已更新")
+    else:
+        return error_response(code=500, message="更新告警配置失败")
 
 
 @router.post("/connect")
@@ -366,3 +427,61 @@ async def get_log_monitoring_status():
     """
     enabled = websocket_manager.is_log_monitoring_enabled()
     return success_response(data={"enabled": enabled}, message="获取成功")
+
+
+@router.get("/scheduler/jobs")
+async def get_manager_scheduler_jobs(
+    trading_manager: TradingManager = Depends(get_trading_manager),
+):
+    """
+    获取Manager级别的定时任务列表
+
+    返回Manager Scheduler中所有任务的状态和配置
+    """
+    jobs = trading_manager.get_manager_scheduler_jobs()
+    return success_response(data={"tasks": jobs, "count": len(jobs)}, message="获取成功")
+
+
+@router.post("/scheduler/jobs/{job_id}/operate")
+async def operate_manager_scheduler_job(
+    job_id: str,
+    request: Request,
+    trading_manager: TradingManager = Depends(get_trading_manager),
+):
+    """
+    操作Manager级别的定时任务
+
+    - **job_id**: 任务ID
+    - **action**: 操作类型（pause/resume/trigger）从请求体中获取
+    """
+    try:
+        body = await request.json()
+        action = body.get("action", "")
+    except Exception:
+        return error_response(code=400, message="请求体解析失败")
+
+    success = trading_manager.operate_manager_scheduler_job(job_id, action)
+    if success:
+        action_text = "暂停" if action == "pause" else "恢复" if action == "resume" else "触发"
+        return success_response(data={"job_id": job_id}, message=f"任务已{action_text}")
+    return error_response(code=500, message="操作任务失败")
+
+
+@router.put("/scheduler/jobs/{job_id}/toggle")
+async def toggle_manager_scheduler_job(
+    job_id: str,
+    enabled: bool = Body(..., description="是否启用"),
+    trading_manager: TradingManager = Depends(get_trading_manager),
+):
+    """
+    切换Manager级别定时任务的启用状态
+
+    - **job_id**: 任务ID
+    - **enabled**: 是否启用
+    """
+    success = trading_manager.toggle_manager_scheduler_job(job_id, enabled)
+    if success:
+        return success_response(
+            data={"job_id": job_id, "enabled": enabled}, message="任务状态已更新"
+        )
+    return error_response(code=500, message="更新任务状态失败")
