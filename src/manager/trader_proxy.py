@@ -829,7 +829,7 @@ class TraderProxy:
                 if self._account_cache:
                     account_data = self._account_cache.copy()
                     total_profit = sum(
-                        p.get("hold_profit_long", 0) + p.get("hold_profit_short", 0)
+                        p.get("hold_profit_long") or 0 + p.get("hold_profit_short") or 0
                         for p in positions
                     )
                     account_data["hold_profit"] = total_profit
