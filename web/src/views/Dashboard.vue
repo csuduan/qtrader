@@ -497,6 +497,7 @@ function getProgressColor(percentage: number): string {
 <style scoped>
 .dashboard {
   padding: 0;
+  min-height: 100%;
 }
 
 .mt-4 {

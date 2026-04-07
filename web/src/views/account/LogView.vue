@@ -3,8 +3,22 @@
     <el-card class="log-card" :body-style="{ padding: 0 }">
       <template #header>
         <div class="card-header">
-          <span>日志查看 - {{ currentAccountId || '未选择账户' }}</span>
+          <span>日志查看</span>
           <div class="header-actions">
+            <el-select
+              v-model="selectedAccountId"
+              size="small"
+              style="width: 120px"
+              placeholder="选择账户"
+              @change="handleAccountChange"
+            >
+              <el-option
+                v-for="account in accountList"
+                :key="account"
+                :label="account"
+                :value="account"
+              />
+            </el-select>
             <el-select
               v-model="selectedFile"
               size="small"
@@ -72,6 +86,7 @@
       </div>
 
       <div class="status-bar">
+        <span>账户: {{ selectedAccountId || '-' }}</span>
         <span>行数: {{ logLines.length }}</span>
         <span>文件大小: {{ formatFileSize(fileSize) }}</span>
         <span v-if="loading">加载中...</span>
@@ -91,8 +106,11 @@ import { useStore } from '@/stores'
 
 const store = useStore()
 
-// 当前账户ID
-const currentAccountId = computed(() => store.selectedAccountId)
+// 账户列表
+const accountList = computed(() => store.accounts.map(a => a.account_id))
+
+// 独立选择的账户ID（默认使用store中的当前账户）
+const selectedAccountId = ref<string | undefined>('')
 
 const logContainer = ref<HTMLElement | null>(null)
 const logLines = ref<string[]>([])
@@ -109,9 +127,24 @@ const scrollTimeout = ref<number | null>(null)
 // 轮询定时器
 let pollTimer: number | null = null
 
+// 初始化账户选择
+const initAccount = () => {
+  // 如果还没有选择账户，使用store中的当前账户或第一个账户
+  if (!selectedAccountId.value) {
+    if (store.selectedAccountId) {
+      selectedAccountId.value = store.selectedAccountId
+    } else {
+      const firstAccount = accountList.value[0]
+      if (firstAccount) {
+        selectedAccountId.value = firstAccount
+      }
+    }
+  }
+}
+
 // 获取日志文件列表
 const fetchLogFiles = async () => {
-  const accountId = currentAccountId.value
+  const accountId = selectedAccountId.value
   if (!accountId) return
   try {
     const res = await logApi.getLogFiles(accountId)
@@ -128,7 +161,7 @@ const fetchLogFiles = async () => {
 
 // 获取日志内容
 const fetchLogContent = async (reset = false) => {
-  if (!currentAccountId.value || !selectedFile.value) return
+  if (!selectedAccountId.value || !selectedFile.value) return
   if (loading.value) return
 
   loading.value = true
@@ -139,8 +172,8 @@ const fetchLogContent = async (reset = false) => {
     }
 
     const res = await logApi.getLog(
-      currentAccountId.value,
-      selectedFile.value.replace(`trader-${currentAccountId.value}_`, '').replace('.log', ''),
+      selectedAccountId.value,
+      selectedFile.value.replace(`trader-${selectedAccountId.value}_`, '').replace('.log', ''),
       offset.value,
       1000
     )
@@ -198,13 +231,13 @@ const handleScroll = () => {
 
 // 轮询获取新日志
 const pollLog = async () => {
-  if (!currentAccountId.value || !selectedFile.value) return
+  if (!selectedAccountId.value || !selectedFile.value) return
   if (userScrolling.value) return
 
   try {
     const res = await logApi.getLog(
-      currentAccountId.value,
-      selectedFile.value.replace(`trader-${currentAccountId.value}_`, '').replace('.log', ''),
+      selectedAccountId.value,
+      selectedFile.value.replace(`trader-${selectedAccountId.value}_`, '').replace('.log', ''),
       offset.value,
       1000
     )
@@ -231,6 +264,14 @@ const pollLog = async () => {
   }
 }
 
+// 处理账户切换
+const handleAccountChange = () => {
+  selectedFile.value = ''
+  logLines.value = []
+  offset.value = 0
+  fetchLogFiles()
+}
+
 // 处理文件切换
 const handleFileChange = () => {
   fetchLogContent(true)
@@ -243,12 +284,12 @@ const handleRefresh = () => {
 
 // 下载日志
 const handleDownload = async () => {
-  if (!currentAccountId.value || !selectedFile.value) return
+  if (!selectedAccountId.value || !selectedFile.value) return
 
   try {
     const res = await logApi.downloadLog(
-      currentAccountId.value,
-      selectedFile.value.replace(`trader-${currentAccountId.value}_`, '').replace('.log', '')
+      selectedAccountId.value,
+      selectedFile.value.replace(`trader-${selectedAccountId.value}_`, '').replace('.log', '')
     )
 
     // 创建下载链接
@@ -308,8 +349,10 @@ const formatFileSize = (size: number): string => {
 }
 
 onMounted(() => {
-  // 初始化加载
-  if (currentAccountId.value) {
+  // 初始化账户选择
+  initAccount()
+  // 加载日志文件
+  if (selectedAccountId.value) {
     fetchLogFiles()
   }
   // 每3秒轮询一次
@@ -325,10 +368,11 @@ onUnmounted(() => {
   }
 })
 
-// 监听当前账户变化
-watch(currentAccountId, (newAccountId) => {
-  if (newAccountId) {
-    selectedFile.value = ''
+// 监听账户列表变化（初始化时可能还没加载完）
+watch(accountList, (newList) => {
+  const firstAccount = newList[0]
+  if (firstAccount && !selectedAccountId.value) {
+    selectedAccountId.value = firstAccount
     fetchLogFiles()
   }
 })

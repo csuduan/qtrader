@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
+import AccountCombined from '@/views/AccountCombined.vue'
 
 const routes: RouteRecordRaw[] = [
   {
@@ -17,55 +18,53 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/Dashboard.vue'),
     meta: { title: '总览', hideHeader: true }
   },
-  // 账户相关路由（二级菜单）
+  // 一级菜单：账户（合并账户详情和交易）
   {
-    path: '/account/detail',
-    name: 'AccountDetail',
-    component: () => import('@/views/Account.vue'),
-    meta: { title: '账户详情' }
+    path: '/account',
+    name: 'Account',
+    component: AccountCombined,
+    meta: { title: '账户' }
   },
+  // 一级菜单：换仓
   {
-    path: '/account/trading',
-    name: 'AccountTrading',
-    component: () => import('@/views/Trading.vue'),
-    meta: { title: '交易' }
-  },
-  {
-    path: '/account/rotation',
-    name: 'AccountRotation',
+    path: '/rotation',
+    name: 'Rotation',
     component: () => import('@/views/Rotation.vue'),
     meta: { title: '换仓' }
   },
+  // 一级菜单：策略
   {
-    path: '/account/strategy',
-    name: 'AccountStrategy',
+    path: '/strategy',
+    name: 'Strategy',
     component: () => import('@/views/Strategy.vue'),
     meta: { title: '策略' }
   },
+  // 一级菜单：监控
   {
-    path: '/account/setting',
-    name: 'AccountSetting',
+    path: '/alarms',
+    name: 'Alarms',
+    component: () => import('@/views/admin/AlarmInfo.vue'),
+    meta: { title: '监控' }
+  },
+  // 一级菜单：设置
+  {
+    path: '/setting',
+    name: 'Setting',
     component: () => import('@/views/account/AccountSetting.vue'),
-    meta: { title: '账户设置' }
+    meta: { title: '设置' }
   },
+  // 管理路由（二级菜单，仅admin可见）
   {
-    path: '/account/log',
-    name: 'AccountLog',
+    path: '/admin/log',
+    name: 'AdminLog',
     component: () => import('@/views/account/LogView.vue'),
-    meta: { title: '日志' }
+    meta: { title: '日志', requiredRole: 'admin', hideHeader: true }
   },
-  // 管理路由（二级菜单）
   {
     path: '/admin/system',
     name: 'SystemAdmin',
     component: () => import('@/views/admin/SystemAdmin.vue'),
-    meta: { title: '系统管理', hideHeader: true }
-  },
-  {
-    path: '/admin/alarms',
-    name: 'AdminAlarms',
-    component: () => import('@/views/admin/AlarmInfo.vue'),
-    meta: { title: '监控告警', hideHeader: true }
+    meta: { title: '系统', requiredRole: 'admin', hideHeader: true }
   },
   // 策略详情（保留）
   {
@@ -76,28 +75,48 @@ const routes: RouteRecordRaw[] = [
   },
   // 重定向：兼容旧路由
   {
-    path: '/account',
-    redirect: '/account/detail'
+    path: '/setting',
+    redirect: '/account'
+  },
+  {
+    path: '/account/detail',
+    redirect: '/account'
+  },
+  {
+    path: '/account/trading',
+    redirect: '/account'
+  },
+  {
+    path: '/account/rotation',
+    redirect: '/rotation'
+  },
+  {
+    path: '/account/strategy',
+    redirect: '/strategy'
+  },
+  {
+    path: '/account/setting',
+    redirect: '/setting'
+  },
+  {
+    path: '/account/log',
+    redirect: '/admin/log'
   },
   {
     path: '/trading',
-    redirect: '/account/trading'
+    redirect: '/account'
   },
   {
     path: '/rotation',
-    redirect: '/account/rotation'
-  },
-  {
-    path: '/strategy',
-    redirect: '/account/strategy'
+    redirect: '/rotation'
   },
   {
     path: '/system',
-    redirect: '/account/setting'
+    redirect: '/admin/system'
   },
   {
-    path: '/alarms',
-    redirect: '/admin/alarms'
+    path: '/admin/alarms',
+    redirect: '/alarms'
   }
 ]
 
@@ -110,12 +129,12 @@ const router = createRouter({
 router.beforeEach((to, _from, next) => {
   // 设置页面标题
   document.title = `${to.meta.title || ''} | Q-Trader`
-  
+
   // 检查登录状态
   const isLoggedIn = localStorage.getItem('isLoggedIn') === 'true'
   const token = localStorage.getItem('token')
   const userRole = localStorage.getItem('userRole') || 'guest'
-  
+
   if (to.meta.public) {
     // 公开页面，直接访问
     next()

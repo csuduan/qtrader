@@ -9,7 +9,6 @@
       </div>
       <el-menu
         :default-active="$route.path"
-        :default-openeds="['/account']"
         router
         class="nav-menu"
         background-color="#304156"
@@ -21,51 +20,47 @@
           <span>总览</span>
         </el-menu-item>
 
-        <!-- 账户子菜单 -->
-        <el-sub-menu index="/account">
-          <template #title>
-            <el-icon><User /></el-icon>
-            <span>账户</span>
-          </template>
-          <el-menu-item index="/account/detail">
-            <el-icon><Document /></el-icon>
-            <span>详情</span>
-          </el-menu-item>
-          <el-menu-item index="/account/trading">
-            <el-icon><Operation /></el-icon>
-            <span>交易</span>
-          </el-menu-item>
-          <el-menu-item index="/account/rotation">
-            <el-icon><RefreshRight /></el-icon>
-            <span>换仓</span>
-          </el-menu-item>
-          <el-menu-item index="/account/strategy">
-            <el-icon><TrendCharts /></el-icon>
-            <span>策略</span>
-          </el-menu-item>
-          <el-menu-item index="/account/setting">
-            <el-icon><Setting /></el-icon>
-            <span>设置</span>
-          </el-menu-item>
-          <el-menu-item index="/account/log">
-            <el-icon><DocumentCopy /></el-icon>
-            <span>日志</span>
-          </el-menu-item>
-        </el-sub-menu>
-
-        <!-- 系统菜单（一级）- 仅admin可见 -->
-        <el-menu-item v-if="isAdmin" index="/admin/system">
-          <el-icon><Monitor /></el-icon>
-          <span>系统</span>
+        <!-- 一级菜单：账户 -->
+        <el-menu-item index="/account">
+          <el-icon><User /></el-icon>
+          <span>账户</span>
         </el-menu-item>
 
-        <!-- 监控告警菜单（一级） -->
-        <el-menu-item index="/admin/alarms">
+        <!-- 一级菜单：换仓 -->
+        <el-menu-item index="/rotation">
+          <el-icon><RefreshRight /></el-icon>
+          <span>换仓</span>
+        </el-menu-item>
+
+        <!-- 一级菜单：策略 -->
+        <el-menu-item index="/strategy">
+          <el-icon><TrendCharts /></el-icon>
+          <span>策略</span>
+        </el-menu-item>
+
+        <!-- 一级菜单：监控 -->
+        <el-menu-item index="/alarms">
           <el-icon><Odometer /></el-icon>
           <span>监控</span>
         </el-menu-item>
+
+        <!-- 管理子菜单（仅admin可见）-->
+        <el-sub-menu v-if="isAdmin" index="/admin">
+          <template #title>
+            <el-icon><Tools /></el-icon>
+            <span>管理</span>
+          </template>
+          <el-menu-item index="/admin/log">
+            <el-icon><DocumentCopy /></el-icon>
+            <span>日志</span>
+          </el-menu-item>
+          <el-menu-item index="/admin/system">
+            <el-icon><Monitor /></el-icon>
+            <span>系统</span>
+          </el-menu-item>
+        </el-sub-menu>
       </el-menu>
-      
+
       <!-- 用户信息与退出 -->
       <div class="sidebar-footer">
         <el-dropdown trigger="click" placement="top">
@@ -104,7 +99,6 @@
       </div>
       <el-menu
         :default-active="$route.path"
-        :default-openeds="['/account']"
         router
         class="nav-menu"
         background-color="#304156"
@@ -117,47 +111,41 @@
           <span>总览</span>
         </el-menu-item>
 
-        <el-sub-menu index="/account">
-          <template #title>
-            <el-icon><User /></el-icon>
-            <span>账户</span>
-          </template>
-          <el-menu-item index="/account/detail">
-            <el-icon><Document /></el-icon>
-            <span>详情</span>
-          </el-menu-item>
-          <el-menu-item index="/account/trading">
-            <el-icon><Operation /></el-icon>
-            <span>交易</span>
-          </el-menu-item>
-          <el-menu-item index="/account/rotation">
-            <el-icon><RefreshRight /></el-icon>
-            <span>换仓</span>
-          </el-menu-item>
-          <el-menu-item index="/account/strategy">
-            <el-icon><TrendCharts /></el-icon>
-            <span>策略</span>
-          </el-menu-item>
-          <el-menu-item index="/account/setting">
-            <el-icon><Setting /></el-icon>
-            <span>设置</span>
-          </el-menu-item>
-          <el-menu-item index="/account/log">
-            <el-icon><DocumentCopy /></el-icon>
-            <span>日志</span>
-          </el-menu-item>
-        </el-sub-menu>
-
-        <el-menu-item v-if="isAdmin" index="/admin/system">
-          <el-icon><Monitor /></el-icon>
-          <span>系统</span>
+        <el-menu-item index="/account">
+          <el-icon><User /></el-icon>
+          <span>账户</span>
         </el-menu-item>
 
-        <el-menu-item index="/admin/alarms">
+        <el-menu-item index="/rotation">
+          <el-icon><RefreshRight /></el-icon>
+          <span>换仓</span>
+        </el-menu-item>
+
+        <el-menu-item index="/strategy">
+          <el-icon><TrendCharts /></el-icon>
+          <span>策略</span>
+        </el-menu-item>
+
+        <el-menu-item index="/alarms">
           <el-icon><Odometer /></el-icon>
           <span>监控</span>
         </el-menu-item>
-        
+
+        <el-sub-menu v-if="isAdmin" index="/admin">
+          <template #title>
+            <el-icon><Tools /></el-icon>
+            <span>管理</span>
+          </template>
+          <el-menu-item index="/admin/log">
+            <el-icon><DocumentCopy /></el-icon>
+            <span>日志</span>
+          </el-menu-item>
+          <el-menu-item index="/admin/system">
+            <el-icon><Monitor /></el-icon>
+            <span>系统</span>
+          </el-menu-item>
+        </el-sub-menu>
+
         <!-- 移动端退出登录 -->
         <div class="mobile-sidebar-footer">
           <el-divider />
@@ -306,14 +294,14 @@
       </el-header>
 
       <!-- 主内容区 -->
-      <el-main class="main-content">
+      <el-main class="main-content" :class="{ 'no-header': $route.meta.hideHeader }">
         <div class="content-wrapper">
           <router-view />
         </div>
       </el-main>
     </el-container>
   </el-container>
-  
+
   <!-- 登录页独立布局 -->
   <router-view v-else />
 </template>
@@ -720,6 +708,10 @@ onUnmounted(() => {
   background-color: #f0f2f5;
   height: calc(100vh - 60px);
   overflow: auto;
+}
+
+.main-content.no-header {
+  height: 100vh;
 }
 
 .header.is-mobile + .main-content {
