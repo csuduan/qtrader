@@ -111,12 +111,14 @@ let pollTimer: number | null = null
 
 // 获取日志文件列表
 const fetchLogFiles = async () => {
-  if (!currentAccountId.value) return
+  const accountId = currentAccountId.value
+  if (!accountId) return
   try {
-    const res = await logApi.getLogFiles(currentAccountId.value)
-    logFiles.value = res.files
-    if (logFiles.value.length > 0 && !selectedFile.value) {
-      selectedFile.value = logFiles.value[0].name
+    const res = await logApi.getLogFiles(accountId)
+    logFiles.value = res.files || []
+    const firstFile = logFiles.value[0]
+    if (firstFile && !selectedFile.value) {
+      selectedFile.value = firstFile.name
       await fetchLogContent(true)
     }
   } catch (error) {
