@@ -243,6 +243,13 @@ class TraderInitConfig(BaseModel):
     public_data_timeout: int = 30
 
 
+class SubsConfig(BaseModel):
+    """订阅配置（全局）"""
+
+    subscribe_symbols: List[str] = Field(default_factory=list, description="订阅的合约列表")
+    subscribe_bars: List[str] = Field(default_factory=list, description="订阅的K线列表，格式: symbol-interval")
+
+
 class AppConfig(BaseModel):
     """全局配置（来自config.yaml）"""
 
@@ -254,12 +261,13 @@ class AppConfig(BaseModel):
     scheduler: Optional[SchedulerConfig] = None  # Manager 定时任务
     account_scheduler: Optional[SchedulerConfig] = None  # 账户定时任务
     trading: TradingConfig | None = Field(default_factory=TradingConfig)
-    # 扩展数据库配置（公共数据）
-    database: DatabaseExtConfig = Field(default_factory=DatabaseExtConfig)
-    # Trader初始化配置
-    trader_init: TraderInitConfig = Field(default_factory=TraderInitConfig)
     # 数据库连接配置
-    data_base: DataBaseConfig = Field(default_factory=DataBaseConfig)
+    data_base: DataBaseConfig|None = Field(default_factory=DataBaseConfig)
+    # 数据服务配置
+    data_service: Dict[str, Dict[str, str]] = Field(default_factory=dict)
+    # 全局订阅配置
+    subs: SubsConfig = Field(default_factory=SubsConfig)
+
     # 全局告警配置（所有账户共享）
     alert: AlertConfig = Field(default_factory=AlertConfig)
 
@@ -280,6 +288,7 @@ class TraderConfig(AccountConfig):
     """交易器配置"""
 
     socket: SocketConfig = Field(default_factory=SocketConfig)
+    subs: SubsConfig = Field(default_factory=SubsConfig)
 
 
 # ==================== 配置加载器 ====================
@@ -345,6 +354,8 @@ class ConfigLoader:
             trader_config.trading = app_config.trading
         if not trader_config.paths:
             trader_config.paths = app_config.paths
+        # 使用全局subs配置（如果账户配置中没有定义）
+        trader_config.subs = app_config.subs
         return trader_config
 
     def _load_app_config(self) -> AppConfig:

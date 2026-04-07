@@ -13,12 +13,12 @@
       </template>
 
       <el-row :gutter="20" class="mb-4">
-        <el-col :span="8">
+        <el-col :xs="24" :sm="8">
           <el-statistic title="CPU 使用率" :value="currentSnapshot?.cpu_percent ?? 0">
             <template #suffix>%</template>
           </el-statistic>
         </el-col>
-        <el-col :span="8">
+        <el-col :xs="24" :sm="8">
           <div class="stat-card">
             <div class="stat-title">内存使用</div>
             <div class="stat-complex">
@@ -27,7 +27,7 @@
             </div>
           </div>
         </el-col>
-        <el-col :span="8">
+        <el-col :xs="24" :sm="8">
           <div class="stat-card">
             <div class="stat-title">磁盘使用</div>
             <div class="stat-complex">
@@ -56,7 +56,7 @@
       <!-- 账户筛选 -->
       <el-row :gutter="20" class="mb-4">
         <el-col :span="24">
-          <div style="display: flex; align-items: center; gap: 12px;">
+          <div class="filter-bar">
             <span style="font-size: 14px;">账户筛选:</span>
             <el-select
               v-model="selectedAccountId"
@@ -77,39 +77,39 @@
       </el-row>
 
       <el-row :gutter="20" class="mb-4">
-        <el-col :span="6">
+        <el-col :xs="12" :sm="6">
           <el-statistic title="今日总告警数" :value="stats.today_total">
             <template #suffix>条</template>
           </el-statistic>
         </el-col>
-        <el-col :span="6">
+        <el-col :xs="12" :sm="6">
           <el-statistic title="未处理告警数" :value="stats.unconfirmed">
             <template #suffix>条</template>
           </el-statistic>
         </el-col>
-        <el-col :span="6">
+        <el-col :xs="12" :sm="6">
           <el-statistic title="近1小时告警数" :value="stats.last_hour">
             <template #suffix>条</template>
           </el-statistic>
         </el-col>
-        <el-col :span="6">
+        <el-col :xs="12" :sm="6">
           <el-statistic title="近5分钟告警数" :value="stats.last_five_minutes">
             <template #suffix>条</template>
           </el-statistic>
         </el-col>
       </el-row>
 
-      <el-row :gutter="20" class="mb-4">
-        <el-col :span="18">
-          <div style="display: flex; align-items: center;">
-            <span style="margin-right: 12px; font-size: 14px;">告警状态:</span>
+      <el-row :gutter="20" class="mb-4" align="middle">
+        <el-col :xs="24" :sm="18">
+          <div class="filter-bar">
+            <span style="font-size: 14px;">告警状态:</span>
             <el-radio-group v-model="statusFilter" @change="handleFilterChange" size="small">
               <el-radio-button value="UNCONFIRMED">未处理</el-radio-button>
               <el-radio-button value="CONFIRMED">已处理</el-radio-button>
             </el-radio-group>
           </div>
         </el-col>
-        <el-col :span="6" style="text-align: right;">
+        <el-col :xs="24" :sm="6" style="text-align: right;">
           <el-button
             type="primary"
             @click="handleConfirmAll"
@@ -121,34 +121,36 @@
         </el-col>
       </el-row>
 
-      <el-table :data="alarms" stripe v-loading="loading" table-layout="fixed" empty-text="暂无告警信息">
-        <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="alarm_time" label="时间" width="100" />
-        <el-table-column prop="source" label="来源" width="100" />
-        <el-table-column prop="title" label="标题" min-width="200" show-overflow-tooltip />
-        <el-table-column prop="detail" label="详情" min-width="300" show-overflow-tooltip />
-        <el-table-column prop="status" label="状态" width="120">
-          <template #default="{ row }">
-            <el-tag :type="getStatusType(row.status)">
-              {{ getStatusText(row.status) }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="120">
-          <template #default="{ row }">
-            <el-button
-              v-if="row.status === 'UNCONFIRMED'"
-              type="primary"
-              size="small"
-              @click="handleConfirm(row.id)"
-              :loading="confirmingId === row.id"
-            >
-              标记已处理
-            </el-button>
-            <span v-else class="text-gray">已处理</span>
-          </template>
-        </el-table-column>
-      </el-table>
+      <div class="table-wrapper">
+        <el-table :data="alarms" stripe v-loading="loading" table-layout="fixed" empty-text="暂无告警信息">
+          <el-table-column prop="id" label="ID" width="80" />
+          <el-table-column prop="alarm_time" label="时间" width="100" />
+          <el-table-column prop="source" label="来源" width="100" />
+          <el-table-column prop="title" label="标题" min-width="200" show-overflow-tooltip />
+          <el-table-column prop="detail" label="详情" min-width="300" show-overflow-tooltip />
+          <el-table-column prop="status" label="状态" width="120">
+            <template #default="{ row }">
+              <el-tag :type="getStatusType(row.status)">
+                {{ getStatusText(row.status) }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="120">
+            <template #default="{ row }">
+              <el-button
+                v-if="row.status === 'UNCONFIRMED'"
+                type="primary"
+                size="small"
+                @click="handleConfirm(row.id)"
+                :loading="confirmingId === row.id"
+              >
+                标记已处理
+              </el-button>
+              <span v-else class="text-gray">已处理</span>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
     </el-card>
   </div>
 </template>
@@ -424,6 +426,12 @@ onUnmounted(() => {
   height: 280px;
 }
 
+@media (max-width: 768px) {
+  .resource-chart {
+    height: 220px;
+  }
+}
+
 .card-header {
   display: flex;
   justify-content: space-between;
@@ -466,5 +474,17 @@ onUnmounted(() => {
 .stat-sub {
   font-size: 12px;
   color: #909399;
+}
+
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.table-wrapper {
+  width: 100%;
+  overflow-x: auto;
 }
 </style>

@@ -14,6 +14,7 @@ from src.manager.api.websocket_manager import websocket_manager
 from src.manager.manager import TradingManager
 from src.models.object import AccountData
 from src.models.po import JobPo
+from src.utils.config_loader import get_config_loader
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -172,6 +173,8 @@ async def update_alert_config(
     threshold: bool = Body(..., description="是否启用阈值告警"),
     threshold_count: Optional[int] = Body(None, description="阈值告警数量"),
     threshold_window: Optional[int] = Body(None, description="阈值告警时间窗口（秒）"),
+    dnd_start: Optional[int] = Body(None, description="免打扰开始时间（小时，默认23点）"),
+    dnd_end: Optional[int] = Body(None, description="免打扰结束时间（小时，默认次日8点）"),
     account_id: Optional[str] = Body(None, description="账户ID（多账号模式）"),
     trading_manager=Depends(get_trading_manager),
 ):
@@ -183,6 +186,8 @@ async def update_alert_config(
     - **threshold**: 是否启用阈值告警（异常日志达到阈值时发送）
     - **threshold_count**: 阈值告警数量，默认5
     - **threshold_window**: 阈值告警时间窗口（秒），默认300（5分钟）
+    - **dnd_start**: 免打扰开始时间（小时，默认23点），此时间段内不发送即时告警
+    - **dnd_end**: 免打扰结束时间（小时，默认次日8点）
     """
     trader = trading_manager.get_trader(account_id)
     if not trader:
@@ -196,6 +201,10 @@ async def update_alert_config(
         config["threshold_count"] = threshold_count
     if threshold_window is not None:
         config["threshold_window"] = threshold_window
+    if dnd_start is not None:
+        config["dnd_start"] = dnd_start
+    if dnd_end is not None:
+        config["dnd_end"] = dnd_end
 
     success = await trader.update_alert_config(config)
     if success:
@@ -485,3 +494,110 @@ async def toggle_manager_scheduler_job(
             data={"job_id": job_id, "enabled": enabled}, message="任务状态已更新"
         )
     return error_response(code=500, message="更新任务状态失败")
+
+
+@router.get("/manager/alert-config")
+async def get_manager_alert_config():
+    """
+    获取Manager全局告警配置
+
+    返回config.yaml中配置的alert配置
+    """
+    try:
+        config_loader = get_config_loader()
+        app_config = config_loader.load_config()
+        alert_config = app_config.alert
+
+        return success_response(
+            data={
+                "immediate": alert_config.immediate,
+                "threshold": alert_config.threshold,
+                "threshold_count": alert_config.threshold_count,
+                "threshold_window": alert_config.threshold_window,
+                "dnd_start": alert_config.dnd_start,
+                "dnd_end": alert_config.dnd_end,
+            },
+            message="获取成功",
+        )
+    except Exception as e:
+        logger.exception(f"获取Manager告警配置失败: {e}")
+        return error_response(code=500, message=f"获取告警配置失败: {str(e)}")
+
+
+@router.put("/manager/alert-config")
+async def update_manager_alert_config(
+    immediate: bool = Body(..., description="是否启用即时告警"),
+    threshold: bool = Body(..., description="是否启用阈值告警"),
+    threshold_count: Optional[int] = Body(None, description="阈值告警数量"),
+    threshold_window: Optional[int] = Body(None, description="阈值告警时间窗口（秒）"),
+    dnd_start: Optional[int] = Body(None, description="免打扰开始时间（小时，默认23点）"),
+    dnd_end: Optional[int] = Body(None, description="免打扰结束时间（小时，默认次日8点）"),
+):
+    """
+    更新Manager全局告警配置
+
+    更新config.yaml中的alert配置
+    - **immediate**: 是否启用即时告警（如Trader异常、连接断开等立即发送）
+    - **threshold**: 是否启用阈值告警（异常日志达到阈值时发送）
+    - **threshold_count**: 阈值告警数量，默认5
+    - **threshold_window**: 阈值告警时间窗口（秒），默认300（5分钟）
+    - **dnd_start**: 免打扰开始时间（小时，默认23点），此时间段内不发送即时告警
+    - **dnd_end**: 免打扰结束时间（小时，默认次日8点）
+    """
+    try:
+        import yaml
+        from pathlib import Path
+
+        config_loader = get_config_loader()
+        app_config = config_loader.load_config()
+
+        # 更新内存中的配置
+        app_config.alert.immediate = immediate
+        app_config.alert.threshold = threshold
+        if threshold_count is not None:
+            app_config.alert.threshold_count = threshold_count
+        if threshold_window is not None:
+            app_config.alert.threshold_window = threshold_window
+        if dnd_start is not None:
+            app_config.alert.dnd_start = dnd_start
+        if dnd_end is not None:
+            app_config.alert.dnd_end = dnd_end
+
+        # 读取现有配置文件
+        config_path = Path(config_loader.config_dir) / "config.yaml"
+        if config_path.exists():
+            with open(config_path, "r", encoding="utf-8") as f:
+                config_data = yaml.safe_load(f) or {}
+        else:
+            config_data = {}
+
+        # 更新alert配置
+        config_data["alert"] = {
+            "immediate": app_config.alert.immediate,
+            "threshold": app_config.alert.threshold,
+            "threshold_count": app_config.alert.threshold_count,
+            "threshold_window": app_config.alert.threshold_window,
+            "dnd_start": app_config.alert.dnd_start,
+            "dnd_end": app_config.alert.dnd_end,
+        }
+
+        # 写回文件
+        with open(config_path, "w", encoding="utf-8") as f:
+            yaml.dump(config_data, f, allow_unicode=True, sort_keys=False)
+
+        logger.info(f"Manager告警配置已更新: immediate={immediate}, threshold={threshold}")
+
+        return success_response(
+            data={
+                "immediate": app_config.alert.immediate,
+                "threshold": app_config.alert.threshold,
+                "threshold_count": app_config.alert.threshold_count,
+                "threshold_window": app_config.alert.threshold_window,
+                "dnd_start": app_config.alert.dnd_start,
+                "dnd_end": app_config.alert.dnd_end,
+            },
+            message="告警配置已更新",
+        )
+    except Exception as e:
+        logger.exception(f"更新Manager告警配置失败: {e}")
+        return error_response(code=500, message=f"更新告警配置失败: {str(e)}")

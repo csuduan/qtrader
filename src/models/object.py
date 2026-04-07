@@ -227,9 +227,10 @@ class OrderData(BaseModel):
     """
 
     # 必需字段
-    order_id: str = Field(..., description="订单ID（系统内部唯一标识）")
+    order_id: str = Field(..., description="订单ID（系统内部唯一标识,order_ref")
     symbol: str = Field(..., description="合约代码")
     exchange: Exchange = Field(default=Exchange.NONE, description="交易所")
+    order_sys_id: Optional[str] = Field(None, description="交易所订单ID")
 
     direction: Direction = Field(..., description="买卖方向")
     offset: Offset = Field(default=Offset.OPEN, description="开平类型")

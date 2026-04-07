@@ -122,7 +122,7 @@ class SocketClient:
 
         return decorator
 
-    async def connect(self, retry_interval: float = 3.0, max_retries: int = 30) -> bool:
+    async def connect(self, retry_interval: float = 3.0, max_retries: int = 10) -> bool:
         """
         连接到服务器
 
@@ -147,10 +147,10 @@ class SocketClient:
                     self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
                 # 启动自动重连任务
-                if self._auto_reconnect and (
-                    self._reconnect_task is None or self._reconnect_task.done()
-                ):
-                    self._reconnect_task = asyncio.create_task(self._reconnect_loop())
+                # if self._auto_reconnect and (
+                #     self._reconnect_task is None or self._reconnect_task.done()
+                # ):
+                #     self._reconnect_task = asyncio.create_task(self._reconnect_loop())
 
                 logger.info(f"SocketClient V2 已连接: {self.socket_path}")
 
@@ -428,20 +428,6 @@ class SocketClient:
     def set_connect_callback(self, callback: Callable[[], Any]) -> None:
         """设置连接成功回调"""
         self._on_connect_callback = callback
-
-    def start_auto_reconnect(self) -> None:
-        """启动自动重连"""
-        if self._reconnect_task is None or self._reconnect_task.done():
-            self._auto_reconnect = True
-            self._reconnect_task = asyncio.create_task(self._reconnect_loop())
-            logger.info("已启动自动重连")
-
-    def stop_auto_reconnect(self) -> None:
-        """停止自动重连"""
-        self._auto_reconnect = False
-        if self._reconnect_task and not self._reconnect_task.done():
-            self._reconnect_task.cancel()
-            logger.info("已停止自动重连")
 
     async def health_check(self) -> bool:
         """执行健康检查"""

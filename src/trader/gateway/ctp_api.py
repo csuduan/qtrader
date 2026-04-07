@@ -163,9 +163,9 @@ class CtpMdApi(mdapi.CThostFtdcMdSpi):
 
         # 已订阅合约
         self.subscribed: set = set()
-        # 历史订阅合约
+        # 历史订阅合约（从全局配置加载）
         self.hist_subscribed: set = set()
-        self.hist_subscribed.update(self.config.subscribe_symbols)
+        self.hist_subscribed.update(gateway.subs_config.subscribe_symbols)
 
         # API 实例
         self.api: Optional[mdapi.CThostFtdcMdApi] = None
@@ -579,12 +579,16 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
         ctp_req = tdapi.CThostFtdcInputOrderActionField()
         ctp_req.BrokerID = self.broker
         ctp_req.InvestorID = self.user
-        ctp_req.OrderRef = order.order_id
-        ctp_req.FrontID = self.frontid
-        ctp_req.SessionID = self.sessionid
+        if order.order_sys_id:
+            #优先使用sys_id +exchange
+            ctp_req.OrderSysID = order.order_sys_id
+            ctp_req.ExchangeID = EXCHANGE_VT2CTP.get(order.exchange, "")
+
+        else:
+            ctp_req.OrderRef = order.order_id
+            ctp_req.FrontID = self.frontid
+            ctp_req.SessionID = self.sessionid
         ctp_req.ActionFlag = tdapi.THOST_FTDC_AF_Delete
-        ctp_req.InstrumentID = order.symbol
-        ctp_req.ExchangeID = EXCHANGE_VT2CTP.get(order.exchange, "")
 
         self.reqid += 1
         ret = self.api.ReqOrderAction(ctp_req, self.reqid)
@@ -627,7 +631,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
         """查询合约"""
         # 检查是否已有当日合约缓存
         today = datetime.now().strftime("%Y-%m-%d")
-        if self.gateway.contracts and self.gateway._contracts_update_date == today:
+        if len(self.gateway.contracts) > 0:
             logger.info(f"合约信息已缓存 ({len(self.gateway.contracts)} 个)，跳过查询")
             self.contract_inited = True
             self.semaphore.release()
@@ -1066,11 +1070,12 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
             return
 
         if pOrder:
-            order_id = pOrder.OrderSysID
+            order_id = pOrder.OrderRef
             order: OrderData = OrderData(
                 order_id=order_id,
                 trading_day=pOrder.TradingDay,
                 symbol=pOrder.InstrumentID,
+                order_sys_id=pOrder.OrderSysID,
                 exchange=EXCHANGE_CTP2VT[pOrder.ExchangeID],
                 direction=DIRECTION_CTP2VT[pOrder.Direction],
                 offset=OFFSET_CTP2VT[pOrder.CombOffsetFlag],

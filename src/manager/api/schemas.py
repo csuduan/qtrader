@@ -100,8 +100,6 @@ class OrderRes(BaseModel):
     status: str
     last_msg: Optional[str] = None
     insert_date_time: datetime
-    created_at: datetime
-    updated_at: datetime
 
     class Config:
         from_attributes = True

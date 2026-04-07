@@ -2,6 +2,12 @@ import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 
 const routes: RouteRecordRaw[] = [
   {
+    path: '/login',
+    name: 'Login',
+    component: () => import('@/views/Login.vue'),
+    meta: { title: '登录', public: true, standalone: true }
+  },
+  {
     path: '/',
     redirect: '/dashboard'
   },
@@ -41,6 +47,12 @@ const routes: RouteRecordRaw[] = [
     name: 'AccountSetting',
     component: () => import('@/views/account/AccountSetting.vue'),
     meta: { title: '账户设置' }
+  },
+  {
+    path: '/account/log',
+    name: 'AccountLog',
+    component: () => import('@/views/account/LogView.vue'),
+    meta: { title: '日志' }
   },
   // 管理路由（二级菜单）
   {
@@ -98,7 +110,31 @@ const router = createRouter({
 router.beforeEach((to, _from, next) => {
   // 设置页面标题
   document.title = `${to.meta.title || ''} | Q-Trader`
-  next()
+  
+  // 检查登录状态
+  const isLoggedIn = localStorage.getItem('isLoggedIn') === 'true'
+  const token = localStorage.getItem('token')
+  const userRole = localStorage.getItem('userRole') || 'guest'
+  
+  if (to.meta.public) {
+    // 公开页面，直接访问
+    next()
+  } else if (!isLoggedIn || !token) {
+    // 未登录，跳转到登录页
+    next('/login')
+  } else if (to.meta.requiredRole) {
+    // 需要特定角色权限
+    const requiredRole = to.meta.requiredRole as string
+    if (requiredRole === 'admin' && userRole !== 'admin') {
+      // 需要admin权限但当前用户不是admin
+      next('/dashboard')
+    } else {
+      next()
+    }
+  } else {
+    // 已登录，正常访问
+    next()
+  }
 })
 
 export default router

@@ -332,3 +332,21 @@ class ContractPo(Base):
 
     def __repr__(self):
         return f"<ContractPo(symbol={self.symbol}, exchange_id={self.exchange_id}, update_date={self.update_date}, data_source={self.data_source})>"
+
+
+class UserPo(Base):
+    """用户信息表"""
+
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(50), unique=True, nullable=False, index=True)
+    password = Column(String(255), nullable=False)  # 密码哈希
+    role = Column(String(20), nullable=False, default="guest")  # admin, trader, guest
+    is_active = Column(Boolean, nullable=False, default=True)
+    last_login = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    def __repr__(self):
+        return f"<UserPo(user_id={self.user_id}, role={self.role}, is_active={self.is_active})>"

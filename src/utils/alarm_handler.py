@@ -17,8 +17,42 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+import re
+
+
+def extract_account_id_from_message(message: str) -> Optional[str]:
+    """
+    从日志消息中提取账户ID
+
+    常见的账户ID格式：
+    -  trader-XXXX
+    -  账户ID: XXXX
+    -  account_id: XXXX
+    """
+    if not message:
+        return None
+
+    # 匹配常见的账户ID模式
+    patterns = [
+        r'账户\[?([^\]]+)\]?',  # 账户[DQ] 或 账户DQ
+        r'account_id[:=]\s*(\w+)',  # account_id: DQ 或 account_id=DQ
+        r'trader[-_](\w+)',  # trader-DQ 或 trader_DQ
+        r'account[:=]\s*(\w+)',  # account: DQ
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, message, re.IGNORECASE)
+        if match:
+            return match.group(1)
+
+    return None
+
+
 def create_alarm_from_log(
-    log_message: str, module: Optional[str] = None, function: Optional[str] = None
+    log_message: str,
+    module: Optional[str] = None,
+    function: Optional[str] = None,
+    extra: Optional[dict] = None
 ) -> bool:
     """
     从日志记录创建告警
@@ -42,12 +76,24 @@ def create_alarm_from_log(
         today = now.strftime("%Y-%m-%d")
         time_str = now.strftime("%H:%M:%S")
 
+        # 尝试从 extra 或消息中提取账户ID
+        account_id = None
+        if extra and isinstance(extra, dict):
+            account_id = extra.get('account_id')
+        if not account_id:
+            account_id = extract_account_id_from_message(log_message)
+        if not account_id:
+            account_id = "SYSTEM"
+
+        # 格式化标题：【即时告警】【账户ID】模块错误
+        title = f"【即时告警】【{account_id}】{module or '未知模块'}错误"
+
         alarm = AlarmPo(
-            account_id="SYSTEM",
+            account_id=account_id,
             alarm_date=today,
             alarm_time=time_str,
             source="LOG",
-            title=f"系统错误: {module or '未知模块'}",
+            title=title,
             detail=log_message,
             status="UNCONFIRMED",
         )
@@ -168,7 +214,17 @@ class AlarmHandler:
             except:
                 pass
 
-            create_alarm_from_log(log_message, module, function)
+            # 获取 extra 数据
+            extra = None
+            try:
+                if isinstance(record, dict):
+                    extra = record.get("extra")
+                else:
+                    extra = getattr(record, "extra", None)
+            except:
+                pass
+
+            create_alarm_from_log(log_message, module, function, extra)
 
         except Exception as e:
             # 避免告警处理器自身出错导致日志系统异常

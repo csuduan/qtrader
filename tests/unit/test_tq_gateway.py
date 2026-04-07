@@ -34,33 +34,60 @@ from src.models.object import (
     TradeData,
 )
 from src.trader.gateway.tq_gateway import TqGateway
-from src.utils.config_loader import GatewayConfig, TianqinConfig, BrokerConfig
+from src.utils.config_loader import (
+    TraderConfig,
+    GatewayConfig,
+    TianqinConfig,
+    BrokerConfig,
+    SubsConfig,
+    TradingConfig,
+    RiskControlConfig,
+)
 
 
 # ==================== Fixtures ====================
 
 
 @pytest.fixture
-def gateway_config() -> GatewayConfig:
-    """创建 TqGateway 配置"""
-    return GatewayConfig(
-        account_id="test_account_001",
-        type="TQSDK",
-        tianqin=TianqinConfig(
-            username="test_user",
-            password="test_pass",
-        ),
-        broker=BrokerConfig(
-            type="sim",
-        ),
+def subs_config() -> SubsConfig:
+    """创建订阅配置"""
+    return SubsConfig(
         subscribe_symbols=["SHFE.rb2505"],
+        subscribe_bars=["rb2505-M1"],
     )
 
 
 @pytest.fixture
-def gateway(gateway_config: GatewayConfig) -> TqGateway:
+def trader_config(subs_config: SubsConfig) -> TraderConfig:
+    """创建 TraderConfig 配置"""
+    config = TraderConfig(
+        account_id="test_account_001",
+        account_type="kq",
+        gateway=GatewayConfig(
+            account_id="test_account_001",
+            type="TQSDK",
+            tianqin=TianqinConfig(
+                username="test_user",
+                password="test_pass",
+            ),
+            broker=BrokerConfig(
+                type="sim",
+            ),
+        ),
+        trading=TradingConfig(
+            auto_trade=True,
+            paused=False,
+            risk_control=RiskControlConfig(),
+        ),
+        subs=subs_config,
+    )
+    return config
+
+
+@pytest.fixture
+def gateway(trader_config: TraderConfig) -> TqGateway:
     """创建 TqGateway 实例"""
-    return TqGateway(config=gateway_config)
+    return TqGateway(acct_config=trader_config)
 
 
 @pytest.fixture
@@ -171,10 +198,10 @@ def mock_tq_api():
 class TestTqGatewayInitialization:
     """TqGateway 初始化测试"""
 
-    def test_initialization_stores_config(self, gateway: TqGateway, gateway_config: GatewayConfig):
+    def test_initialization_stores_config(self, gateway: TqGateway, trader_config: TraderConfig):
         """测试配置正确存储"""
-        assert gateway.config == gateway_config
-        assert gateway.account_id == gateway_config.account_id
+        assert gateway.config == trader_config.gateway
+        assert gateway.account_id == trader_config.gateway.account_id
 
     def test_initialization_internal_caches(self, gateway: TqGateway):
         """测试内部缓存初始化"""
@@ -192,9 +219,9 @@ class TestTqGatewayInitialization:
         assert gateway.connected is False
         assert gateway._running is False
 
-    def test_initialization_subscribe_symbols(self, gateway: TqGateway, gateway_config: GatewayConfig):
+    def test_initialization_subscribe_symbols(self, gateway: TqGateway, trader_config: TraderConfig):
         """测试订阅符号初始化"""
-        assert gateway.hist_subs == gateway_config.subscribe_symbols
+        assert gateway.hist_subs == set(trader_config.subs.subscribe_symbols)
 
     def test_initialization_order_ref(self, gateway: TqGateway):
         """测试订单引用计数初始化"""

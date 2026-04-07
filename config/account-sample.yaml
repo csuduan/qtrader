@@ -1,14 +1,6 @@
 account_id: "xxx"
 account_type: "kq"
 
-# 告警通知配置
-alert:
-  immediate: true     # 即时告警（Trader异常、连接断开等）
-  threshold: true     # 阈值告警（异常日志达到阈值时发送）
-  threshold_count: 5  # 阈值：异常次数
-  threshold_window: 300  # 时间窗口（秒）
-  dnd_start: 23       # 免打扰开始时间（小时，默认23点）
-  dnd_end: 8          # 免打扰结束时间（小时，默认次日8点）
 
 gateway:
   type: "TQSDK"
@@ -20,23 +12,8 @@ gateway:
     broker_name: "H徽商期货"
     user_id: "xxx"
     password: "xxx"
-  subscribe_symbols:
-    - "IC2603"
-    - "IM2603"
-    - "RB2605"
-    - "RB2603"
 
-# 交易控制
-trading:
-  auto_trade: true
-  paused: false
-  # 风控参数
-  risk_control:
-    max_daily_orders: 10000
-    max_daily_cancels: 5000
-    max_order_volume: 50
-    max_split_volume: 5
-    order_timeout: 5
+
 
 # 策略配置文件
 strategies:
@@ -44,7 +21,7 @@ strategies:
   StrRsiInDay-AM-IM01:
     enabled: true
     type: rsi_strategy
-    symbol: "IM2603"
+    symbol: "IM2606"
     exchange: "CFFEX"
     volume: 3
     bar: "M1"
@@ -54,7 +31,7 @@ strategies:
   StrRsiInDay-PM-IM01:
     enabled: true
     type: rsi_strategy
-    symbol: "IM2603"
+    symbol: "IM2606"
     exchange: "CFFEX"
     volume: 1
     bar: "M1"
@@ -64,7 +41,7 @@ strategies:
   StrRsiInDay-AM-IC01:
     enabled: true
     type: rsi_strategy
-    symbol: "IC2603"
+    symbol: "IC2606"
     exchange: "CFFEX"
     volume: 1
     bar: "M1"
@@ -74,7 +51,7 @@ strategies:
   StrRsiInDay-PM-IC01:
     enabled: true
     type: rsi_strategy
-    symbol: "IC2603"
+    symbol: "IC2606"
     exchange: "CFFEX"
     volume: 1
     bar: "M1"

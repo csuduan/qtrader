@@ -11,7 +11,6 @@ from typing import Any, Dict, List, Optional
 
 from src.app_context import AppContext, get_app_context
 from src.manager.public_data_service import PublicDataService
-from src.manager.trader_monitor import TraderMonitor
 from src.manager.trader_proxy import TraderProxy
 from src.models.object import AccountData, Direction, Offset, OrderData, OrderRequest
 from src.utils.config_loader import AccountConfig, AppConfig, DatabaseConfig, SocketConfig, get_config_loader
@@ -30,13 +29,11 @@ class TradingManager:
     交易管理器
 
     职责：
-    1. 启动/停止/重启 Trader（独立进程模式）
+    1. 启动/停止/重启 Trader
     2. 进程健康检查和自动重启
     3. 事件处理和分发（通过 AsyncEventEngine）
     4. API 服务集成（查询Trader获取数据）
 
-    运行模式：
-    - standalone: 独立模式，Trader作为独立进程运行，Trader作为Socket服务器
     """
 
     def __init__(self, account_configs: List[AccountConfig], app_config: Optional[AppConfig] = None):
@@ -57,14 +54,12 @@ class TradingManager:
         self.socket_config = SocketConfig()
         self.database_config = DatabaseConfig()
 
-        # 创建全局配置适配器（用于传递给TraderProxy）
-        # self._global_config_adapter = _GlobalConfigAdapter(self.socket_config)
 
         # Socket目录（独立模式的Trader进程会创建socket文件）
         socket_dir = self.socket_config.socket_dir
         Path(socket_dir).mkdir(parents=True, exist_ok=True)
 
-        # Trader Proxy 实例（独立模式）
+        # Trader Proxy 实例
         self.traders: Dict[str, TraderProxy] = {}
 
         # 运行状态
@@ -81,9 +76,6 @@ class TradingManager:
         # 公共数据服务
         self.public_data_service: Optional[PublicDataService] = None
 
-        # Trader启动监控器
-        self._trader_monitor: Optional[TraderMonitor] = None
-
         # 服务器资源监控历史缓存（5秒采样一次，默认保存2880条约4小时）
         self._resource_history: deque = deque(maxlen=2880)
         self._resource_sample_task: Optional[asyncio.Task] = None
@@ -91,7 +83,7 @@ class TradingManager:
         logger.info("交易管理器初始化完成")
 
     # ==================== Trader Proxy管理 ====================
-    async def create_trader(self, account_id) -> bool:
+    async def create_trader_proxy(self, account_id) -> bool:
         """
         创建指定账户的Trader Proxy
         Args:
@@ -100,14 +92,21 @@ class TradingManager:
         Returns:
             是否创建成功
         """
+        # 如果已存在，先停止旧实例
+        if account_id in self.traders:
+            old_trader = self.traders[account_id]
+            logger.warning(f"Trader [{account_id}] 已存在，_connect_task={old_trader._connect_task}，先停止旧实例")
+            await old_trader.stop_monitoring()
+            del self.traders[account_id]
 
         account_config = self.account_configs_map.get(account_id)
         if not account_config:
             logger.error(f"未找到账号 [{account_id}] 的配置")
             return False
 
-        trader = TraderProxy(account_config=account_config)
-        self.traders[account_id] = trader
+        trader_proxy = TraderProxy(account_config=account_config)
+        # TraderProxy 会自动检测 socket 文件并决定是否连接，不需要手动调用 start()
+        self.traders[account_id] = trader_proxy
         logger.info(f"Trader Proxy [{account_id}] 初始化完成（enabled: {account_config.enabled}）")
         return True
 
@@ -129,10 +128,11 @@ class TradingManager:
                 logger.error(f"Trader Proxy [{account_id}] 未初始化")
                 return False
 
-            success = await trader.start()
+            success = await trader.start_process()
             if success:
                 logger.info(f"Trader Proxy [{account_id}] 启动成功")
-
+            else:
+                logger.warning(f"Trader Proxy [{account_id}] 启动返回 False")
             return success
 
         except Exception as e:
@@ -155,44 +155,14 @@ class TradingManager:
             return False
 
         try:
-            # 停止Trader（只停止自己创建的子进程）
-            success = await trader.stop()
+            # 停止Trader
+            success = await trader.stop_process()
             logger.info(f"Trader [{account_id}] 已停止")
             return success
 
         except Exception as e:
             logger.exception(f"停止Trader [{account_id}] 失败: {e}")
             return False
-
-    async def restart_trader(self, account_id: str) -> bool:
-        """
-        重启指定Trader
-
-        Args:
-            account_id: 账户ID
-
-        Returns:
-            是否重启成功
-        """
-        trader = self.traders.get(account_id)
-        if not trader:
-            logger.warning(f"Trader [{account_id}] 未运行，无法重启")
-            return False
-
-        # 获取配置信息
-        account_config = self.account_configs_map.get(account_id)
-        if account_config is None:
-            logger.warning(f"未找到账号 [{account_id}] 的配置")
-            return False
-
-        # 停止
-        await self.stop_trader(account_id)
-
-        # 等待一秒
-        await asyncio.sleep(1)
-
-        # 启动
-        return await self.start_trader(account_id)
 
     def is_running(self, account_id: str) -> bool:
         """
@@ -798,34 +768,18 @@ class TradingManager:
         # 初始化共享数据库和公共数据服务
         await self._init_public_data()
 
-        # Note: ManagerPersistence 已禁用 - 新架构下 Trader 直接写入 PG
-        # Manager 只负责查询 PG 并推送到 WebSocket
-        # 如需启用旧模式，取消下面注释：
-        # from src.manager.persistence import init_persistence
-        # event_engine = ctx.get_event_engine()
-        # if event_engine:
-        #     init_persistence(event_engine)
-        #     logger.info("Manager 持久化服务已启动")
         logger.info("Manager 使用新架构：Trader 直接写入 PG，Manager 只读模式")
-
-        # 启动 Trader 启动监控器
-        self._start_trader_monitor()
 
         # 获取所有账号
         accounts = [acc for acc in self.account_configs]
         logger.info(f"识别到账号: {[acc.account_id for acc in accounts]}")
 
-        # 启动所有Trader
+        # 创建所有TraderProxy（TraderProxy会自动检测socket文件并决定是否连接）
         for account in accounts:
             if account.account_id is None:
                 logger.warning(f"跳过没有 account_id 的账户配置")
                 continue
-            await self.create_trader(account.account_id)
-            success = await self.start_trader(account.account_id)
-            if success:
-                logger.info(f"Trader Proxy [{account.account_id}] 启动成功")
-            else:
-                logger.error(f"Trader Proxy [{account.account_id}] 启动失败")
+            await self.create_trader_proxy(account.account_id)
 
         # 启动资源采样任务
         self._start_resource_sampler()
@@ -888,7 +842,7 @@ class TradingManager:
 
             from src.manager.tq_contract_fetcher import TqContractFetcher
 
-            fetcher = TqContractFetcher(tq_config["user"], tq_config["password"])
+            fetcher = TqContractFetcher(tq_config["username"], tq_config["password"])
             # TqSdk 连接超时由库内部控制
             contracts = await asyncio.to_thread(fetcher.fetch_contracts)
 
@@ -906,7 +860,7 @@ class TradingManager:
                 try:
                     from src.manager.rq_contract_fetcher import RqContractFetcher
 
-                    rq_fetcher = RqContractFetcher(rq_config["user"], rq_config["password"])
+                    rq_fetcher = RqContractFetcher(rq_config["username"], rq_config["password"])
                     min_order_map = await asyncio.to_thread(rq_fetcher.fetch_min_order_quantities)
                     logger.info(f"从米筐获取了 {len(min_order_map)} 个合约的最小开仓手数")
                 except Exception as e:
@@ -946,55 +900,9 @@ class TradingManager:
         if not data_service or not isinstance(data_service, dict):
             return None
         config = data_service.get(key)
-        if config and config.get("user"):
+        if config and config.get("username"):
             return config
         return None
-
-    def _start_trader_monitor(self) -> None:
-        """启动 Trader 启动监控器"""
-        try:
-            from src.utils.config_loader import get_config_loader
-
-            loader = get_config_loader()
-            app_config = loader._load_app_config()
-            socket_dir = Path(app_config.paths.socket_dir).expanduser().resolve()
-
-            loop = asyncio.get_event_loop()
-            self._trader_monitor = TraderMonitor(
-                socket_dir=str(socket_dir),
-                on_trader_started=self._on_trader_started,
-                loop=loop,
-            )
-            self._trader_monitor.start()
-            logger.info("TraderMonitor 已启动")
-        except Exception as e:
-            logger.exception(f"启动 TraderMonitor 失败: {e}")
-
-    async def _on_trader_started(self, account_id: str) -> None:
-        """
-        当检测到 Trader 进程启动时触发
-
-        等待连接就绪后，推送公共数据（合约信息）给该 Trader
-
-        Args:
-            account_id: 启动的 Trader 账户ID
-        """
-        logger.info(f"检测到 Trader [{account_id}] 启动，准备推送公共数据...")
-        trader = self.traders.get(account_id)
-        if not trader:
-            logger.warning(f"Trader [{account_id}] 未在管理器中注册，跳过公共数据推送")
-            return
-
-        # 等待连接建立（最多30秒）
-        for _ in range(30):
-            if trader.socket_client and trader.socket_client.is_connected():
-                break
-            await asyncio.sleep(1)
-        else:
-            logger.warning(f"Trader [{account_id}] 连接超时，跳过公共数据推送")
-            return
-
-        await self._push_public_data_to_trader(account_id)
 
     async def _push_public_data_to_trader(self, account_id: str) -> bool:
         """
@@ -1043,11 +951,6 @@ class TradingManager:
         # 停止所有Trader
         for account_id in list(self.traders.keys()):
             await self.stop_trader(account_id)
-
-        # 停止 TraderMonitor
-        if self._trader_monitor:
-            self._trader_monitor.stop()
-            self._trader_monitor = None
 
         # 停止 ManagerScheduler
         if self._scheduler:

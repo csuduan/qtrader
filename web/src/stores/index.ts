@@ -164,16 +164,18 @@ export const useStore = defineStore('main', () => {
         static_balance: 0,
         position_profit: 0,
         close_profit: 0,
+        float_profit: 0,
         today_profit: 0,
         risk_ratio: 0,
         updated_at: new Date().toISOString(),
         user_id: '--',
-        status: 'stopped'
-      } as Account))
+        status: 'stopped',
+        id: 0
+      } as unknown as Account))
 
       // 如果有账户但还没选中，默认选中第一个
       if (!selectedAccountId.value && accountIds.length > 0) {
-        selectedAccountId.value = accountIds[0]
+        selectedAccountId.value = accountIds[0] || null
       }
       return accountIds
     } catch (error) {

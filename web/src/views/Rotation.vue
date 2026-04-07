@@ -30,6 +30,7 @@
           </div>
         </template>
 
+        <div class="table-wrapper">
           <el-table
             :data="instructions"
             :row-class-name="tableRowClassName"
@@ -93,13 +94,15 @@
             </template>
           </el-table-column>
         </el-table>
-      </el-card>
+      </div>
+    </el-card>
 
     <!-- 导入CSV对话框 -->
     <el-dialog
       v-model="showImportDialog"
       title="导入换仓CSV"
-      width="700px"
+      width="90%"
+      style="max-width: 700px"
       @open="handleDialogOpen"
     >
       <el-alert
@@ -131,17 +134,19 @@
         </el-form-item>
 
         <el-form-item v-if="csvPreview.length > 0" label="预览前5行">
-          <el-table :data="csvPreview" size="small" border max-height="200">
-            <el-table-column
-              v-for="(header, index) in csvHeaders"
-              :key="index"
-              :prop="`col${index}`"
-              :label="header"
-              :width="120"
-              show-overflow-tooltip
-            >
-            </el-table-column>
-          </el-table>
+          <div class="table-wrapper">
+            <el-table :data="csvPreview" size="small" border max-height="200">
+              <el-table-column
+                v-for="(header, index) in csvHeaders"
+                :key="index"
+                :prop="`col${index}`"
+                :label="header"
+                :width="120"
+                show-overflow-tooltip
+              >
+              </el-table-column>
+            </el-table>
+          </div>
         </el-form-item>
 
         <el-form-item label="导入方式">
@@ -164,7 +169,7 @@
     </el-dialog>
 
     <!-- 新增指令对话框 -->
-    <el-dialog v-model="showCreateDialog" title="新增换仓指令" width="600px">
+    <el-dialog v-model="showCreateDialog" title="新增换仓指令" width="90%" style="max-width: 600px">
       <el-form :model="form" label-width="100px">
         <el-form-item label="账户编号">
           <el-input v-model="form.account_id" placeholder="如: DQ" />
@@ -523,15 +528,24 @@ onMounted(() => {
   width: 100%;
 }
 
+.table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+}
+
 .card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .header-actions {
   display: flex;
   gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .status-hint {

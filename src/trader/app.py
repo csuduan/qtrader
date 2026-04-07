@@ -33,19 +33,23 @@ ctx = get_app_context()
 
 # 全局变量
 trader: Optional[Trader] = None
+stop_event: Optional[asyncio.Event] = None
 
 
 def signal_handler(signum, frame):
     """信号处理器"""
     logger.info(f"收到信号 {signum}，准备退出...")
-    if trader:
-        asyncio.create_task(trader.stop())
+    if stop_event:
+        stop_event.set()
 
 
 async def main_async(args):
     """异步主函数"""
-    global trader
+    global trader, stop_event
     account_id = args.account_id
+
+    # 创建停止事件
+    stop_event = asyncio.Event()
 
     # 加载配置
     config: TraderConfig = get_config_loader().load_trader_config(account_id)
@@ -117,10 +121,20 @@ async def main_async(args):
         logger.info(f"已写入PID文件: {pid_file} (PID: {os.getpid()})")
 
         await trader.start(socket_path=socket_path)
+
+        # 等待服务器任务或停止事件
+        try:
+            await stop_event.wait()
+        except asyncio.CancelledError:
+            pass
+
+        logger.info("收到停止信号，开始停止Trader...")
+        await trader.stop()
     except Exception as e:
         logger.exception(f"Trader运行出错: {e}")
     finally:
-        await trader.stop()
+        if not stop_event.is_set():
+            await trader.stop()
 
         # 清理PID文件（使用绝对路径）
         pid_file = socket_dir_abs / f"qtrader_{account_id}.pid"

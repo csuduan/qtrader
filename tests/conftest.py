@@ -215,7 +215,6 @@ def mock_tq_gateway_config():
         broker=BrokerConfig(
             type="sim",
         ),
-        subscribe_symbols=["SHFE.rb2505"],
     )
 
 
@@ -253,6 +252,10 @@ def sample_config_yaml():
             "port": 8000,
             "cors_origins": ["http://localhost:5173"],
         },
+        "subs": {
+            "subscribe_symbols": ["SHFE.rb2505"],
+            "subscribe_bars": ["rb2505-M1"],
+        },
     }
 
 
@@ -281,7 +284,6 @@ def sample_account_yaml():
                 "auth_code": "",
                 "url": "",
             },
-            "subscribe_symbols": ["SHFE.rb2505"],
         },
         "trading": {
             "auto_trade": True,

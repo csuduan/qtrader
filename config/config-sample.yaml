@@ -11,12 +11,42 @@ paths:
 
 # 全局告警配置（所有账户共享）
 alert:
-  immediate: false     # 即时告警（Trader异常、连接断开等）
+  immediate: true     # 即时告警（Trader异常、连接断开等）
   threshold: false     # 阈值告警（异常日志达到阈值时发送）
   threshold_count: 5  # 阈值：异常次数
   threshold_window: 300  # 时间窗口（秒）
   dnd_start: 23       # 免打扰开始时间（小时，默认23点）
   dnd_end: 8          # 免打扰结束时间（小时，默认次日8点）
+
+# db配置
+data_base:
+  pg:
+    host: "localhost"
+    port: 5432
+    user: "postgres"
+    password: "123456"
+    db: "qtrader"
+
+# 外部数据服务
+data_service:
+  tq_data:
+    user: "xxx"
+    password: "xxx"
+  rice_data:
+    user: "xxx"
+    password: "xxx"
+
+# 订阅配置
+subs:
+  subscribe_symbols:
+    - "IC2606"
+    - "IM2606"
+    - "RB2605"
+    - "RB2606"
+  subscribe_bars:
+    - "IC2606-M1"
+    - "IM2606-M1"
+    - "RB2605-M1"
 
 # API服务配置
 api:
@@ -31,17 +61,28 @@ api:
 # Manager 定时任务配置
 scheduler:
   jobs:
-    # Trader 健康检查（每10分钟，故障首次告警后压制，恢复后自动通知）
+    # Trader 健康检查
     - job_id: "trader_health_check"
       job_name: "Trader健康检查"
-      job_description: "检查所有Trader进程的连接状态，故障告警后压制直到恢复"
-      cron_expression: "0 */10 * * * *"  # 每10分钟
+      job_group: "监控"
+      job_description: "检查所有Trader进程的连接状态"
+      cron_expression: "0 10 8-23 * * *"  # 每10分钟 8:00-22:00
       job_method: "trader_health_check"
+      enabled: true
+
+    # 开盘前检查
+    - job_id: "pre_market_check"
+      job_name: "开盘前检查"
+      job_group: "监控"
+      job_description: "开盘前检查网关连接状态"
+      cron_expression: "0 45 8,20 * * *"  # 每天 8:45 和 20:45
+      job_method: "pre_market_check"
       enabled: true
 
     # 清理告警
     - job_id: "cleanup_alarms"
       job_name: "清理告警"
+      job_group: "清理"
       job_description: "清理3天前的告警记录"
       cron_expression: "0 0 3 * * *"  # 每天凌晨 3:00
       job_method: "cleanup_alarms"
@@ -50,6 +91,7 @@ scheduler:
     # 清理日志
     - job_id: "cleanup_logs"
       job_name: "清理日志"
+      job_group: "清理"
       job_description: "清理5天前的日志文件"
       cron_expression: "0 0 3 * * *"  # 每天凌晨 3:00
       job_method: "cleanup_logs"

@@ -2,6 +2,18 @@ import api from './request'
 import type { SystemStatus, Job, RiskControlStatus } from '@/types'
 
 /**
+ * 告警配置类型
+ */
+export interface AlertConfig {
+  immediate: boolean
+  threshold: boolean
+  threshold_count: number
+  threshold_window: number
+  dnd_start: number
+  dnd_end: number
+}
+
+/**
  * 系统控制 API
  */
 export const systemApi = {
@@ -51,45 +63,34 @@ export const systemApi = {
   },
 
   /**
-   * 获取告警配置
+   * 获取告警配置（账户级别，已废弃，请使用 getManagerAlertConfig）
    */
-  getAlertConfig: async (accountId?: string): Promise<{
-    immediate: boolean
-    threshold: boolean
-    threshold_count: number
-    threshold_window: number
-  }> => {
-    return api.get<{
-      immediate: boolean
-      threshold: boolean
-      threshold_count: number
-      threshold_window: number
-    }>('/system/alert-config', { params: { account_id: accountId } })
+  getAlertConfig: async (accountId?: string): Promise<AlertConfig> => {
+    return api.get<AlertConfig>('/system/alert-config', { params: { account_id: accountId } })
   },
 
   /**
-   * 更新告警配置
+   * 更新告警配置（账户级别，已废弃，请使用 updateManagerAlertConfig）
    */
-  updateAlertConfig: async (config: {
-    immediate: boolean
-    threshold: boolean
-    threshold_count?: number
-    threshold_window?: number
-  }, accountId?: string): Promise<{
-    immediate: boolean
-    threshold: boolean
-    threshold_count: number
-    threshold_window: number
-  }> => {
-    return api.put<{
-      immediate: boolean
-      threshold: boolean
-      threshold_count: number
-      threshold_window: number
-    }>('/system/alert-config', {
+  updateAlertConfig: async (config: Partial<AlertConfig>, accountId?: string): Promise<AlertConfig> => {
+    return api.put<AlertConfig>('/system/alert-config', {
       ...config,
       account_id: accountId
     })
+  },
+
+  /**
+   * 获取Manager全局告警配置
+   */
+  getManagerAlertConfig: async (): Promise<AlertConfig> => {
+    return api.get<AlertConfig>('/system/manager/alert-config')
+  },
+
+  /**
+   * 更新Manager全局告警配置
+   */
+  updateManagerAlertConfig: async (config: Partial<AlertConfig>): Promise<AlertConfig> => {
+    return api.put<AlertConfig>('/system/manager/alert-config', config)
   },
 
   /**

@@ -87,6 +87,9 @@ class TqGateway(BaseGateway):
         self.hist_subs: set[str] = set()
         self.kline_subs: List[tuple[str, str]] = []
 
+        # 订阅配置（来自全局config.yaml）
+        self.subs_config = acct_config.subs
+
         # 订单引用计数
         self._order_ref = 0
 
@@ -106,8 +109,9 @@ class TqGateway(BaseGateway):
         # 先尝试从数据库加载合约信息
         self.load_contracts()
 
-        if self.config.subscribe_symbols:
-            self.hist_subs.update(self.config.subscribe_symbols)
+        # 从全局订阅配置加载合约列表
+        if self.subs_config.subscribe_symbols:
+            self.hist_subs.update(self.subs_config.subscribe_symbols)
 
     # ==================== 连接管理 ====================
     async def connect(self) -> bool:
@@ -245,7 +249,7 @@ class TqGateway(BaseGateway):
             # 加载合约列表：先从数据库加载今天的，如果没有则从API查询
             # if len(self._contracts) <= 0:
             today = datetime.now().strftime("%Y-%m-%d")
-            if not self.contracts or self._contracts_update_date != today:
+            if len(self.contracts) <= 0:
                 self._query_and_save_contracts(today)
 
             self.trading_day = self.get_trading_day()
@@ -259,7 +263,11 @@ class TqGateway(BaseGateway):
             pos_symbols = [symbol for symbol in self._positions if len(symbol) <= 12]
             self.subscribe(pos_symbols)
 
-            # 订阅kline
+            # 订阅kline（从全局配置加载）
+            for sub_bar in self.subs_config.subscribe_bars:
+                symbol, interval = sub_bar.split("-")
+                self.subscribe_bars(symbol, interval)
+            # 订阅运行时的kline
             for symbol, interval in self.kline_subs:
                 self.subscribe_bars(symbol, interval)
             

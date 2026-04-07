@@ -92,12 +92,14 @@ class TraderAlarmHandler:
 
             # 构造告警数据
             now = datetime.now()
+            # 格式化标题：【即时告警】【账户ID】模块错误
+            title = f"【即时告警】【{self.account_id}】{module or '未知模块'}错误"
             alarm_data = AlarmData(
                 account_id=self.account_id,
                 alarm_date=now.strftime("%Y-%m-%d"),
                 alarm_time=now.strftime("%H:%M:%S"),
                 source="TRADER",
-                title=f"Trader错误: {module or '未知模块'}",
+                title=title,
                 detail=log_message,
                 status="UNCONFIRMED",
                 created_at=now,

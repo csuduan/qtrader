@@ -6,6 +6,7 @@ Trader Proxy 模块
 
 import asyncio
 import os
+import sys
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -25,8 +26,7 @@ ctx: AppContext = get_app_context()
 
 class TraderProxy:
     """
-    Trader Proxy - 独立模式
-
+    Trader Proxy 
     管理独立Trader子进程，作为Socket客户端连接到Trader的Socket服务器。
     """
 
@@ -52,7 +52,7 @@ class TraderProxy:
         self.account_id = account_config.account_id
         self.account_config = account_config
         self.heartbeat_timeout = heartbeat_timeout
-        self._running = False
+        self._running = True
 
         # ==================== 状态管理 ====================
         self._state: TraderState = TraderState.STOPPED
@@ -64,7 +64,6 @@ class TraderProxy:
 
         # ==================== 进程管理 ====================
         self._created_process: bool = False
-        self.process: Optional[asyncio.subprocess.Process] = None
         # 从全局配置获取 socket_dir
         app_config = get_config_loader()._load_app_config()
         socket_dir = app_config.paths.socket_dir
@@ -75,6 +74,8 @@ class TraderProxy:
         # ==================== 连接管理 ====================
         self.socket_client: Optional[SocketClient] = None
         self._connect_task: Optional[asyncio.Task] = None
+        self._socket_monitor_task: Optional[asyncio.Task] = None  # socket文件监听任务
+        self._socket_check_interval: float = 3.0  # socket检测间隔（秒）
 
         # ==================== 数据缓存（用于本地计算盈亏）====================
         # 最新行情缓存 (symbol -> tick_data)
@@ -94,10 +95,266 @@ class TraderProxy:
         # 从DB加载初始账户数据
         self._load_account_from_db()
 
+        # 启动 连接任务
+        asyncio.create_task(self._connect_async())
+
         logger.info(f"TraderProxy [{self.account_id}] 初始化完成，状态: STOPPED")
 
     # ==================== 状态管理 ====================
 
+    
+    def get_state(self) -> TraderState:
+        """获取当前状态"""
+        return self._state
+
+    async def _set_state(self, new_state: TraderState) -> None:
+        """
+        设置状态（线程安全）
+
+        Args:
+            new_state: 新状态
+        """
+        async with self._state_lock:
+            old_state = self._state
+            self._state = new_state
+            if old_state != new_state:
+                logger.info(f"TraderProxy [{self.account_id}] 状态变更: {old_state} -> {new_state}")
+
+        # 状态变化时触发账户更新事件，通知前端刷新
+        try:
+            event_engine = ctx.get_event_engine()
+            if event_engine:
+                # 构造账户状态更新数据
+                account_update = {
+                    "account_id": self.account_id,
+                    "status": new_state.value,
+                    "timestamp": datetime.now().isoformat(),
+                }
+                event_engine.put(EventTypes.ACCOUNT_STATUS, account_update)
+                logger.debug(f"推送账户状态更新事件: {account_update}")
+        except Exception as e:
+            logger.error(f"推送账户状态更新事件失败: {e}")
+
+        # 根据状态启动/停止WebSocket推送任务，并更新连接状态
+        if new_state == TraderState.CONNECTED and old_state != TraderState.CONNECTED:
+            self._start_ws_push_task()
+        elif old_state == TraderState.CONNECTED and new_state != TraderState.CONNECTED:
+            # 从连接状态变为非连接状态，重置网关连接状态
+            await self._stop_ws_push_task()
+            if self._account_cache:
+                self._account_cache["md_connected"] = False
+                self._account_cache["td_connected"] = False
+                logger.info(f"Trader [{self.account_id}] 断开，重置网关连接状态")
+        elif new_state == TraderState.STOPPED and old_state != TraderState.STOPPED:
+            await self._stop_ws_push_task()
+
+    def _is_state(self, state: TraderState) -> bool:
+        """检查是否为指定状态"""
+        return self._state == state
+
+    # ==================== 启动/停止 ====================
+    async def start_process(self) -> bool:
+        """
+        启动 Trader 进程
+        Returns:
+            是否启动成功
+        """
+        pid = await self._get_process()
+        if pid:
+            logger.warning(f"TraderProxy [{self.account_id}] 进程已存在{pid}，不允许重复启动")
+            return False
+
+        self._created_process = False
+        logger.info(f"TraderProxy [{self.account_id}] 开始启动...")
+
+        """创建新的子进程"""
+        self._created_process = True
+
+        # 从环境变量获取 conda 环境名，默认为 "qts"
+        conda_env = os.environ.get("CONDA_ENV_NAME", "qts")
+
+        cmd: List[str] = [
+            "conda",
+            "run",
+            "-n",
+            conda_env,
+            "python",
+            "-m",
+            "src.run_trader",
+            "--account-id",
+            self.account_id,
+        ]
+
+        # 根据账户配置决定是否添加debug参数
+        if hasattr(self.account_config, "debug") and self.account_config.debug:
+            cmd.append("--debug")
+            logger.info(f"TraderProxy [{self.account_id}] 启用调试模式")
+
+        logger.info(f"TraderProxy [{self.account_id}] 创建子进程: {' '.join(cmd)}")
+
+        # 使用nohup包裹命令，确保Manager退出时Trader不会收到SIGHUP信号而终止
+        # 使用shell执行: nohup cmd &，使命令完全脱离当前进程控制
+        cmd_str = ' '.join(cmd)
+        shell_cmd = f"nohup {cmd_str} > /dev/null 2>&1 &"
+
+        logger.info(f"TraderProxy [{self.account_id}] 创建子进程: {shell_cmd}")
+
+        # 通过shell启动，使用start_new_session=True脱离控制终端
+        process = await asyncio.create_subprocess_shell(
+            shell_cmd,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+            start_new_session=True
+        )
+        logger.info(f"TraderProxy [{self.account_id}] 子进程守护进程已启动，Shell PID: {process.pid}")
+        logger.info(f"TraderProxy [{self.account_id}] Trader进程将在启动后自行写入PID文件")
+
+        return True
+
+    async def stop_process(self) -> bool:
+        """
+        停止 Trader
+
+        优雅停止流程：
+        1. 发送stop命令给Trader进程
+        2. 等待5秒让Trader自己停止
+        3. 如果进程还在，发送SIGTERM
+        4. 再等待5秒
+        5. 如果进程还在，发送SIGKILL强制停止
+
+        Returns:
+            是否停止成功
+        """
+        self._manual_stop = True  # 标记为手动停止，健康检查不告警
+        current_state = self._state
+        logger.info(f"TraderProxy [{self.account_id}] 开始停止，当前状态: {current_state}")
+
+        # 步骤1: 如果已连接，发送stop命令给Trader
+        if self.socket_client and self.socket_client.is_connected():
+            try:
+                logger.info(f"TraderProxy [{self.account_id}] 发送stop命令给Trader...")
+                await self.socket_client.request("stop", {}, timeout=5.0)
+                logger.info(f"TraderProxy [{self.account_id}] stop命令已发送")
+            except Exception as e:
+                logger.warning(f"TraderProxy [{self.account_id}] 发送stop命令失败: {e}")
+        else:
+            logger.warning(f"TraderProxy [{self.account_id}] 未连接，跳过stop命令")
+
+        # 步骤2 优雅待5秒优雅停止Trader进程
+        await asyncio.sleep(5)
+        logger.info(f"TraderProxy [{self.account_id}] 优雅停止Trader进程...")
+        pid = await self._get_process()
+        if pid:
+            try:
+                os.kill(pid, 0)
+                os.kill(pid, 15)  # SIGKILL
+                logger.warning(f"TraderProxy [{self.account_id}] 进程 {pid} 优雅停止")
+            except Exception as e:
+                logger.warning(f"TraderProxy [{self.account_id}] kill进程失败: {e}")
+        
+
+        # 清理PID文件
+        Path(self.pid_file).unlink(missing_ok=True)
+        # 设置状态为已停止
+        await self._set_state(TraderState.STOPPED)
+
+        # 检查最终状态
+        pid = await self._get_process()
+        if not pid:
+            logger.info(f"TraderProxy [{self.account_id}] 停止完成")
+        else:
+            logger.error(f"TraderProxy [{self.account_id}] 停止失败，进程仍在运行")
+
+        return True
+
+    # ==================== 异步连接 ====================
+    async def _connect_async(self) -> None:
+        """
+        后台异步连接到 Trader
+
+        连接成功 → 状态变为 CONNECTED
+        连接失败 → 状态变为 STOPPED
+        """
+        # 创建Socket客户端
+        self.start_time = datetime.now()
+        self.socket_client = SocketClient(self.socket_path, self.account_id, self._on_msg_callback)
+        check_interval = 5
+        attempt = 0 
+        while self._running:
+            try:
+                pid = await self._get_process()
+                if not pid:
+                    await self._set_state(TraderState.STOPPED)
+                    # 进程不存在，跳过连接
+                    await asyncio.sleep(check_interval)
+                    continue
+
+                if self.socket_client.is_connected():
+                    # 已连接，跳过连接尝试
+                    await self._set_state(TraderState.CONNECTED)
+                    await asyncio.sleep(check_interval)
+                    continue
+
+                # 进程存在，且为未连接
+                self.last_heartbeat = datetime.now()
+                # 状态变为连接中
+                await self._set_state(TraderState.CONNECTING)
+                logger.info(f"TraderProxy [{self.account_id}] 尝试连接 ({attempt + 1})...")
+                success = await self.socket_client.connect()
+                if success:
+                    logger.info(f"TraderProxy [{self.account_id}] 连接成功")
+                    await self._set_state(TraderState.CONNECTED)
+                    # 连接成功后立即同步一次数据
+                    await self._sync_account_detail()
+                    attempt = 0
+                    continue
+                else:
+                    logger.warning(f"TraderProxy [{self.account_id}] 连接失败 ({attempt + 1})")
+
+            except Exception as e:
+                logger.exception(f"TraderProxy [{self.account_id}] 连接异常 ({attempt + 1}): {e}")
+            # 等待重试
+            await asyncio.sleep(check_interval)
+
+    async def _get_process(self) -> int|None:
+        """
+        检查进程是否存在并返回PID
+
+        通过检查socket文件和PID文件判断
+
+        Returns:
+            进程是否存在
+        """
+        # 检查socket文件是否存在
+        socket_file = Path(self.socket_path)
+        if not socket_file.exists():
+            return None
+
+        # 检查PID文件
+        pid_file = Path(self.pid_file)
+        if not pid_file.exists():
+            return None
+
+        try:
+            # 读取PID
+            with open(pid_file, "r") as f:
+                pid = int(f.read().strip())
+
+            # 检查进程是否运行
+            try:
+                os.kill(pid, 0)  # 检查进程是否存在，不发送信号
+                return pid
+            except OSError:
+                # 清理过期的PID文件
+                pid_file.unlink(missing_ok=True)
+                return None
+
+        except Exception as e:
+            logger.warning(f"TraderProxy [{self.account_id}] 检查进程失败: {e}")
+            return None
+
+
+    # ==================== 消息处理 ====================
     def _load_account_from_db(self) -> None:
         """从DB加载账户数据到内存缓存（初始化时调用一次）"""
         try:
@@ -236,7 +493,7 @@ class TraderProxy:
                 if md_connected and td_connected:
                     # Trader已就绪，立即全量同步
                     logger.info(f"Trader [{self.account_id}] 已就绪，立即同步数据")
-                    await self._sync_full_data_from_trader()
+                    await self._sync_account_detail()
                 else:
                     # Trader未就绪，等待 trader_ready 通知
                     logger.info(
@@ -246,7 +503,7 @@ class TraderProxy:
         except Exception as e:
             logger.warning(f"检查Trader就绪状态失败: {e}")
 
-    async def _sync_full_data_from_trader(self) -> None:
+    async def _sync_account_detail(self) -> None:
         """
         从Trader同步完整账户数据（账户、持仓、挂单、成交、行情）
 
@@ -326,307 +583,6 @@ class TraderProxy:
         except Exception as e:
             logger.warning(f"TraderProxy [{self.account_id}] 同步完整数据失败: {e}")
 
-    def get_state(self) -> TraderState:
-        """获取当前状态"""
-        return self._state
-
-    async def _set_state(self, new_state: TraderState) -> None:
-        """
-        设置状态（线程安全）
-
-        Args:
-            new_state: 新状态
-        """
-        async with self._state_lock:
-            old_state = self._state
-            self._state = new_state
-            if old_state != new_state:
-                logger.info(f"TraderProxy [{self.account_id}] 状态变更: {old_state} -> {new_state}")
-
-        # 状态变化时触发账户更新事件，通知前端刷新
-        try:
-            event_engine = ctx.get_event_engine()
-            if event_engine:
-                # 构造账户状态更新数据
-                account_update = {
-                    "account_id": self.account_id,
-                    "status": new_state.value,
-                    "timestamp": datetime.now().isoformat(),
-                }
-                event_engine.put(EventTypes.ACCOUNT_STATUS, account_update)
-                logger.debug(f"推送账户状态更新事件: {account_update}")
-        except Exception as e:
-            logger.error(f"推送账户状态更新事件失败: {e}")
-
-        # 根据状态启动/停止WebSocket推送任务，并更新连接状态
-        if new_state == TraderState.CONNECTED and old_state != TraderState.CONNECTED:
-            self._start_ws_push_task()
-        elif old_state == TraderState.CONNECTED and new_state != TraderState.CONNECTED:
-            # 从连接状态变为非连接状态，重置网关连接状态
-            await self._stop_ws_push_task()
-            if self._account_cache:
-                self._account_cache["md_connected"] = False
-                self._account_cache["td_connected"] = False
-                logger.info(f"Trader [{self.account_id}] 断开，重置网关连接状态")
-        elif new_state == TraderState.STOPPED and old_state != TraderState.STOPPED:
-            await self._stop_ws_push_task()
-
-    def _is_state(self, state: TraderState) -> bool:
-        """检查是否为指定状态"""
-        return self._state == state
-
-    # ==================== 启动/停止 ====================
-
-    async def start(self) -> bool:
-        """
-        启动 Trader Proxy
-
-        只有STOPPED状态才允许调用start。
-        start成功后状态变为CONNECTING，并开始异步连接。
-
-        Returns:
-            是否启动成功
-        """
-        if self._running:
-            logger.warning(f"TraderProxy [{self.account_id}] 已经在运行中，当前状态: {self._state}")
-            return False
-
-        self._running = True
-        self._manual_stop = False  # 重置手动停止标记
-        logger.info(f"TraderProxy [{self.account_id}] 开始启动...")
-
-        # 在后台启动
-        self._connect_task = asyncio.create_task(self._connect_async())
-        return True
-
-    async def stop(self) -> bool:
-        """
-        停止 Trader Proxy
-
-        任何状态都允许调用stop，调用后状态变为STOPPED。
-
-        Returns:
-            是否停止成功
-        """
-        self._running = False
-        self._manual_stop = True  # 标记为手动停止，健康检查不告警
-        current_state = self._state
-        logger.info(f"TraderProxy [{self.account_id}] 开始停止，当前状态: {current_state}")
-
-        # 停止连接任务
-        if self._connect_task and not self._connect_task.done():
-            self._connect_task.cancel()
-            try:
-                await self._connect_task
-            except asyncio.CancelledError:
-                pass
-            logger.info(f"TraderProxy [{self.account_id}] 连接任务已取消")
-        self._connect_task = None
-
-        # 断开Socket连接
-        if self.socket_client:
-            await self.socket_client.disconnect()
-            self.socket_client = None
-
-        # 强制停止trader进程
-        # await self._force_kill_trader()
-        # 状态变为已停止
-        await self._set_state(TraderState.STOPPED)
-        logger.info(f"TraderProxy [{self.account_id}] 已停止")
-        return True
-
-    # ==================== 异步连接 ====================
-
-    async def _connect_async(self) -> None:
-        """
-        后台异步连接到 Trader
-
-        使用退避算法进行重试：
-        - 重试间隔从0.5s开始，每次翻倍
-        - 最大重试间隔为30s
-        - 最多重试10次
-
-        连接成功 → 状态变为 CONNECTED
-        连接失败 → 状态变为 STOPPED
-        """
-        # 创建Socket客户端
-        self.start_time = datetime.now()
-        if self.account_id is None:
-            raise ValueError("account_id is required for SocketClient")
-
-        self.socket_client = SocketClient(self.socket_path, self.account_id, self._on_msg_callback)
-        attempt = 0
-        check_interval = 5
-        while self._running:
-            try:
-                # 计算当前重试间隔（退避算法：指数增长）
-                attempt += 1
-                process_exists = await self._check_process_exists()
-                if not process_exists:
-                    await self._set_state(TraderState.STOPPED)
-                    await asyncio.sleep(check_interval)
-                    continue
-
-                if self.socket_client.is_connected():
-                    await self._set_state(TraderState.CONNECTED)
-                    await asyncio.sleep(check_interval)
-                    attempt = 0
-                    continue
-
-                # 进程存在，且为未连接
-                self.last_heartbeat = datetime.now()
-                # 状态变为连接中
-                await self._set_state(TraderState.CONNECTING)
-                logger.info(f"TraderProxy [{self.account_id}] 尝试连接 ({attempt + 1})...")
-                success = await self.socket_client.connect()
-                if success:
-                    logger.info(f"TraderProxy [{self.account_id}] 连接成功")
-                    await self._set_state(TraderState.CONNECTED)
-                    # 查询Trader是否已就绪，如果已就绪则立即同步
-                    # 否则等待 trader_ready 通知后再同步
-                    await self._check_and_sync_if_ready()
-                    attempt = 0
-                    continue
-                else:
-                    logger.warning(f"TraderProxy [{self.account_id}] 连接失败 ({attempt + 1})")
-
-            except Exception as e:
-                logger.exception(f"TraderProxy [{self.account_id}] 连接异常 ({attempt + 1}): {e}")
-            # 等待重试
-            await asyncio.sleep(check_interval)
-
-    # ==================== 进程管理 ====================
-    async def _check_process_exists(self) -> bool:
-        """
-        检查进程是否已存在
-
-        通过检查socket文件和PID文件判断
-
-        Returns:
-            进程是否存在
-        """
-        # 检查socket文件是否存在
-        socket_file = Path(self.socket_path)
-        if not socket_file.exists():
-            return False
-
-        # 检查PID文件
-        pid_file = Path(self.pid_file)
-        if not pid_file.exists():
-            return False
-
-        try:
-            # 读取PID
-            with open(pid_file, "r") as f:
-                pid = int(f.read().strip())
-
-            # 检查进程是否运行
-            try:
-                os.kill(pid, 0)  # 检查进程是否存在，不发送信号
-                return True
-            except OSError:
-                # 清理过期的PID文件
-                pid_file.unlink(missing_ok=True)
-                return False
-
-        except Exception as e:
-            logger.warning(f"TraderProxy [{self.account_id}] 检查进程失败: {e}")
-            return False
-
-    async def _create_subprocess(self) -> None:
-        """创建新的子进程"""
-        self._created_process = True
-        # 构建命令
-        if self.account_id is None:
-            raise ValueError("account_id is required to create subprocess")
-        cmd: List[str] = [
-            "python",
-            "-m",
-            "src.run_trader",
-            "--account-id",
-            self.account_id,
-        ]
-
-        # 根据账户配置决定是否添加debug参数
-        if hasattr(self.account_config, "debug") and self.account_config.debug:
-            cmd.append("--debug")
-            logger.info(f"TraderProxy [{self.account_id}] 启用调试模式")
-
-        logger.info(f"TraderProxy [{self.account_id}] 创建子进程: {' '.join(cmd)}")
-
-        # 启动子进程
-        self.process = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
-
-        logger.info(f"TraderProxy [{self.account_id}] 子进程已启动，PID: {self.process.pid}")
-
-    async def _cleanup_subprocess(self) -> None:
-        """清理自己创建的子进程"""
-        if not self.process:
-            return
-
-        try:
-            process = self.process
-
-            # 发送SIGTERM信号
-            process.terminate()
-
-            # 等待进程结束
-            try:
-                await asyncio.wait_for(process.wait(), timeout=5)
-                logger.info(f"TraderProxy [{self.account_id}] 子进程已停止")
-            except asyncio.TimeoutError:
-                # 超时则强制杀死
-                process.kill()
-                await process.wait()
-                logger.warning(f"TraderProxy [{self.account_id}] 子进程强制停止")
-
-        except Exception as e:
-            logger.exception(f"TraderProxy [{self.account_id}] 清理子进程失败: {e}")
-        finally:
-            self.process = None
-            # 清理PID文件
-            Path(self.pid_file).unlink(missing_ok=True)
-
-    async def _force_kill_trader(self) -> None:
-        """强制停止trader进程"""
-        # 检查PID文件并停止进程
-        pid_file = Path(self.pid_file)
-        if pid_file.exists():
-            try:
-                with open(pid_file, "r") as f:
-                    pid = int(f.read().strip())
-
-                # 停止进程
-                try:
-                    os.kill(pid, 15)  # SIGTERM
-                    # 等待进程结束
-                    for _ in range(10):
-                        try:
-                            os.kill(pid, 0)
-                            await asyncio.sleep(0.1)
-                        except OSError:
-                            break
-                    logger.info(f"TraderProxy [{self.account_id}] 进程 {pid} 已停止")
-                except OSError:
-                    pass
-
-                # 如果进程还在运行，强制杀死
-                try:
-                    os.kill(pid, 0)
-                    os.kill(pid, 9)  # SIGKILL
-                    logger.warning(f"TraderProxy [{self.account_id}] 进程 {pid} 强制停止")
-                except OSError:
-                    pass
-
-            except Exception as e:
-                logger.warning(f"TraderProxy [{self.account_id}] 停止进程失败: {e}")
-            finally:
-                # 清理PID文件
-                pid_file.unlink(missing_ok=True)
-
-    # ==================== 消息处理 ====================
 
     def _update_heartbeat(self) -> None:
         """更新心跳时间"""
@@ -731,7 +687,7 @@ class TraderProxy:
             # 延迟2秒后执行全量同步，确保Trader数据已准备就绪
             async def delayed_sync():
                 await asyncio.sleep(2)
-                await self._sync_full_data_from_trader()
+                await self._sync_account_detail()
             asyncio.create_task(delayed_sync())
         except Exception as e:
             logger.exception(f"处理Trader就绪通知失败: {e}")
@@ -813,7 +769,8 @@ class TraderProxy:
                                 f"{app_config.alert.dnd_end})，跳过告警通知: {alarm.title}"
                             )
                         else:
-                            send_wechat(f"【即时告警】{alarm.title}\n{alarm.detail}")
+                            # 标题已包含【即时告警】【账户ID】前缀
+                            send_wechat(f"{alarm.title}\n{alarm.detail}")
                     except Exception as e:
                         logger.error(f"发送即时告警通知失败: {e}")
 
@@ -903,7 +860,7 @@ class TraderProxy:
 
     def _recalc_position_profit(self, pos: Dict, last_price: float) -> Dict:
         """根据最新价格重新计算持仓盈亏"""
-        if last_price <= 0:
+        if not last_price or last_price <= 0:
             return pos
 
         # 获取合约乘数（从tick缓存中获取，如果没有则使用默认值）
@@ -958,7 +915,7 @@ class TraderProxy:
             return {"success": False, "message": "未连接到Trader"}
 
         try:
-            await self._sync_full_data_from_trader()
+            await self._sync_account_detail()
             logger.info(f"TraderProxy [{self.account_id}] 手动全量同步完成")
             return {
                 "success": True,
@@ -1698,33 +1655,6 @@ class TraderProxy:
             """是否已连接到网关"""
             return self._proxy._is_state(TraderState.CONNECTED)
 
-    # ==================== 辅助方法 ====================
-
-    async def restart(self) -> bool:
-        """
-        重启 Trader Proxy
-
-        Returns:
-            是否重启成功
-        """
-        logger.info(f"TraderProxy [{self.account_id}] 重启中...")
-
-        # 停止
-        await self.stop()
-
-        # 等待一秒
-        await asyncio.sleep(1)
-
-        # 启动
-        success = await self.start()
-        if success:
-            self.restart_count += 1
-            logger.info(f"TraderProxy [{self.account_id}] 重启成功，重启次数: {self.restart_count}")
-        else:
-            logger.error(f"TraderProxy [{self.account_id}] 重启失败")
-
-        return success
-
     def is_running(self) -> bool:
         """检查是否运行中"""
         return not self._is_state(TraderState.STOPPED)
@@ -1736,8 +1666,16 @@ class TraderProxy:
 
     def is_alive(self) -> bool:
         """检查子进程是否存活"""
-        if self.process and self._created_process:
-            return self.process.returncode is None
+        # 自己创建的进程，检查PID是否存活
+        if self._created_process:
+            pid = self._get_pid()
+            if pid:
+                try:
+                    os.kill(pid, 0)
+                    return True
+                except OSError:
+                    return False
+            return False
         # 非自己创建的进程，通过心跳判断
         if not self._is_state(TraderState.STOPPED):
             heartbeat_age = (datetime.now() - self.last_heartbeat).total_seconds()
@@ -1745,9 +1683,7 @@ class TraderProxy:
         return False
 
     def _get_pid(self) -> Optional[int]:
-        """获取PID，优先从子进程对象获取，否则 fallback 到 PID 文件"""
-        if self.process:
-            return self.process.pid
+        """获取PID，从 PID 文件读取"""
         pid_file = Path(self.pid_file)
         if pid_file.exists():
             try:

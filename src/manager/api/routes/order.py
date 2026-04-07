@@ -122,6 +122,7 @@ async def get_orders(
                     id=0,
                     account_id=order.account_id,
                     order_id=order.order_id,
+                    order_sys_id=order.order_sys_id,
                     exchange_order_id=order.exchange.value if hasattr(order.exchange, "value") else "",
                     symbol=order.symbol,
                     direction=(

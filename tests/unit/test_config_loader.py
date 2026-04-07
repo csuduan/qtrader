@@ -102,7 +102,6 @@ def sample_account_yaml():
                 "auth_code": "",
                 "url": "",
             },
-            "subscribe_symbols": ["SHFE.rb2505"],
         },
         "trading": {
             "auto_trade": True,

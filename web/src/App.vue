@@ -1,7 +1,8 @@
 <template>
-  <el-container class="app-container">
-    <!-- 侧边栏 -->
-    <el-aside width="150px" class="sidebar">
+  <!-- 主应用布局 -->
+  <el-container v-if="!$route.meta.standalone" class="app-container">
+    <!-- 桌面端侧边栏 -->
+    <el-aside v-if="!isMobile" width="150px" class="sidebar">
       <div class="logo">
          <img :src="getLogo()" alt="logo" width="40" />
         <h2>Q-Trader</h2>
@@ -46,10 +47,14 @@
             <el-icon><Setting /></el-icon>
             <span>设置</span>
           </el-menu-item>
+          <el-menu-item index="/account/log">
+            <el-icon><DocumentCopy /></el-icon>
+            <span>日志</span>
+          </el-menu-item>
         </el-sub-menu>
 
-        <!-- 系统菜单（一级） -->
-        <el-menu-item index="/admin/system">
+        <!-- 系统菜单（一级）- 仅admin可见 -->
+        <el-menu-item v-if="isAdmin" index="/admin/system">
           <el-icon><Monitor /></el-icon>
           <span>系统</span>
         </el-menu-item>
@@ -60,13 +65,120 @@
           <span>监控</span>
         </el-menu-item>
       </el-menu>
+      
+      <!-- 用户信息与退出 -->
+      <div class="sidebar-footer">
+        <el-dropdown trigger="click" placement="top">
+          <div class="user-info">
+            <el-icon><User /></el-icon>
+            <span class="username">{{ currentUser }}</span>
+            <el-icon class="arrow-icon"><ArrowUp /></el-icon>
+          </div>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item disabled>
+                <el-icon><User /></el-icon>
+                {{ currentUser }}
+              </el-dropdown-item>
+              <el-dropdown-item divided @click="handleLogout">
+                <el-icon><SwitchButton /></el-icon>
+                退出
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+      </div>
     </el-aside>
+
+    <!-- 移动端抽屉侧边栏 -->
+    <el-drawer
+      v-model="drawerVisible"
+      direction="ltr"
+      size="200px"
+      :with-header="false"
+      class="mobile-sidebar-drawer"
+    >
+      <div class="logo">
+         <img :src="getLogo()" alt="logo" width="40" />
+        <h2>Q-Trader</h2>
+      </div>
+      <el-menu
+        :default-active="$route.path"
+        :default-openeds="['/account']"
+        router
+        class="nav-menu"
+        background-color="#304156"
+        text-color="#bfcbd9"
+        active-text-color="#409eff"
+        @select="drawerVisible = false"
+      >
+        <el-menu-item index="/dashboard">
+          <el-icon><DataBoard /></el-icon>
+          <span>总览</span>
+        </el-menu-item>
+
+        <el-sub-menu index="/account">
+          <template #title>
+            <el-icon><User /></el-icon>
+            <span>账户</span>
+          </template>
+          <el-menu-item index="/account/detail">
+            <el-icon><Document /></el-icon>
+            <span>详情</span>
+          </el-menu-item>
+          <el-menu-item index="/account/trading">
+            <el-icon><Operation /></el-icon>
+            <span>交易</span>
+          </el-menu-item>
+          <el-menu-item index="/account/rotation">
+            <el-icon><RefreshRight /></el-icon>
+            <span>换仓</span>
+          </el-menu-item>
+          <el-menu-item index="/account/strategy">
+            <el-icon><TrendCharts /></el-icon>
+            <span>策略</span>
+          </el-menu-item>
+          <el-menu-item index="/account/setting">
+            <el-icon><Setting /></el-icon>
+            <span>设置</span>
+          </el-menu-item>
+          <el-menu-item index="/account/log">
+            <el-icon><DocumentCopy /></el-icon>
+            <span>日志</span>
+          </el-menu-item>
+        </el-sub-menu>
+
+        <el-menu-item v-if="isAdmin" index="/admin/system">
+          <el-icon><Monitor /></el-icon>
+          <span>系统</span>
+        </el-menu-item>
+
+        <el-menu-item index="/admin/alarms">
+          <el-icon><Odometer /></el-icon>
+          <span>监控</span>
+        </el-menu-item>
+        
+        <!-- 移动端退出登录 -->
+        <div class="mobile-sidebar-footer">
+          <el-divider />
+          <div class="mobile-user-info" @click="handleLogout">
+            <el-icon><SwitchButton /></el-icon>
+            <span>退出 ({{ currentUser }})</span>
+          </div>
+        </div>
+      </el-menu>
+    </el-drawer>
 
     <!-- 主体内容 -->
     <el-container class="main-container">
       <!-- 顶部栏 -->
-      <el-header v-if="!$route.meta.hideHeader" class="header">
+      <el-header v-if="!$route.meta.hideHeader" class="header" :class="{ 'is-mobile': isMobile }">
         <div class="header-left">
+          <!-- 移动端菜单按钮 -->
+          <el-button v-if="isMobile" text class="menu-btn" @click="drawerVisible = true">
+            <el-icon :size="20"><Fold /></el-icon>
+          </el-button>
+
           <!-- 账户选择器 -->
           <template v-if="store.accounts.length > 0">
             <el-dropdown @command="handleSwitchAccount" trigger="click">
@@ -94,14 +206,23 @@
               </template>
             </el-dropdown>
             <!-- 账户操作按钮 -->
-            <el-dropdown trigger="click" @command="(cmd: string) => handleAccountAction(cmd, store.currentAccount?.account_id)" @click.stop>
+            <el-dropdown trigger="click" @command="(cmd: any) => handleAccountAction(cmd, store.currentAccount?.account_id)" @click.stop>
               <el-button circle size="small" class="header-action-btn">
                 <el-icon><MoreFilled /></el-icon>
               </el-button>
               <template #dropdown>
                 <el-dropdown-menu>
-                  <!-- 已连接状态：显示连接网关、断开网关、暂停交易、恢复交易 -->
-                  <template v-if="isAccountConnected(store.currentAccount)">
+                  <!-- 已停止状态：显示启动Trader -->
+                  <template v-if="isAccountStopped(store.currentAccount)">
+                    <el-dropdown-item
+                      :command="{ action: 'start_trader' }"
+                    >
+                      <el-icon><VideoPlay /></el-icon>
+                      启动
+                    </el-dropdown-item>
+                  </template>
+                  <!-- 已连接状态 -->
+                  <template v-else-if="isAccountConnected(store.currentAccount)">
                     <el-dropdown-item
                       :command="{ action: 'sync' }"
                     >
@@ -135,6 +256,27 @@
                     >
                       <el-icon><CircleCheck /></el-icon>
                       恢复交易
+                    </el-dropdown-item>
+                    <el-dropdown-item divided
+                      :command="{ action: 'stop_trader' }"
+                      type="danger"
+                    >
+                      <el-icon><VideoPause /></el-icon>
+                      停止
+                    </el-dropdown-item>
+                  </template>
+                  <!-- 启动中状态 -->
+                  <template v-else-if="isAccountStarting(store.currentAccount)">
+                    <el-dropdown-item disabled>
+                      <el-icon><Loading /></el-icon>
+                      正在启动...
+                    </el-dropdown-item>
+                    <el-dropdown-item divided
+                      :command="{ action: 'stop_trader' }"
+                      type="danger"
+                    >
+                      <el-icon><VideoPause /></el-icon>
+                      停止
                     </el-dropdown-item>
                   </template>
                 </el-dropdown-menu>
@@ -171,17 +313,66 @@
       </el-main>
     </el-container>
   </el-container>
+  
+  <!-- 登录页独立布局 -->
+  <router-view v-else />
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { useStore } from '@/stores'
-import { accountApi } from '@/api'
+import { accountApi, authApi } from '@/api'
 import wsManager from '@/ws'
 import type { Account } from '@/types'
 import { ElMessage } from 'element-plus'
 
 const store = useStore()
+const router = useRouter()
+const route = useRoute()
+const isMobile = ref(false)
+const drawerVisible = ref(false)
+
+// 当前登录用户（使用 ref 以便响应式更新）
+const currentUser = ref(localStorage.getItem('username') || '用户')
+
+// 当前用户角色
+const userRole = computed(() => {
+  return localStorage.getItem('userRole') || 'guest'
+})
+
+// 是否是管理员
+const isAdmin = computed(() => {
+  return userRole.value === 'admin'
+})
+
+// 是否可以交易（admin 或 trader）
+const canTrade = computed(() => {
+  return userRole.value === 'admin' || userRole.value === 'trader'
+})
+
+// 保留参考
+console.log('User can trade:', canTrade.value)
+
+// 退出登录
+async function handleLogout() {
+  try {
+    await authApi.logout()
+  } catch (error) {
+    // 忽略错误
+  }
+  localStorage.removeItem('isLoggedIn')
+  localStorage.removeItem('username')
+  localStorage.removeItem('userRole')
+  localStorage.removeItem('token')
+  localStorage.removeItem('rememberMe')
+  ElMessage.success('已退出登录')
+  router.push('/login')
+}
+
+function checkMobile() {
+  isMobile.value = window.innerWidth <= 768
+}
 
 function getLogo() {
     return new URL("/logo.png", import.meta.url).href;
@@ -284,7 +475,6 @@ async function handleAccountAction(cmd: any, accountId: string | undefined) {
         await accountApi.syncAccount(targetAccountId)
         ElMessage.success('同步成功')
         await store.loadAllAccounts()
-        await store.loadPositions(targetAccountId)
         break
     }
   } catch (error: any) {
@@ -293,14 +483,40 @@ async function handleAccountAction(cmd: any, accountId: string | undefined) {
 }
 
 onMounted(async () => {
-  // 加载初始数据
-  await store.loadAllData()
+  checkMobile()
+  window.addEventListener('resize', checkMobile)
 
-  // 初始化 WebSocket
-  store.initWebSocket()
+  // 更新当前用户名
+  currentUser.value = localStorage.getItem('username') || '用户'
+
+  // 只在已登录状态下加载数据
+  const isLoggedIn = localStorage.getItem('isLoggedIn') === 'true'
+  if (isLoggedIn) {
+    // 加载初始数据
+    await store.loadAllData()
+
+    // 初始化 WebSocket
+    store.initWebSocket()
+  }
+})
+
+// 监听路由变化，登录后加载数据并更新用户信息
+watch(() => route.path, async (newPath, oldPath) => {
+  // 从登录页跳转到其他页面时，加载数据
+  if (oldPath === '/login' && newPath !== '/login') {
+    // 更新当前用户名
+    currentUser.value = localStorage.getItem('username') || '用户'
+
+    const isLoggedIn = localStorage.getItem('isLoggedIn') === 'true'
+    if (isLoggedIn) {
+      await store.loadAllData()
+      store.initWebSocket()
+    }
+  }
 })
 
 onUnmounted(() => {
+  window.removeEventListener('resize', checkMobile)
   wsManager.disconnect()
 })
 </script>
@@ -321,6 +537,8 @@ onUnmounted(() => {
 .sidebar {
   background-color: #304156;
   overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .logo {
@@ -344,6 +562,66 @@ onUnmounted(() => {
 
 .nav-menu {
   border-right: none;
+  flex: 1;
+  overflow-y: auto;
+}
+
+/* 侧边栏底部用户信息 */
+.sidebar-footer {
+  padding: 12px 16px;
+  border-top: 1px solid #1f2d3d;
+  background-color: #304156;
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #bfcbd9;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 4px;
+  transition: all 0.3s;
+}
+
+.user-info:hover {
+  background-color: #263445;
+  color: #409eff;
+}
+
+.username {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.arrow-icon {
+  font-size: 12px;
+}
+
+/* 移动端侧边栏底部 */
+.mobile-sidebar-footer {
+  padding: 8px 16px;
+  margin-top: auto;
+}
+
+.mobile-user-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #bfcbd9;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 12px 8px;
+  border-radius: 4px;
+  transition: all 0.3s;
+}
+
+.mobile-user-info:hover {
+  background-color: #263445;
+  color: #f56c6c;
 }
 
 .main-container {
@@ -361,10 +639,35 @@ onUnmounted(() => {
   overflow: visible;
 }
 
+.header.is-mobile {
+  padding: 0 12px;
+  flex-wrap: wrap;
+  height: auto;
+  min-height: 60px;
+  gap: 8px;
+}
+
 .header-left {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+.header.is-mobile .header-left {
+  gap: 6px;
+}
+
+.header.is-mobile .header-right {
+  width: 100%;
+  justify-content: flex-end;
+  font-size: 13px;
+  padding-bottom: 8px;
+}
+
+.menu-btn {
+  padding: 6px;
+  margin-right: 4px;
 }
 
 /* 状态标签之间的竖线间距减小 */
@@ -375,6 +678,11 @@ onUnmounted(() => {
 /* Header 中的操作按钮样式 */
 .header-action-btn {
   padding: 4px;
+}
+
+.user-btn {
+  padding: 4px;
+  margin-left: 4px;
 }
 
 .header-right {
@@ -412,6 +720,10 @@ onUnmounted(() => {
   background-color: #f0f2f5;
   height: calc(100vh - 60px);
   overflow: auto;
+}
+
+.header.is-mobile + .main-content {
+  height: calc(100vh - 90px);
 }
 
 .content-wrapper {
@@ -502,7 +814,6 @@ onUnmounted(() => {
 .summary-info span {
   white-space: nowrap;
 }
-
 </style>
 
 <!-- 全局样式：用于下拉菜单等 Portal 渲染的组件 -->
@@ -518,5 +829,11 @@ onUnmounted(() => {
 .el-dropdown-menu__item.is-selected .account-status-dot.status-dot-green {
   background-color: #5daf34;
   box-shadow: 0 0 4px rgba(103, 194, 58, 0.5);
+}
+
+/* 移动端抽屉样式覆盖 */
+.mobile-sidebar-drawer .el-drawer__body {
+  padding: 0;
+  background-color: #304156;
 }
 </style>

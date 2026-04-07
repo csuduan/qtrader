@@ -242,23 +242,6 @@ async def stop_account_trader(
         return error_response(code=500, message="Trader停止失败")
 
 
-@router.post("/{account_id}/restart")
-async def restart_account_trader(
-    account_id: str,
-    trading_manager: TradingManager = Depends(get_trading_manager),
-):
-    """
-    重启账户Trader
-
-    重启指定账户的Trader进程
-    - **account_id**: 账户ID
-    """
-    success = await trading_manager.restart_trader(account_id)
-
-    if success:
-        return success_response(data={"running": True}, message="Trader已重启")
-    else:
-        return error_response(code=500, message="Trader重启失败")
 
 
 @router.post("/{account_id}/connect")

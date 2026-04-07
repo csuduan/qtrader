@@ -46,7 +46,7 @@
                           v-if="isAccountStopped(acc)"
                         >
                           <el-icon><VideoPlay /></el-icon>
-                          启动Trader
+                          启动
                         </el-dropdown-item>
                       </template>
                       <!-- 已连接状态：显示连接网关、断开网关、暂停交易、恢复交易、重启、停止 -->
@@ -79,13 +79,9 @@
                           <el-icon><CircleCheck /></el-icon>
                           恢复交易
                         </el-dropdown-item>
-                        <el-dropdown-item divided :command="{ action: 'restart_trader', accountId: acc.account_id }">
-                          <el-icon><RefreshRight /></el-icon>
-                          重启Trader
-                        </el-dropdown-item>
                         <el-dropdown-item :command="{ action: 'stop_trader', accountId: acc.account_id }">
                           <el-icon><VideoPause /></el-icon>
-                          停止Trader
+                          停止
                         </el-dropdown-item>
                       </template>
                     </el-dropdown-menu>

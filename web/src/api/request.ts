@@ -1,5 +1,6 @@
 import axios, { type AxiosRequestConfig, type InternalAxiosRequestConfig, type AxiosResponse } from 'axios'
 import { ElMessage } from 'element-plus'
+import router from '@/router'
 
 // 定义响应类型
 export interface ApiResponse<T = any> {
@@ -24,9 +25,13 @@ const axiosInstance = axios.create({
   }
 })
 
-// 请求拦截器
+// 请求拦截器 - 自动添加Token
 axiosInstance.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
+    const token = localStorage.getItem('token')
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
+    }
     return config
   },
   (error) => {
@@ -49,6 +54,16 @@ axiosInstance.interceptors.response.use(
   (error) => {
     console.error('Network Error:', error)
     if (error.response) {
+      // 处理 401 未授权
+      if (error.response.status === 401) {
+        ElMessage.error('登录已过期，请重新登录')
+        localStorage.removeItem('token')
+        localStorage.removeItem('isLoggedIn')
+        localStorage.removeItem('username')
+        localStorage.removeItem('userRole')
+        router.push('/login')
+        throw new Error('登录已过期')
+      }
       if (error.response.status === 500) {
         ElMessage.error('无法连接服务端')
         throw new Error('无法连接服务端')

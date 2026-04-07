@@ -165,11 +165,8 @@ class Trader:
         logger.info(f"Trader [{self.account_id}] 启动成功，持续运行中...")
         logger.info("=" * 60)
 
-        # 等待服务器任务（防止协程结束）
-        try:
-            await self._server_task
-        except asyncio.CancelledError:
-            logger.info(f"Trader [{self.account_id}] 服务器任务已取消")
+        # 注意：不再这里等待服务器任务
+        # 停止控制由 app.py 中的 stop_event 控制
 
     async def _init_database(self) -> None:
         """
@@ -2151,6 +2148,13 @@ class Trader:
         except Exception as e:
             logger.exception(f"Trader [{self.account_id}] 刷新合约信息失败: {e}")
             return {"success": False, "message": f"刷新失败: {str(e)}"}
+
+    @request("stop")
+    async def _req_stop(self, data: dict) -> dict:
+        """处理停止Trader请求"""
+        logger.info(f"Trader [{self.account_id}] 收到停止请求")
+        asyncio.create_task(self.stop())
+        return {"success": True, "message": "停止命令已接收"}
 
     @request("init_public_data")
     async def _req_init_public_data(self, data: dict) -> dict:

@@ -23,6 +23,7 @@ from fastapi_offline import FastAPIOffline
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from src.app_context import AppContext, get_app_context
+from src.manager.api.middleware.auth import AuthMiddleware
 from src.manager.api.responses import (
     global_exception_handler,
     http_exception_handler,
@@ -96,6 +97,13 @@ async def lifespan(app: FastAPI):
 
     global_db = get_database()
     logger.info(f"全局数据库实例: {global_db}")
+
+    # 初始化默认用户
+    try:
+        from src.manager.api.routes.auth import init_default_users
+        init_default_users()
+    except Exception as e:
+        logger.error(f"初始化默认用户失败: {e}")
 
     # 启用告警日志处理器
     try:
@@ -186,6 +194,9 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # 注册鉴权中间件（必须在CORS之后，路由之前）
+    app.add_middleware(AuthMiddleware)
 
     @app.middleware("http")
     async def add_response_time(request: Request, call_next):

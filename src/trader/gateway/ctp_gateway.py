@@ -100,6 +100,9 @@ class CtpGateway(BaseGateway):
         # 加载最小开仓手数配置
         self._open_limit = acct_config.trading.open_limit or {}
 
+        # 订阅配置（来自全局config.yaml）
+        self.subs_config = acct_config.subs
+
         # 加载合约
         self.load_contracts()
 
@@ -485,8 +488,8 @@ class CtpGateway(BaseGateway):
             # 订阅持仓
             if len(self._positions) > 0:
                 self.subscribe([pos.symbol for pos in self._positions.values()])
-            # 订阅k线
-            for sub_bar in self.config.subscribe_bars:
+            # 订阅k线（从全局配置加载）
+            for sub_bar in self.subs_config.subscribe_bars:
                 symbol, interval = sub_bar.split("-")
                 self.subscribe_bars(symbol, interval)
 
