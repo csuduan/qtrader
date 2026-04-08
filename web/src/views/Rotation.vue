@@ -42,7 +42,7 @@
             </template>
           <el-table-column type="selection" width="55" />
           <el-table-column prop="strategy_id" label="策略编号" width="150" />
-          <el-table-column label="合约" width="150" fixed>
+          <el-table-column label="合约" width="100" fixed>
             <template #default="{ row }">
               {{ row.symbol }}
             </template>
@@ -552,5 +552,28 @@ onMounted(() => {
   margin-left: 10px;
   color: #e6a23c;
   font-size: 14px;
+}
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+  .card-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .header-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .header-actions .el-button {
+    flex: 1;
+    min-width: 0;
+    padding: 8px 12px;
+  }
+
+  .header-actions .el-button span {
+    font-size: 12px;
+  }
 }
 </style>

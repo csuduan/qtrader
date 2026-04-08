@@ -840,4 +840,31 @@ onMounted(() => {
   display: flex;
   align-items: center;
 }
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+  .card-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .card-header .el-button {
+    width: 100%;
+    margin-left: 0 !important;
+    margin-top: 8px;
+  }
+
+  .header-actions {
+    width: 100%;
+  }
+
+  .header-actions .el-space {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .header-actions .el-space > * {
+    margin: 4px 0;
+  }
+}
 </style>

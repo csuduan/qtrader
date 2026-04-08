@@ -3,7 +3,7 @@
     <!-- 账户卡片列表 -->
     <div class="account-cards">
       <el-row :gutter="20">
-        <el-col :span="6" v-for="acc in sortedAccounts" :key="acc.account_id">
+        <el-col :xs="12" :sm="12" :lg="6" v-for="acc in sortedAccounts" :key="acc.account_id">
           <el-card
             shadow="hover"
             :class="getAccountCardClass(acc)"
@@ -117,17 +117,17 @@
     <!-- 统计卡片 -->
     <el-row :gutter="20" class="mt-4">
       <!-- 统一使用当前选中账户的数据 -->
-      <el-col :span="6">
+      <el-col :xs="12" :sm="6">
         <el-card shadow="hover">
           <el-statistic title="总资产" :value="store.currentAccount?.balance || 0" :precision="2" prefix="¥" />
         </el-card>
       </el-col>
-      <el-col :span="6">
+      <el-col :xs="12" :sm="6">
         <el-card shadow="hover">
           <el-statistic title="可用资金" :value="store.currentAccount?.available || 0" :precision="2" prefix="¥" />
         </el-card>
       </el-col>
-      <el-col :span="6">
+      <el-col :xs="12" :sm="6">
         <el-card shadow="hover">
           <el-statistic
             title="持仓数量"
@@ -136,7 +136,7 @@
           />
         </el-card>
       </el-col>
-      <el-col :span="6">
+      <el-col :xs="12" :sm="6">
         <el-card shadow="hover">
           <el-statistic
             title="活跃委托"
@@ -149,7 +149,7 @@
 
     <el-row :gutter="20" class="mt-4">
       <!-- 盈亏统计 -->
-      <el-col :span="12">
+      <el-col :xs="24" :sm="12">
         <el-card shadow="hover">
           <template #header>
             <div class="card-header">
@@ -184,7 +184,7 @@
       </el-col>
 
       <!-- 风控统计 -->
-      <el-col :span="12">
+      <el-col :xs="24" :sm="12" class="mt-4-sm">
         <el-card shadow="hover">
           <template #header>
             <div class="card-header">
@@ -227,8 +227,8 @@
               <el-link type="primary" @click="$router.push('/alarms')">查看全部</el-link>
             </div>
           </template>
-          <el-row :gutter="20">
-            <el-col :span="8">
+          <el-row :gutter="10">
+            <el-col :xs="8" :sm="8">
               <div class="stat-item">
                 <div class="stat-label">今日总告警</div>
                 <div class="stat-value" :class="alarmStats.today_total > 0 ? 'loss' : 'profit'">
@@ -236,7 +236,7 @@
                 </div>
               </div>
             </el-col>
-            <el-col :span="8">
+            <el-col :xs="8" :sm="8">
               <div class="stat-item">
                 <div class="stat-label">最近1小时告警</div>
                 <div class="stat-value" :class="alarmStats.last_hour > 0 ? 'loss' : 'profit'">
@@ -244,7 +244,7 @@
                 </div>
               </div>
             </el-col>
-            <el-col :span="8">
+            <el-col :xs="8" :sm="8">
               <div class="stat-item">
                 <div class="stat-label">最近5分钟告警</div>
                 <div class="stat-value" :class="alarmStats.last_five_minutes > 0 ? 'loss' : 'profit'">
@@ -474,16 +474,22 @@ function formatNumber(num: number): string {
 
 // 计算报单百分比
 function getOrderPercentage(): number {
-  if (currentRiskStatus.value.max_daily_orders === 0) return 0
-  const percentage = (currentRiskStatus.value.daily_order_count / currentRiskStatus.value.max_daily_orders) * 100
-  return parseFloat(percentage.toFixed(1))
+  const max = currentRiskStatus.value.max_daily_orders ?? 0
+  const count = currentRiskStatus.value.daily_order_count ?? 0
+  if (!max || max === 0) return 0
+  const percentage = (count / max) * 100
+  const result = parseFloat(percentage.toFixed(1))
+  return isNaN(result) ? 0 : result
 }
 
 // 计算撤单百分比
 function getCancelPercentage(): number {
-  if (currentRiskStatus.value.max_daily_cancels === 0) return 0
-  const percentage = (currentRiskStatus.value.daily_cancel_count / currentRiskStatus.value.max_daily_cancels) * 100
-  return parseFloat(percentage.toFixed(1))
+  const max = currentRiskStatus.value.max_daily_cancels ?? 0
+  const count = currentRiskStatus.value.daily_cancel_count ?? 0
+  if (!max || max === 0) return 0
+  const percentage = (count / max) * 100
+  const result = parseFloat(percentage.toFixed(1))
+  return isNaN(result) ? 0 : result
 }
 
 // 进度条颜色
@@ -524,6 +530,7 @@ function getProgressColor(percentage: number): string {
   font-size: 24px;
   font-weight: 600;
 }
+
 
 .profit {
   color: #67c23a;
@@ -654,5 +661,47 @@ function getProgressColor(percentage: number): string {
   font-size: 15px;
   font-weight: 600;
   color: #303133;
+}
+
+/* 移动端适配 */
+@media (max-width: 767px) {
+  .mt-4-sm {
+    margin-top: 20px;
+  }
+
+  .mb-2-mobile {
+    margin-bottom: 16px;
+  }
+
+  .account-card-stats {
+    gap: 6px;
+  }
+
+  .account-stat-label {
+    font-size: 12px;
+  }
+
+  .account-stat-value {
+    font-size: 14px;
+  }
+
+  .account-id {
+    font-size: 14px;
+  }
+
+  .account-status-tags-inline .el-tag {
+    font-size: 10px;
+    padding: 0 4px;
+    height: 18px;
+  }
+
+  .stat-label {
+    font-size: 12px;
+    margin-bottom: 6px;
+  }
+
+  .stat-value {
+    font-size: 16px;
+  }
 }
 </style>

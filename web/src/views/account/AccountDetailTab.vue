@@ -69,7 +69,7 @@
           <template #empty>
             <el-empty description="暂无持仓" />
           </template>
-          <el-table-column prop="symbol" label="合约" width="150" fixed>
+          <el-table-column prop="symbol" label="合约" width="100" fixed>
             <template #default="{ row }">
               {{ row.symbol }}
             </template>
@@ -165,7 +165,7 @@ const emit = defineEmits<{
 }>()
 
 function updateDescColumn() {
-  descColumn.value = window.innerWidth <= 768 ? 1 : 2
+  descColumn.value = window.innerWidth < 768 ? 1 : 2
 }
 
 function formatNumber(num: number | null | undefined): string {

@@ -352,4 +352,17 @@ onMounted(async () => {
 .checkbox-paused :deep(.el-checkbox__input.is-checked + .el-checkbox__label) {
   color: var(--el-color-danger);
 }
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+  .card-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .card-header .el-space {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
 </style>

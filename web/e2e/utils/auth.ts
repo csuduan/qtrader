@@ -14,8 +14,8 @@ export async function login(page: Page, username: string, password: string): Pro
   await page.locator('.login-btn').click()
   // 等待登录完成并跳转到 dashboard
   await page.waitForURL(/\/dashboard/)
-  // 刷新页面以确保菜单根据 localStorage 重新渲染
-  await page.reload()
+  // 等待页面加载完成
+  await page.waitForLoadState('networkidle')
 }
 
 /**

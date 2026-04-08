@@ -5,7 +5,6 @@
     <el-aside v-if="!isMobile" width="150px" class="sidebar">
       <div class="logo">
          <img :src="getLogo()" alt="logo" width="40" />
-        <h2>Q-Trader</h2>
       </div>
       <el-menu
         :default-active="$route.path"
@@ -95,7 +94,6 @@
     >
       <div class="logo">
          <img :src="getLogo()" alt="logo" width="40" />
-        <h2>Q-Trader</h2>
       </div>
       <el-menu
         :default-active="$route.path"
@@ -159,16 +157,16 @@
 
     <!-- 主体内容 -->
     <el-container class="main-container">
-      <!-- 顶部栏 -->
-      <el-header v-if="!$route.meta.hideHeader" class="header" :class="{ 'is-mobile': isMobile }">
+      <!-- 顶部栏：移动端始终显示，桌面端非简化页面显示 -->
+      <el-header v-if="isMobile || !isSimpleHeaderPage" class="header" :class="{ 'is-mobile': isMobile, 'simple-header': isSimpleHeaderPage }">
         <div class="header-left">
           <!-- 移动端菜单按钮 -->
           <el-button v-if="isMobile" text class="menu-btn" @click="drawerVisible = true">
             <el-icon :size="20"><Fold /></el-icon>
           </el-button>
 
-          <!-- 账户选择器 -->
-          <template v-if="store.accounts.length > 0">
+          <!-- 简化header页面不显示账户选择器等内容 -->
+          <template v-if="!isSimpleHeaderPage && store.accounts.length > 0">
             <el-dropdown @command="handleSwitchAccount" trigger="click">
               <div class="account-selector">
                 <span class="account-name">{{ currentAccountName }}</span>
@@ -285,16 +283,19 @@
 
         </div>
         <div class="header-right">
-          <span>总资产: ¥{{ formatNumber(store.currentAccount?.balance || 0) }}</span>
-          <el-divider direction="vertical" />
-          <span :class="(store.currentAccount?.today_profit || 0) >= 0 ? 'profit' : 'loss'">
-            今日盈亏: ¥{{ formatNumber(store.currentAccount?.today_profit || 0) }}
-          </span>
+          <!-- 非简化header页面显示资产信息 -->
+          <template v-if="!isSimpleHeaderPage">
+            <span>总资产: ¥{{ formatNumber(store.currentAccount?.balance || 0) }}</span>
+            <el-divider direction="vertical" />
+            <span :class="(store.currentAccount?.today_profit || 0) >= 0 ? 'profit' : 'loss'">
+              今日盈亏: ¥{{ formatNumber(store.currentAccount?.today_profit || 0) }}
+            </span>
+          </template>
         </div>
       </el-header>
 
       <!-- 主内容区 -->
-      <el-main class="main-content" :class="{ 'no-header': $route.meta.hideHeader }">
+      <el-main class="main-content">
         <div class="content-wrapper">
           <router-view />
         </div>
@@ -339,6 +340,12 @@ const canTrade = computed(() => {
   return userRole.value === 'admin' || userRole.value === 'trader'
 })
 
+// 是否是简化header页面（总览、日志、系统）
+const isSimpleHeaderPage = computed(() => {
+  const simplePaths = ['/dashboard', '/admin/log', '/admin/system']
+  return simplePaths.includes(route.path)
+})
+
 // 保留参考
 console.log('User can trade:', canTrade.value)
 
@@ -359,7 +366,7 @@ async function handleLogout() {
 }
 
 function checkMobile() {
-  isMobile.value = window.innerWidth <= 768
+  isMobile.value = window.innerWidth < 768
 }
 
 function getLogo() {
@@ -704,18 +711,19 @@ onUnmounted(() => {
   font-weight: 600;
 }
 
+.main-container {
+  display: flex;
+  flex-direction: column;
+}
+
 .main-content {
   background-color: #f0f2f5;
-  height: calc(100vh - 60px);
+  flex: 1;
   overflow: auto;
 }
 
-.main-content.no-header {
-  height: 100vh;
-}
-
-.header.is-mobile + .main-content {
-  height: calc(100vh - 90px);
+.header {
+  flex-shrink: 0;
 }
 
 .content-wrapper {
@@ -805,6 +813,42 @@ onUnmounted(() => {
 
 .summary-info span {
   white-space: nowrap;
+}
+
+/* 用户名样式 */
+.user-name-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background-color 0.3s;
+}
+
+.user-name-wrapper:hover {
+  background-color: #f5f7fa;
+}
+
+.username-text {
+  font-size: 14px;
+  color: #606266;
+}
+
+.arrow-down {
+  font-size: 12px;
+  color: #909399;
+}
+
+/* 简化header样式 */
+.simple-header .header-left {
+  flex: 1;
+}
+
+@media (max-width: 767px) {
+  .simple-header {
+    justify-content: space-between;
+  }
 }
 </style>
 

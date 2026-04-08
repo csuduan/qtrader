@@ -377,10 +377,20 @@ const handleLogin = async () => {
   .login-left {
     display: none;
   }
-  
+
   .login-right {
     width: 100%;
+    min-width: auto;
     padding: 24px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    align-items: flex-start;
+  }
+
+  .login-box {
+    max-width: 100%;
+    width: 100%;
+    padding: 20px 0;
   }
 }
 

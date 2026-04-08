@@ -8,6 +8,7 @@ import App from './App.vue'
 import router from './router'
 import wsManager from './ws'
 import './style.css'
+import './styles/responsive.scss'
 
 const app = createApp(App)
 const pinia = createPinia()

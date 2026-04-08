@@ -360,6 +360,10 @@ class TradingEngine:
             order_data.insert_time = datetime.now()
             # 更新风控计数
             self.risk_control.on_order_inserted()
+            # 推送更新后的账户状态（包含风控数据）
+            account_data = self.account
+            if account_data:
+                self._emit_event(EventTypes.ACCOUNT_UPDATE, account_data.model_dump())
         else:
             logger.error(
                 f"下单失败: {symbol} {direction} {offset} {volume}手 @{price if price > 0 else 'MARKET'}"
@@ -378,7 +382,15 @@ class TradingEngine:
         """
         if self.gateway and self.gateway.connected:
             req = CancelRequest(order_id=order_id)
-            return self.gateway.cancel_order(req)
+            success = self.gateway.cancel_order(req)
+            if success:
+                # 更新风控计数
+                self.risk_control.on_order_cancelled()
+                # 推送更新后的账户状态（包含风控数据）
+                account_data = self.account
+                if account_data:
+                    self._emit_event(EventTypes.ACCOUNT_UPDATE, account_data.model_dump())
+            return success
 
         logger.warning("Gateway未初始化或未连接")
         return False

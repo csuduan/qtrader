@@ -378,6 +378,7 @@ class TraderProxy:
                         "risk_ratio": float(account_po.risk_ratio) if account_po.risk_ratio else 0,
                         "md_connected": False,
                         "td_connected": False,
+                        "risk_status": {},
                     }
                     logger.info(f"TraderProxy [{self.account_id}] 从DB加载账户数据成功")
         except Exception as e:
@@ -409,6 +410,7 @@ class TraderProxy:
                     "user_id": data.get("user_id"),
                     "currency": data.get("currency", "CNY"),
                     "trade_paused": data.get("trade_paused", False),
+                    "risk_status": data.get("risk_status", {}),
                 })
                 logger.info(
                     f"TraderProxy [{self.account_id}] 已从Trader同步账户数据, "
@@ -538,6 +540,7 @@ class TraderProxy:
                     "user_id": account_data.get("user_id"),
                     "currency": account_data.get("currency", "CNY"),
                     "trade_paused": account_data.get("trade_paused", False),
+                    "risk_status": account_data.get("risk_status", {}),
                 })
 
             # 更新持仓缓存
@@ -665,6 +668,7 @@ class TraderProxy:
                 "user_id": data.get("user_id"),
                 "currency": data.get("currency", "CNY"),
                 "trade_paused": data.get("trade_paused", False),
+                "risk_status": data.get("risk_status", {}),
             })
             # 推送给前端
             self._emit_data("account", self._account_cache.copy())

@@ -1,0 +1,155 @@
+/**
+ * 移动端响应式样式
+ * 简化断点：手机 < 768px，平板和桌面 >= 768px（使用相同布局）
+ */
+
+/* 只在手机端隐藏的类 */
+@media (max-width: 767px) {
+  .hide-mobile {
+    display: none !important;
+  }
+}
+
+/* 只在桌面/平板显示的类 */
+@media (min-width: 768px) {
+  .show-desktop {
+    display: block !important;
+  }
+  .hide-desktop {
+    display: none !important;
+  }
+}
+
+/* 只在手机显示的类 */
+@media (max-width: 767px) {
+  .show-mobile {
+    display: block !important;
+  }
+}
+@media (min-width: 768px) {
+  .show-mobile {
+    display: none !important;
+  }
+}
+
+/* 手机端间距调整 */
+@media (max-width: 767px) {
+  .mt-4-mobile {
+    margin-top: 16px !important;
+  }
+
+  .mb-2-mobile {
+    margin-bottom: 12px !important;
+  }
+
+  .p-0-mobile {
+    padding: 0 !important;
+  }
+
+  .px-2-mobile {
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+  }
+}
+
+/* 手机端表格横向滚动 */
+@media (max-width: 767px) {
+  .table-responsive {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+
+    .el-table {
+      min-width: 600px;
+    }
+  }
+
+  /* 卡片头部按钮自适应 */
+  .card-header-actions {
+    width: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+
+    .el-button {
+      flex: 1;
+      min-width: 0;
+    }
+  }
+}
+
+/* 手机端抽屉菜单样式 */
+.mobile-sidebar-drawer {
+  .el-drawer__body {
+    padding: 0;
+    background-color: #304156;
+  }
+
+  .nav-menu {
+    border-right: none;
+  }
+}
+
+/* 手机端头部样式 */
+@media (max-width: 767px) {
+  .header.is-mobile {
+    height: auto;
+    min-height: 60px;
+    padding: 8px 12px;
+    flex-wrap: wrap;
+
+    .header-left {
+      width: 100%;
+      margin-bottom: 8px;
+    }
+
+    .header-right {
+      width: 100%;
+      justify-content: flex-start;
+      font-size: 13px;
+    }
+  }
+}
+
+/* 表单手机端优化 */
+@media (max-width: 767px) {
+  .el-form {
+    .el-form-item {
+      margin-bottom: 16px;
+
+      .el-form-item__label {
+        float: none;
+        display: block;
+        text-align: left;
+        margin-bottom: 4px;
+      }
+
+      .el-form-item__content {
+        margin-left: 0 !important;
+      }
+    }
+  }
+
+  /* 对话框手机端宽度 */
+  .el-dialog {
+    width: 95% !important;
+    margin: 10px auto !important;
+  }
+}
+
+/* 统计卡片手机端优化 */
+@media (max-width: 767px) {
+  .stat-card-grid {
+    .el-col {
+      margin-bottom: 12px;
+
+      &:last-child {
+        margin-bottom: 0;
+      }
+    }
+
+    .el-statistic__number {
+      font-size: 20px;
+    }
+  }
+}
