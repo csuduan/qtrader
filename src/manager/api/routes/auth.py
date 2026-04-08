@@ -287,40 +287,45 @@ async def logout(current_user: dict = Depends(get_current_user)):
 # ============ 初始化默认用户 ============
 
 def init_default_users():
-    """初始化默认用户数据"""
+    """初始化管理员用户
+
+    从 config.yaml 读取 admin 配置，更新到用户表中。
+    如果用户已存在则更新密码，不存在则创建。
+    其他用户由 admin 手动创建。
+    """
+    from src.utils.config_loader import get_config_loader
+
     db = get_database()
-    
+    config_loader = get_config_loader()
+    app_config = config_loader.load_config()
+
+    admin_config = app_config.admin
+    admin_user_id = admin_config.user
+    admin_password = admin_config.password
+
     with db.get_session() as session:
-        # 检查是否已有用户
-        stmt = select(UserPo).limit(1)
+        # 查询管理员用户是否存在
+        stmt = select(UserPo).where(UserPo.user_id == admin_user_id)
         result = session.execute(stmt)
-        if result.scalar_one_or_none():
-            logger.info("用户表已有数据，跳过初始化")
-            return
-        
-        # 创建默认用户
-        default_users = [
-            {
-                "user_id": "duanqing",
-                "password": "duanqing123",
-                "role": "admin"
-            },
-            {
-                "user_id": "caizijia",
-                "password": "caizijia123",
-                "role": "trader"
-            }
-        ]
-        
-        for user_data in default_users:
+        user = result.scalar_one_or_none()
+
+        if user:
+            # 用户已存在，更新密码
+            user.password = hash_password(admin_password)
+            user.role = "admin"
+            user.is_active = True
+            user.updated_at = datetime.now()
+            logger.info(f"管理员用户密码已更新: {admin_user_id}")
+        else:
+            # 用户不存在，创建新用户
             user = UserPo(
-                user_id=user_data["user_id"],
-                password=hash_password(user_data["password"]),
-                role=user_data["role"],
+                user_id=admin_user_id,
+                password=hash_password(admin_password),
+                role="admin",
                 is_active=True
             )
             session.add(user)
-            logger.info(f"创建默认用户: {user_data['user_id']}, 角色: {user_data['role']}")
-        
+            logger.info(f"创建管理员用户: {admin_user_id}")
+
         session.commit()
-        logger.info("默认用户初始化完成")
+        logger.info("管理员用户初始化完成")

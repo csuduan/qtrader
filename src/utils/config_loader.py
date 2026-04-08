@@ -250,6 +250,13 @@ class SubsConfig(BaseModel):
     subscribe_bars: List[str] = Field(default_factory=list, description="订阅的K线列表，格式: symbol-interval")
 
 
+class AdminConfig(BaseModel):
+    """管理员账户配置"""
+
+    user: str = "admin"
+    password: str = "admin123"
+
+
 class AppConfig(BaseModel):
     """全局配置（来自config.yaml）"""
 
@@ -270,6 +277,8 @@ class AppConfig(BaseModel):
 
     # 全局告警配置（所有账户共享）
     alert: AlertConfig = Field(default_factory=AlertConfig)
+    # 管理员账户配置
+    admin: AdminConfig = Field(default_factory=AdminConfig)
 
     class Config:
         extra = "allow"  # 允许额外字段

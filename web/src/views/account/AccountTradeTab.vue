@@ -1,0 +1,128 @@
+<template>
+  <div class="account-trade-tab">
+    <el-card shadow="hover">
+      <template #header>
+        <div class="card-header">
+          <span>成交记录</span>
+          <el-space>
+            <el-date-picker
+              v-model="localDateFilter"
+              type="date"
+              placeholder="选择日期"
+              format="YYYY-MM-DD"
+              value-format="YYYY-MM-DD"
+              clearable
+            />
+            <el-button type="primary" @click="emit('refresh')" :loading="loading">
+              <el-icon><Refresh /></el-icon>
+              刷新
+            </el-button>
+          </el-space>
+        </div>
+      </template>
+
+      <div class="table-wrapper">
+        <el-table :data="sortedTrades" stripe v-loading="loading">
+          <template #empty>
+            <el-empty description="暂无成交记录" />
+          </template>
+          <el-table-column prop="trade_id" label="成交ID" width="180" show-overflow-tooltip />
+          <el-table-column prop="symbol" label="合约" width="120" />
+          <el-table-column prop="direction" label="方向" width="80">
+            <template #default="{ row }">
+              <el-tag :type="row.direction === 'BUY' ? 'success' : 'danger'" size="small">
+                {{ row.direction === 'BUY' ? '买' : '卖' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="offset" label="开平" width="80" />
+          <el-table-column prop="price" label="成交价" width="100">
+            <template #default="{ row }">
+              {{ formatNumber(row.price) }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="volume" label="手数" width="80" />
+          <el-table-column prop="order_id" label="委托单ID" width="180" show-overflow-tooltip />
+          <el-table-column prop="created_at" label="成交时间">
+            <template #default="{ row }">
+              {{ formatDateTime(row.trade_date_time) }}
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+    </el-card>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { computed } from 'vue'
+import type { Trade } from '@/types'
+
+const props = defineProps<{
+  loading: boolean
+  trades: Trade[]
+  dateFilter: string | undefined
+}>()
+
+const emit = defineEmits<{
+  refresh: []
+  'update:dateFilter': [date: string | undefined]
+}>()
+
+const localDateFilter = computed({
+  get: () => props.dateFilter,
+  set: (val) => emit('update:dateFilter', val || new Date().toISOString().split('T')[0])
+})
+
+// 按时间倒序排序的成交记录
+const sortedTrades = computed(() => {
+  if (!props.trades || props.trades.length === 0) return []
+  return [...props.trades].sort((a, b) => {
+    let timeA = 0
+    let timeB = 0
+    if (typeof a.trade_date_time === 'number') {
+      timeA = a.trade_date_time
+    } else if (typeof a.trade_date_time === 'string') {
+      timeA = new Date(a.trade_date_time).getTime() / 1000
+    }
+    if (typeof b.trade_date_time === 'number') {
+      timeB = b.trade_date_time
+    } else if (typeof b.trade_date_time === 'string') {
+      timeB = new Date(b.trade_date_time).getTime() / 1000
+    }
+    return timeB - timeA
+  })
+})
+
+function formatNumber(num: number | null | undefined): string {
+  if (num === null || num === undefined) return '0.00'
+  return num.toFixed(2)
+}
+
+function formatDateTime(datetime: string | number | null | undefined): string {
+  if (!datetime) return '-'
+  const date = typeof datetime === 'number'
+    ? new Date(datetime * 1000)
+    : new Date(datetime)
+  return date.toLocaleString('zh-CN')
+}
+</script>
+
+<style scoped>
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.table-wrapper .el-table {
+  min-width: 600px;
+}
+</style>

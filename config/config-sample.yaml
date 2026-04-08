@@ -58,6 +58,10 @@ api:
     - "http://localhost:8080"
     - "http://localhost:3001"
 
+admin:
+  user: "duanqing"
+  password: "duanqing123"
+
 # Manager 定时任务配置
 scheduler:
   jobs:

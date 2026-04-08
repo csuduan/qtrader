@@ -265,15 +265,124 @@
         </el-card>
       </el-col>
     </el-row>
+
+    <!-- 用户管理 -->
+    <el-row :gutter="20" class="mt-4">
+      <el-col :span="24">
+        <el-card shadow="hover">
+          <template #header>
+            <div class="card-header">
+              <span>用户管理</span>
+              <el-button type="primary" @click="handleAddUser">
+                <el-icon><Plus /></el-icon>
+                新增用户
+              </el-button>
+            </div>
+          </template>
+
+          <div class="table-wrapper">
+            <el-table :data="userList" stripe v-loading="loadingUsers" table-layout="fixed">
+              <template #empty>
+                <el-empty description="暂无用户" />
+              </template>
+              <el-table-column prop="username" label="用户名" min-width="150" />
+              <el-table-column prop="user_id" label="用户ID" min-width="150" />
+              <el-table-column prop="role" label="角色" width="120">
+                <template #default="{ row }">
+                  <el-tag :type="getRoleTagType(row.role)" size="small">
+                    {{ getRoleLabel(row.role) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="created_at" label="创建时间" min-width="180">
+                <template #default="{ row }">
+                  {{ row.created_at ? formatDateTime(row.created_at) : '-' }}
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="200" fixed="right">
+                <template #default="{ row }">
+                  <el-space>
+                    <el-button
+                      type="primary"
+                      size="small"
+                      @click="handleEditUser(row)"
+                    >
+                      <el-icon><Edit /></el-icon>
+                      编辑
+                    </el-button>
+                    <el-button
+                      type="danger"
+                      size="small"
+                      @click="handleDeleteUser(row)"
+                    >
+                      <el-icon><Delete /></el-icon>
+                      删除
+                    </el-button>
+                  </el-space>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </el-card>
+      </el-col>
+    </el-row>
+
+    <!-- 用户编辑对话框 -->
+    <el-dialog
+      v-model="userDialogVisible"
+      :title="userDialogTitle"
+      width="500px"
+      :close-on-click-modal="false"
+    >
+      <el-form
+        ref="userFormRef"
+        :model="userForm"
+        :rules="userFormRules"
+        label-width="80px"
+      >
+        <el-form-item label="用户名" prop="username">
+          <el-input
+            v-model="userForm.username"
+            placeholder="请输入用户名"
+            :disabled="isEditing"
+          />
+        </el-form-item>
+        <el-form-item
+          :label="isEditing ? '新密码' : '密码'"
+          prop="password"
+          :required="!isEditing"
+        >
+          <el-input
+            v-model="userForm.password"
+            type="password"
+            placeholder="请输入密码"
+            show-password
+          />
+          <div v-if="isEditing" class="form-help">不填写则保持原密码不变</div>
+        </el-form-item>
+        <el-form-item label="角色" prop="role">
+          <el-select v-model="userForm.role" placeholder="请选择角色" style="width: 100%">
+            <el-option label="管理员" value="admin" />
+            <el-option label="交易员" value="trader" />
+            <el-option label="访客" value="guest" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="userDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleSaveUser">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { reactive, ref, onMounted, computed } from 'vue'
-import { ElMessage, ElSpace } from 'element-plus'
-import { VideoPlay, VideoPause, Refresh, Check } from '@element-plus/icons-vue'
-import { systemApi, accountApi } from '@/api'
+import { ElMessage, ElMessageBox, ElSpace } from 'element-plus'
+import { VideoPlay, VideoPause, Refresh, Check, Plus, Edit, Delete } from '@element-plus/icons-vue'
+import { systemApi, accountApi, userApi } from '@/api'
 import type { TraderStatus, Job } from '@/types'
+import type { User, CreateUserRequest, UpdateUserRequest } from '@/api/user'
 
 // ==================== 告警设置（Manager级别）====================
 const savingAlert = ref(false)
@@ -542,10 +651,152 @@ async function handleOperateJob(row: Job, action: 'pause' | 'resume' | 'trigger'
   }
 }
 
+// ==================== 用户管理 ====================
+const loadingUsers = ref(false)
+const userList = ref<User[]>([])
+const userDialogVisible = ref(false)
+const userDialogTitle = ref('新增用户')
+const isEditing = ref(false)
+const currentUserId = ref('')
+const userFormRef = ref<any>(null)
+
+const userForm = reactive({
+  username: '',
+  password: '',
+  role: 'trader' as 'admin' | 'trader' | 'guest'
+})
+
+const userFormRules = {
+  username: [
+    { required: true, message: '请输入用户名', trigger: 'blur' },
+    { min: 3, max: 20, message: '用户名长度3-20个字符', trigger: 'blur' }
+  ],
+  password: [
+    { required: true, message: '请输入密码', trigger: 'blur' },
+    { min: 6, max: 20, message: '密码长度6-20个字符', trigger: 'blur' }
+  ],
+  role: [
+    { required: true, message: '请选择角色', trigger: 'change' }
+  ]
+}
+
+async function loadUsers() {
+  loadingUsers.value = true
+  try {
+    userList.value = await userApi.getUsers()
+  } catch (error: any) {
+    ElMessage.error(`加载用户列表失败: ${error.message}`)
+  } finally {
+    loadingUsers.value = false
+  }
+}
+
+function handleAddUser() {
+  isEditing.value = false
+  userDialogTitle.value = '新增用户'
+  currentUserId.value = ''
+  userForm.username = ''
+  userForm.password = ''
+  userForm.role = 'trader'
+  userDialogVisible.value = true
+}
+
+function handleEditUser(row: User) {
+  isEditing.value = true
+  userDialogTitle.value = '编辑用户'
+  currentUserId.value = row.user_id
+  userForm.username = row.username
+  userForm.password = ''
+  userForm.role = row.role
+  userDialogVisible.value = true
+}
+
+async function handleDeleteUser(row: User) {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除用户 "${row.username}" 吗？`,
+      '确认删除',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+    await userApi.deleteUser(row.user_id)
+    ElMessage.success('用户已删除')
+    await loadUsers()
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      ElMessage.error(`删除失败: ${error.message}`)
+    }
+  }
+}
+
+async function handleSaveUser() {
+  if (!userFormRef.value) return
+
+  try {
+    await userFormRef.value.validate()
+
+    if (isEditing.value) {
+      const data: UpdateUserRequest = {
+        username: userForm.username,
+        role: userForm.role
+      }
+      if (userForm.password) {
+        data.password = userForm.password
+      }
+      await userApi.updateUser(currentUserId.value, data)
+      ElMessage.success('用户已更新')
+    } else {
+      const data: CreateUserRequest = {
+        username: userForm.username,
+        password: userForm.password,
+        role: userForm.role
+      }
+      await userApi.createUser(data)
+      ElMessage.success('用户已创建')
+    }
+    userDialogVisible.value = false
+    await loadUsers()
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      ElMessage.error(`保存失败: ${error.message}`)
+    }
+  }
+}
+
+function getRoleTagType(role: string): '' | 'success' | 'warning' | 'danger' | 'info' {
+  switch (role) {
+    case 'admin':
+      return 'danger'
+    case 'trader':
+      return 'success'
+    case 'guest':
+      return 'info'
+    default:
+      return 'info'
+  }
+}
+
+function getRoleLabel(role: string): string {
+  switch (role) {
+    case 'admin':
+      return '管理员'
+    case 'trader':
+      return '交易员'
+    case 'guest':
+      return '访客'
+    default:
+      return role
+  }
+}
+
 onMounted(() => {
   loadAlertConfig()
   loadTradersStatus()
   loadJobs()
+  loadUsers()
 })
 </script>
 

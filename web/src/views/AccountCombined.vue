@@ -3,697 +3,77 @@
     <el-tabs v-model="activeTab" class="account-tabs">
       <!-- 账户详情 Tab -->
       <el-tab-pane label="账户详情" name="detail">
-        <el-card shadow="hover" v-if="store.currentAccount">
-          <template #header>
-            <div class="card-header">
-              <span>账户信息</span>
-              <div>
-                <el-button type="primary" @click="loadAccountData" :loading="loading">
-                  <el-icon><Refresh /></el-icon>
-                  刷新
-                </el-button>
-              </div>
-            </div>
-          </template>
-
-          <el-descriptions :column="descColumn" border>
-            <el-descriptions-item label="用户ID">{{ store.currentAccount.user_id || '-'}}</el-descriptions-item>
-            <el-descriptions-item label="经纪商">
-              {{ store.currentAccount.broker_name || '-' }}
-              <el-tag v-if="store.currentAccount.broker_type" size="small" style="margin-left: 8px">
-                {{ getBrokerTypeName(store.currentAccount.broker_type) }}
-              </el-tag>
-            </el-descriptions-item>
-            <el-descriptions-item label="总资产">
-              <span class="balance">¥{{ formatNumber(store.currentAccount.balance) }}</span>
-            </el-descriptions-item>
-            <el-descriptions-item label="静态权益">
-              <span class="available">¥{{ formatNumber(store.currentAccount.static_balance) }}</span>
-            </el-descriptions-item>
-
-            <el-descriptions-item label="持仓盈亏">
-              <span :class="store.currentAccount.position_profit >= 0 ? 'profit' : 'loss'">
-                ¥{{ formatNumber(store.currentAccount.position_profit) }}
-              </span>
-            </el-descriptions-item>
-            <el-descriptions-item label="平仓盈亏">
-              <span :class="store.currentAccount.close_profit >= 0 ? 'profit' : 'loss'">
-                ¥{{ formatNumber(store.currentAccount.close_profit) }}
-              </span>
-            </el-descriptions-item>
-            <el-descriptions-item label="保证金占用">
-              ¥{{ formatNumber(store.currentAccount.margin) }}
-               <el-tag :type="store.currentAccount.risk_ratio > 1 ? 'danger' : 'success'">
-                {{ formatNumber(store.currentAccount.risk_ratio*100) }}%
-              </el-tag>
-            </el-descriptions-item>
-            <el-descriptions-item label="更新时间">{{ formatDateTime(store.currentAccount.updated_at) }}</el-descriptions-item>
-          </el-descriptions>
-        </el-card>
-
-        <el-card shadow="hover" style="margin-top: 20px;">
-          <template #header>
-            <div class="card-header">
-              <span>持仓列表</span>
-              <el-button @click="loadPositionData" :loading="loading">
-                <el-icon><Refresh /></el-icon>
-                刷新
-              </el-button>
-            </div>
-          </template>
-
-          <div class="table-wrapper">
-            <el-table
-              :data="store.currentPositions"
-              stripe
-              v-loading="loading"
-              table-layout="fixed"
-            >
-              <template #empty>
-                <el-empty description="暂无持仓" />
-              </template>
-              <el-table-column prop="symbol" label="合约" width="150" fixed>
-                <template #default="{ row }">
-                  {{ row.symbol }}
-                </template>
-              </el-table-column>
-              <el-table-column label="多头持仓" width="100">
-                <template #default="{ row }">
-                  <span v-if="row.pos_long > 0" class="long">{{ row.pos_long }}</span>
-                  <span v-else>-</span>
-                </template>
-              </el-table-column>
-              <el-table-column label="空头持仓" width="100">
-                <template #default="{ row }">
-                  <span v-if="row.pos_short > 0" class="short">{{ row.pos_short }}</span>
-                  <span v-else>-</span>
-                </template>
-              </el-table-column>
-              <el-table-column label="多头均价" width="110">
-                <template #default="{ row }">
-                  {{ row.pos_long > 0 ? formatNumber(row.hold_price_long) : '-' }}
-                </template>
-              </el-table-column>
-              <el-table-column label="空头均价" width="110">
-                <template #default="{ row }">
-                  {{ row.pos_short > 0 ? formatNumber(row.hold_price_short) : '-' }}
-                </template>
-              </el-table-column>
-              <el-table-column label="保证金" width="110">
-                <template #default="{ row }">
-                  ¥{{ formatNumber((row.margin_long || 0) + (row.margin_short || 0)) }}
-                </template>
-              </el-table-column>
-              <el-table-column label="持仓盈亏" width="130">
-                <template #default="{ row }">
-                  <span :class="(row.hold_profit_long || 0) + (row.hold_profit_short || 0) >= 0 ? 'profit' : 'loss'">
-                    ¥{{ formatNumber((row.hold_profit_long || 0) + (row.hold_profit_short || 0)) }}
-                  </span>
-                </template>
-              </el-table-column>
-              <el-table-column label="平仓盈亏" width="130">
-                <template #default="{ row }">
-                  <span :class="(row.close_profit_long || 0) + (row.close_profit_short || 0) >= 0 ? 'profit' : 'loss'">
-                    ¥{{ formatNumber((row.close_profit_long || 0) + (row.close_profit_short || 0)) }}
-                  </span>
-                </template>
-              </el-table-column>
-              <el-table-column prop="updated_at" label="更新时间" width="180">
-                <template #default="{ row }">
-                  {{ formatDateTime(row.updated_at) }}
-                </template>
-              </el-table-column>
-              <el-table-column label="操作"  fixed="right">
-                <template #default="{ row }">
-                  <el-button
-                    type="danger"
-                    size="small"
-                    :disabled="row.pos_long <= 0"
-                    @click="handleClosePosition(row, 'SELL')"
-                  >
-                    平多
-                  </el-button>
-                  <el-button
-                    type="primary"
-                    size="small"
-                    :disabled="row.pos_short <= 0"
-                    @click="handleClosePosition(row, 'BUY')"
-                  >
-                    平空
-                  </el-button>
-                </template>
-              </el-table-column>
-            </el-table>
-          </div>
-        </el-card>
+        <AccountDetailTab
+          :loading="loading"
+          @refresh="loadAccountData"
+          @refresh-positions="loadPositionData"
+          @close-position="handleClosePosition"
+        />
       </el-tab-pane>
 
       <!-- 交易 Tab -->
       <el-tab-pane label="账户交易" name="trading">
-        <el-row :gutter="20">
-          <el-col :xs="24" :lg="6">
-            <el-card shadow="hover" class="quote-card">
-              <template #header>
-                <div class="card-header">
-                  <span>行情订阅</span>
-                  <el-space>
-                    <el-button @click="loadQuotes" :loading="loading">
-                      <el-icon><Refresh /></el-icon>
-                      刷新
-                    </el-button>
-                    <el-button type="primary" @click="showSubscribeDialog = true">
-                      <el-icon><Plus /></el-icon>
-                      订阅
-                    </el-button>
-                  </el-space>
-                </div>
-              </template>
-
-              <div class="table-wrapper">
-                <el-table
-                  :data="quotes"
-                  stripe
-                  v-loading="loading"
-                  table-layout="fixed"
-                  row-key="symbol"
-                  :default-sort="{ prop: 'symbol', order: 'ascending' }"
-                >
-                  <template #empty>
-                    <el-empty description="暂无订阅行情" />
-                  </template>
-                  <el-table-column prop="symbol" label="合约" width="80" :sortable="true">
-                     <template #default="{ row }">
-                      {{ row.symbol}}
-                    </template>
-                  </el-table-column>
-
-                  <el-table-column prop="last_price" label="最新价" width="90">
-                    <template #default="{ row }">
-                      {{ formatNumber(row.last_price) }}
-                    </template>
-                  </el-table-column>
-                  <el-table-column prop="bid_price1" label="买一价" width="90">
-                    <template #default="{ row }">
-                      {{ formatNumber(row.bid_price1) }}
-                    </template>
-                  </el-table-column>
-                  <el-table-column prop="ask_price1" label="卖一价" width="90">
-                    <template #default="{ row }">
-                      {{ formatNumber(row.ask_price1) }}
-                    </template>
-                  </el-table-column>
-                  <el-table-column prop="datetime" label="时间" :sortable="true">
-                    <template #default="{ row }">
-                      {{ formatTime(row.datetime) }}
-                    </template>
-                  </el-table-column>
-                </el-table>
-              </div>
-            </el-card>
-          </el-col>
-
-          <el-col :xs="24" :lg="18">
-            <el-card shadow="hover" class="order-card">
-              <template #header>
-                <div class="card-header">
-                  <el-tabs v-model="orderTab" type="card">
-                    <el-tab-pane label="挂单" name="PENDING" />
-                    <el-tab-pane label="已成交" name="FINISHED" />
-                    <el-tab-pane label="废单" name="ERROR" />
-                  </el-tabs>
-                  <el-space>
-                    <el-button type="primary" @click="showOrderInputDialog = true">
-                      <el-icon><Plus /></el-icon>
-                      报单
-                    </el-button>
-                    <el-button @click="loadOrderData" :loading="loading">
-                      <el-icon><Refresh /></el-icon>
-                      刷新
-                    </el-button>
-                  </el-space>
-                </div>
-              </template>
-
-              <div class="table-wrapper">
-                <el-table
-                  :data="store.currentOrders"
-                  stripe
-                  v-loading="loading"
-                  table-layout="fixed"
-                  @selection-change="handleOrderSelectionChange"
-                >
-                  <template #empty>
-                    <el-empty description="暂无委托单" />
-                  </template>
-                  <el-table-column prop="order_id" label="委托单ID" width="180" show-overflow-tooltip />
-                  <el-table-column prop="symbol" label="合约" width="120" />
-                  <el-table-column prop="direction" label="方向" width="80">
-                    <template #default="{ row }">
-                      <el-tag :type="row.direction === 'BUY' ? 'success' : 'danger'" size="small">
-                        {{ row.direction === 'BUY' ? '买' : '卖' }}
-                      </el-tag>
-                    </template>
-                  </el-table-column>
-                  <el-table-column prop="offset" label="开平" width="80" />
-                  <el-table-column prop="volume_orign" label="报单手数" width="100" />
-                  <el-table-column prop="volume_left" label="剩余手数" width="100" />
-                  <el-table-column prop="limit_price" label="限价" width="100">
-                    <template #default="{ row }">
-                      {{ row.limit_price ? formatNumber(row.limit_price) : '市价' }}
-                    </template>
-                  </el-table-column>
-                  <el-table-column prop="status" label="状态" width="100">
-                    <template #default="{ row }">
-                      <el-tag :type="getStatusType(row.status)" size="small">
-                        {{ getStatusText(row.status) }}
-                      </el-tag>
-                    </template>
-                  </el-table-column>
-                  <el-table-column prop="last_msg" label="最后消息" width="200" show-overflow-tooltip />
-                  <el-table-column prop="updated_at" label="报单时间">
-                    <template #default="{ row }">
-                      {{ formatDateTime(row.insert_date_time) }}
-                    </template>
-                  </el-table-column>
-                  <el-table-column
-                    v-if="orderTab === 'PENDING'"
-                    label="操作"
-                    width="100"
-                    fixed="right"
-                  >
-                    <template #default="{ row }">
-                      <el-button
-                        type="danger"
-                        size="small"
-                        @click="handleCancel(row.order_id)"
-                      >
-                        撤单
-                      </el-button>
-                    </template>
-                  </el-table-column>
-                </el-table>
-              </div>
-            </el-card>
-          </el-col>
-        </el-row>
+        <AccountTradingTab
+          :loading="loading"
+          :quotes="quotes"
+          :orders="store.currentOrders"
+          v-model:order-tab="orderTab"
+          @refresh-quotes="loadQuotes"
+          @show-subscribe="showSubscribeDialog = true"
+          @refresh-orders="loadOrderData"
+          @show-order="showOrderInputDialog = true"
+          @cancel-order="handleCancel"
+          @order-selection-change="handleOrderSelectionChange"
+        />
       </el-tab-pane>
 
       <!-- 成交记录 Tab -->
       <el-tab-pane label="成交记录" name="trade">
-        <el-card shadow="hover">
-          <template #header>
-            <div class="card-header">
-              <span>成交记录</span>
-              <el-space>
-                <el-date-picker
-                  v-model="tradeDateFilter"
-                  type="date"
-                  placeholder="选择日期"
-                  format="YYYY-MM-DD"
-                  value-format="YYYY-MM-DD"
-                  clearable
-                />
-                <el-button type="primary" @click="loadTradeData" :loading="loading">
-                  <el-icon><Refresh /></el-icon>
-                  刷新
-                </el-button>
-              </el-space>
-            </div>
-          </template>
-
-          <div class="table-wrapper">
-            <el-table :data="sortedTrades" stripe v-loading="loading">
-              <template #empty>
-                <el-empty description="暂无成交记录" />
-              </template>
-              <el-table-column prop="trade_id" label="成交ID" width="180" show-overflow-tooltip />
-              <el-table-column prop="symbol" label="合约" width="120" />
-              <el-table-column prop="direction" label="方向" width="80">
-                <template #default="{ row }">
-                  <el-tag :type="row.direction === 'BUY' ? 'success' : 'danger'" size="small">
-                    {{ row.direction === 'BUY' ? '买' : '卖' }}
-                  </el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column prop="offset" label="开平" width="80" />
-              <el-table-column prop="price" label="成交价" width="100">
-                <template #default="{ row }">
-                  {{ formatNumber(row.price) }}
-                </template>
-              </el-table-column>
-              <el-table-column prop="volume" label="手数" width="80" />
-              <el-table-column prop="order_id" label="委托单ID" width="180" show-overflow-tooltip />
-              <el-table-column prop="created_at" label="成交时间">
-                <template #default="{ row }">
-                  {{ formatDateTime(row.trade_date_time) }}
-                </template>
-              </el-table-column>
-            </el-table>
-          </div>
-        </el-card>
+        <AccountTradeTab
+          :loading="loading"
+          :trades="store.currentTrades"
+          v-model:date-filter="tradeDateFilter"
+          @refresh="loadTradeData"
+        />
       </el-tab-pane>
 
       <!-- 报单指令 Tab -->
       <el-tab-pane label="报单指令" name="order-cmd">
-        <el-card shadow="hover">
-          <template #header>
-            <div class="card-header">
-              <span>报单指令</span>
-              <el-space>
-                <el-radio-group v-model="orderCmdStatus" >
-                  <el-radio-button label="active">未完成</el-radio-button>
-                  <el-radio-button label="finished">已完成</el-radio-button>
-                </el-radio-group>
-                <el-button type="primary" @click="loadOrderCmdData" :loading="loading">
-                  <el-icon><Refresh /></el-icon>
-                  刷新
-                </el-button>
-              </el-space>
-            </div>
-          </template>
-
-          <div class="table-wrapper">
-            <el-table :data="sortedOrderCmds" stripe v-loading="loading">
-              <template #empty>
-                <el-empty description="暂无报单指令" />
-              </template>
-              <el-table-column prop="cmd_id" label="指令ID" width="180" show-overflow-tooltip />
-              <el-table-column prop="source" label="来源" width="150" show-overflow-tooltip>
-                <template #default="{ row }">
-                  {{ row.source || '-' }}
-                </template>
-              </el-table-column>
-              <el-table-column prop="symbol" label="合约" width="120" />
-              <el-table-column prop="status" label="状态" width="100">
-                <template #default="{ row }">
-                  <el-tag :type="getOrderCmdStatusType(row.status)" size="small">
-                    {{ row.status }}
-                  </el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column prop="volume" label="总手数" width="100" />
-              <el-table-column prop="filled_volume" label="已成交手数" width="120" />
-              <el-table-column prop="limit_price" label="限价" width="100">
-                <template #default="{ row }">
-                  {{ row.limit_price ? formatNumber(row.limit_price) : '市价' }}
-                </template>
-              </el-table-column>
-              <el-table-column prop="direction" label="方向" width="80">
-                <template #default="{ row }">
-                  <el-tag :type="row.direction === 'BUY' ? 'success' : 'danger'" size="small" v-if="row.direction">
-                    {{ row.direction === 'BUY' ? '买' : '卖' }}
-                  </el-tag>
-                  <span v-else>-</span>
-                </template>
-              </el-table-column>
-              <el-table-column prop="offset" label="开平" width="80">
-                <template #default="{ row }">
-                  {{ row.offset || '-' }}
-                </template>
-              </el-table-column>
-              <el-table-column prop="started_at" label="开始时间" width="180">
-                <template #default="{ row }">
-                  {{ formatDateTime(row.started_at) }}
-                </template>
-              </el-table-column>
-              <el-table-column prop="finished_at" label="结束时间" width="180">
-                <template #default="{ row }">
-                  {{ formatDateTime(row.finished_at) }}
-                </template>
-              </el-table-column>
-              <el-table-column prop="total_orders" label="总报单数" width="100" />
-              <el-table-column prop="finish_reason" label="结束原因" width="180" show-overflow-tooltip />
-              <el-table-column
-                v-if="orderCmdStatus === 'active'"
-                label="操作"
-                width="100"
-                fixed="right"
-              >
-                <template #default="{ row }">
-                  <el-button
-                    type="danger"
-                    size="small"
-                    @click="handleCancelOrderCmd(row.cmd_id)"
-                    :loading="cancellingCmdId === row.cmd_id"
-                  >
-                    取消
-                  </el-button>
-                </template>
-              </el-table-column>
-            </el-table>
-          </div>
-        </el-card>
+        <AccountOrderCmdTab
+          :loading="loading"
+          :order-cmds="orderCmds"
+          v-model:status="orderCmdStatus"
+          :cancelling-cmd-id="cancellingCmdId"
+          @refresh="loadOrderCmdData"
+          @cancel-order-cmd="handleCancelOrderCmd"
+        />
       </el-tab-pane>
 
       <!-- 合约信息 Tab -->
       <el-tab-pane label="合约信息" name="contract">
-        <el-card shadow="hover">
-          <template #header>
-            <div class="card-header">
-              <span>合约信息</span>
-              <el-space>
-                <el-select v-model="contractFilter.exchange_id" placeholder="交易所" clearable style="width: 120px" @change="loadContracts">
-                  <el-option label="全部" value="" />
-                  <el-option v-for="ex in exchanges" :key="ex.exchange_id" :label="`${ex.exchange_id} (${ex.contract_count})`" :value="ex.exchange_id" />
-                </el-select>
-                <el-input v-model="contractFilter.symbol_keyword" placeholder="合约代码" clearable style="width: 150px" @keyup.enter="loadContracts" />
-                <el-button type="primary" @click="loadContracts" :loading="loading">
-                  <el-icon><Refresh /></el-icon>
-                  刷新
-                </el-button>
-                <el-button type="warning" @click="handleRefreshContracts" :loading="refreshingContracts">
-                  <el-icon><Download /></el-icon>
-                  强制同步
-                </el-button>
-              </el-space>
-            </div>
-          </template>
-
-          <div class="table-wrapper">
-            <el-table :data="contracts" stripe v-loading="loading">
-              <template #empty>
-                <el-empty description="暂无合约信息" />
-              </template>
-              <el-table-column prop="symbol" label="合约代码" width="120" fixed />
-              <el-table-column prop="name" label="合约名称" width="200" show-overflow-tooltip />
-              <el-table-column prop="exchange_id" label="交易所" width="100">
-                <template #default="{ row }">
-                  <el-tag size="small">{{ row.exchange_id }}</el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column prop="product_type" label="类型" width="80" />
-              <el-table-column prop="volume_multiple" label="合约乘数" width="100" align="right" />
-              <el-table-column prop="price_tick" label="最小变动价位" width="120" align="right">
-                <template #default="{ row }">
-                  {{ formatNumber(row.price_tick) }}
-                </template>
-              </el-table-column>
-              <el-table-column prop="min_volume" label="最小手数" width="100" align="right" />
-              <el-table-column prop="option_strike" label="行权价" width="100" align="right">
-                <template #default="{ row }">
-                  {{ row.option_strike ? formatNumber(row.option_strike) : '-' }}
-                </template>
-              </el-table-column>
-              <el-table-column prop="option_underlying" label="标的合约" width="120">
-                <template #default="{ row }">
-                  {{ row.option_underlying || '-' }}
-                </template>
-              </el-table-column>
-              <el-table-column prop="update_date" label="更新日期" />
-            </el-table>
-          </div>
-        </el-card>
+        <AccountContractTab
+          :loading="loading"
+          :contracts="contracts"
+          :exchanges="exchanges"
+          :refreshing="refreshingContracts"
+          v-model:filter="contractFilter"
+          @refresh="loadContracts"
+          @refresh-contracts="handleRefreshContracts"
+        />
       </el-tab-pane>
 
       <!-- 设置 Tab -->
       <el-tab-pane label="账户设置" name="setting">
-        <el-row :gutter="20">
-          <!-- 系统状态 -->
-          <el-col :span="24">
-            <el-card shadow="hover">
-              <template #header>
-                <div class="card-header">
-                  <span>系统控制</span>
-                </div>
-              </template>
-
-              <el-descriptions :column="descColumn" border>
-                <el-descriptions-item label="连接状态">
-                  <el-tag :type="getAccountStatusType(store.currentAccount)" size="large">
-                    {{ getAccountStatusText(store.currentAccount) }}
-                  </el-tag>
-                </el-descriptions-item>
-                <el-descriptions-item label="交易状态">
-                  <el-tag
-                    v-if="store.currentAccount?.status === 'connected'"
-                    :type="store.currentAccount?.trade_paused ? 'warning' : 'success'"
-                    size="large"
-                  >
-                    {{ store.currentAccount?.trade_paused ? '已暂停' : '正常' }}
-                  </el-tag>
-                  <span v-else>-</span>
-                </el-descriptions-item>
-                <el-descriptions-item label="今日报单">
-                  {{ currentRiskStatus.daily_order_count }} 次
-                </el-descriptions-item>
-                <el-descriptions-item label="今日撤单">
-                  {{ currentRiskStatus.daily_cancel_count }} 次
-                </el-descriptions-item>
-              </el-descriptions>
-            </el-card>
-          </el-col>
-        </el-row>
-
-        <el-row :gutter="20" class="mt-4">
-          <!-- 风控参数配置 -->
-          <el-col :span="24">
-            <el-card shadow="hover">
-              <template #header>
-                <div class="card-header">
-                  <span>风控参数配置</span>
-                </div>
-              </template>
-
-              <el-form :model="riskForm" label-width="140px">
-                <el-row :gutter="20">
-                  <el-col :xs="24" :sm="12">
-                    <el-form-item label="单日最大报单次数">
-                      <el-input-number
-                        v-model="riskForm.max_daily_orders"
-                        :min="0"
-                        :disabled="updatingRisk"
-                      />
-                      <span class="ml-2">今日: {{ currentRiskStatus.daily_order_count }} / {{ currentRiskStatus.max_daily_orders }}</span>
-                    </el-form-item>
-                  </el-col>
-                  <el-col :xs="24" :sm="12">
-                    <el-form-item label="单日最大撤单次数">
-                      <el-input-number
-                        v-model="riskForm.max_daily_cancels"
-                        :min="0"
-                        :disabled="updatingRisk"
-                      />
-                      <span class="ml-2">今日: {{ currentRiskStatus.daily_cancel_count }} / {{ currentRiskStatus.max_daily_cancels }}</span>
-                    </el-form-item>
-                  </el-col>
-                </el-row>
-                <el-row :gutter="20">
-                  <el-col :xs="24" :sm="12">
-                    <el-form-item label="单笔最大报单手数">
-                      <el-input-number
-                        v-model="riskForm.max_order_volume"
-                        :min="1"
-                        :disabled="updatingRisk"
-                      />
-                    </el-form-item>
-                  </el-col>
-                  <el-col :xs="24" :sm="12">
-                    <el-form-item label="单笔最大拆单手数">
-                      <el-input-number
-                        v-model="riskForm.max_split_volume"
-                        :min="1"
-                        :disabled="updatingRisk"
-                      />
-                    </el-form-item>
-                  </el-col>
-                </el-row>
-                <el-row :gutter="20">
-                  <el-col :xs="24" :sm="12">
-                    <el-form-item label="报单超时时间（秒）">
-                      <el-input-number
-                        v-model="riskForm.order_timeout"
-                        :min="1"
-                        :disabled="updatingRisk"
-                      />
-                    </el-form-item>
-                  </el-col>
-                </el-row>
-                <el-form-item>
-                  <el-button
-                    type="primary"
-                    @click="updateRiskControl"
-                    :loading="updatingRisk"
-                  >
-                    保存配置
-                  </el-button>
-                </el-form-item>
-              </el-form>
-            </el-card>
-          </el-col>
-        </el-row>
-
-        <el-row :gutter="20" class="mt-4">
-          <!-- 定时任务列表（独占一行） -->
-          <el-col :span="24">
-            <el-card shadow="hover">
-              <template #header>
-                <div class="card-header">
-                  <span>定时任务列表</span>
-                  <el-button @click="loadTasks" :loading="loadingTasks">
-                    <el-icon><Refresh /></el-icon>
-                    刷新
-                  </el-button>
-                </div>
-              </template>
-
-              <div class="table-wrapper">
-                <el-table :data="tasks" stripe v-loading="loadingTasks" table-layout="fixed">
-                  <template #empty>
-                    <el-empty description="暂无定时任务" />
-                  </template>
-                  <el-table-column prop="job_name" label="任务名称" min-width="200" />
-                  <el-table-column prop="job_group" label="分组" width="120" />
-                  <el-table-column prop="job_description" label="描述" min-width="200" show-overflow-tooltip />
-                  <el-table-column prop="cron_expression" label="Cron表达式" width="150" />
-                  <el-table-column label="上次触发时间" width="180">
-                    <template #default="{ row }">
-                      {{ row.last_trigger_time ? formatDateTime(row.last_trigger_time) : '-' }}
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="状态" width="100">
-                    <template #default="{ row }">
-                      <el-tag :type="row.enabled ? 'success' : 'info'" size="small">
-                        {{ row.enabled ? '就绪' : '暂停' }}
-                      </el-tag>
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="操作" width="200" fixed="right">
-                    <template #default="{ row }">
-                      <el-space>
-                        <el-button
-                          v-if="row.enabled"
-                          type="warning"
-                          size="small"
-                          @click="handleOperateJob(row, 'pause')"
-                          :loading="operatingJob === `${row.job_id}_pause`"
-                        >
-                          暂停
-                        </el-button>
-                        <el-button
-                          v-else
-                          type="success"
-                          size="small"
-                          @click="handleOperateJob(row, 'resume')"
-                          :loading="operatingJob === `${row.job_id}_resume`"
-                        >
-                          恢复
-                        </el-button>
-                        <el-button
-                          type="primary"
-                          size="small"
-                          @click="handleOperateJob(row, 'trigger')"
-                          :loading="operatingJob === `${row.job_id}_trigger`"
-                        >
-                          立即触发
-                        </el-button>
-                      </el-space>
-                    </template>
-                  </el-table-column>
-                </el-table>
-              </div>
-            </el-card>
-          </el-col>
-        </el-row>
+        <AccountSettingTab
+          :loading-tasks="loadingTasks"
+          :operating-job="operatingJob"
+          :tasks="tasks"
+          :updating="updatingRisk"
+          v-model:risk-form="riskForm"
+          @refresh-tasks="loadTasks"
+          @operate-job="handleOperateJob"
+          @update-risk-control="updateRiskControl"
+        />
       </el-tab-pane>
     </el-tabs>
 
@@ -846,23 +226,28 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, watch, onMounted, onUnmounted, computed } from 'vue'
+import { ref, reactive, watch, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useStore } from '@/stores'
 import { positionApi, orderApi, quoteApi, orderCmdApi, contractApi, systemApi, jobsApi } from '@/api'
 import wsManager from '@/ws'
-import type { Position, ManualOrderRequest, Order, Quote, OrderCmd, ContractInfo, ExchangeInfo, Job, RiskControlStatus, Account } from '@/types'
+import AccountDetailTab from './account/AccountDetailTab.vue'
+import AccountTradingTab from './account/AccountTradingTab.vue'
+import AccountTradeTab from './account/AccountTradeTab.vue'
+import AccountOrderCmdTab from './account/AccountOrderCmdTab.vue'
+import AccountContractTab from './account/AccountContractTab.vue'
+import AccountSettingTab from './account/AccountSettingTab.vue'
+import type { Position, ManualOrderRequest, Order, Quote, OrderCmd, ContractInfo, ExchangeInfo, Job } from '@/types'
 
 const store = useStore()
 const loading = ref(false)
 const creating = ref(false)
 const subscribing = ref(false)
 const cancelling = ref(false)
-const descColumn = ref(2)
 
 // Tab 相关
 const activeTab = ref('detail')
-const orderTab = ref('PENDING')
+const orderTab = ref<'PENDING' | 'FINISHED' | 'ERROR'>('PENDING')
 
 // 账户详情相关
 const showCloseDialog = ref(false)
@@ -898,7 +283,6 @@ const exchanges = ref<ExchangeInfo[]>([])
 const refreshingContracts = ref(false)
 const contractFilter = reactive({
   exchange_id: '',
-  product_type: '',
   symbol_keyword: ''
 })
 
@@ -936,21 +320,6 @@ const statusMap: Record<string, string> = {
   'ERROR': 'REJECTED'
 }
 
-// 设置页面 - 风控状态
-const currentRiskStatus = computed<RiskControlStatus>(() => {
-  return store.currentAccount?.risk_status || {
-    daily_order_count: 0,
-    daily_cancel_count: 0,
-    max_daily_orders: 100,
-    max_daily_cancels: 50,
-    max_order_volume: 50,
-    max_split_volume: 5,
-    order_timeout: 5,
-    remaining_orders: 100,
-    remaining_cancels: 50
-  }
-})
-
 const riskForm = reactive({
   max_daily_orders: 100,
   max_daily_cancels: 50,
@@ -958,11 +327,6 @@ const riskForm = reactive({
   max_split_volume: 5,
   order_timeout: 5
 })
-
-// 响应式列数
-function updateDescColumn() {
-  descColumn.value = window.innerWidth <= 768 ? 1 : 2
-}
 
 // ========== 账户详情方法 ==========
 async function loadAccountData() {
@@ -1151,26 +515,6 @@ async function loadTradeData() {
   }
 }
 
-// 按时间倒序排序的成交记录
-const sortedTrades = computed(() => {
-  if (!store.currentTrades || store.currentTrades.length === 0) return []
-  return [...store.currentTrades].sort((a, b) => {
-    let timeA = 0
-    let timeB = 0
-    if (typeof a.trade_date_time === 'number') {
-      timeA = a.trade_date_time
-    } else if (typeof a.trade_date_time === 'string') {
-      timeA = new Date(a.trade_date_time).getTime() / 1000
-    }
-    if (typeof b.trade_date_time === 'number') {
-      timeB = b.trade_date_time
-    } else if (typeof b.trade_date_time === 'string') {
-      timeB = new Date(b.trade_date_time).getTime() / 1000
-    }
-    return timeB - timeA
-  })
-})
-
 // ========== 报单指令方法 ==========
 async function loadOrderCmdData() {
   loading.value = true
@@ -1183,16 +527,6 @@ async function loadOrderCmdData() {
     loading.value = false
   }
 }
-
-// 按开始时间倒序排序的报单指令
-const sortedOrderCmds = computed(() => {
-  if (!orderCmds.value || orderCmds.value.length === 0) return []
-  return [...orderCmds.value].sort((a, b) => {
-    const timeA = a.started_at ? new Date(a.started_at).getTime() : 0
-    const timeB = b.started_at ? new Date(b.started_at).getTime() : 0
-    return timeB - timeA
-  })
-})
 
 async function handleCancelOrderCmd(cmdId: string) {
   try {
@@ -1218,19 +552,6 @@ async function handleCancelOrderCmd(cmdId: string) {
     ElMessage.error(`取消指令失败: ${error.message}`)
   } finally {
     cancellingCmdId.value = null
-  }
-}
-
-function getOrderCmdStatusType(status: string): string {
-  switch (status) {
-    case 'RUNNING':
-      return 'success'
-    case 'FINISHED':
-      return 'info'
-    case 'CANCELED':
-      return 'warning'
-    default:
-      return 'info'
   }
 }
 
@@ -1288,32 +609,6 @@ async function handleRefreshContracts() {
 }
 
 // ========== 设置方法 ==========
-function getAccountStatusType(account: Account | null): string {
-  if (!account) return 'info'
-  switch (account.status) {
-    case 'connected':
-      return 'success'
-    case 'connecting':
-      return 'warning'
-    case 'stopped':
-    default:
-      return 'info'
-  }
-}
-
-function getAccountStatusText(account: Account | null): string {
-  if (!account) return '未连接'
-  switch (account.status) {
-    case 'connected':
-      return '已连接'
-    case 'connecting':
-      return '连接中'
-    case 'stopped':
-    default:
-      return '已停止'
-  }
-}
-
 async function updateRiskControl() {
   updatingRisk.value = true
   try {
@@ -1379,61 +674,6 @@ function formatNumber(num: number | null | undefined): string {
   return num.toFixed(2)
 }
 
-function formatDateTime(datetime: string | number | null | undefined): string {
-  if (!datetime) return '-'
-  const date = typeof datetime === 'number'
-    ? new Date(datetime * 1000)
-    : new Date(datetime)
-  return date.toLocaleString('zh-CN')
-}
-
-function formatTime(datetime: string | number): string {
-  const date = typeof datetime === 'string'
-    ? new Date(datetime)
-    : new Date(datetime * 1000)
-  return date.toTimeString().slice(0, 8)
-}
-
-function getBrokerTypeName(type: string | null): string {
-  const typeMap: Record<string, string> = {
-    'tq': '天勤',
-    'sim': '模拟',
-    'kq': '快期',
-    'ctp': 'CTP',
-  }
-  return typeMap[type || ''] || type || ''
-}
-
-function getStatusType(status: string): string {
-  switch (status) {
-    case 'ALIVE':
-      return 'warning'
-    case 'FINISHED':
-      return 'success'
-    case 'CANCELED':
-      return 'info'
-    case 'REJECTED':
-      return 'danger'
-    default:
-      return 'info'
-  }
-}
-
-function getStatusText(status: string): string {
-  switch (status) {
-    case 'ALIVE':
-      return '挂单中'
-    case 'FINISHED':
-      return '已成交'
-    case 'CANCELED':
-      return '已撤单'
-    case 'REJECTED':
-      return '废单'
-    default:
-      return status
-  }
-}
-
 // ========== 监听 ==========
 watch(activeTab, (newTab) => {
   if (newTab === 'detail') {
@@ -1450,24 +690,6 @@ watch(activeTab, (newTab) => {
     loadContracts()
   } else if (newTab === 'setting') {
     loadTasks()
-  }
-})
-
-watch(orderTab, () => {
-  if (activeTab.value === 'trading') {
-    loadOrderData()
-  }
-})
-
-watch(orderCmdStatus, () => {
-  if (activeTab.value === 'order-cmd') {
-    loadOrderCmdData()
-  }
-})
-
-watch(tradeDateFilter, () => {
-  if (activeTab.value === 'trade') {
-    loadTradeData()
   }
 })
 
@@ -1492,9 +714,6 @@ watch(() => store.selectedAccountId, (newId) => {
 })
 
 onMounted(async () => {
-  updateDescColumn()
-  window.addEventListener('resize', updateDescColumn)
-
   // 初始加载
   if (activeTab.value === 'detail') {
     await loadAccountData()
@@ -1516,7 +735,6 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  window.removeEventListener('resize', updateDescColumn)
   wsManager.onTickUpdate(handleTickUpdate)()
 })
 </script>
@@ -1533,61 +751,5 @@ onUnmounted(() => {
 
 .account-tabs :deep(.el-tabs__content) {
   overflow-x: auto;
-}
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.table-wrapper {
-  width: 100%;
-  overflow-x: auto;
-}
-
-.table-wrapper .el-table {
-  min-width: 600px;
-}
-
-.balance,
-.available {
-  font-size: 18px;
-  font-weight: 600;
-}
-
-.profit {
-  color: #67c23a;
-  font-weight: 600;
-}
-
-.loss {
-  color: #f56c6c;
-  font-weight: 600;
-}
-
-.long {
-  color: #67c23a;
-  font-weight: 600;
-}
-
-.short {
-  color: #f56c6c;
-  font-weight: 600;
-}
-
-.quote-card,
-.order-card {
-  margin-bottom: 12px;
-}
-
-.mt-4 {
-  margin-top: 20px;
-}
-
-.ml-2 {
-  margin-left: 8px;
 }
 </style>

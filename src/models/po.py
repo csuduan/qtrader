@@ -124,8 +124,8 @@ class TradePo(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     account_id = Column(String(50), ForeignKey("accounts.account_id"), nullable=False, index=True)
-    trade_id = Column(String(50), unique=True, nullable=False, index=True)
-    order_id = Column(String(50), nullable=True, index=True)
+    trade_id = Column(String(100), unique=True, nullable=False, index=True)
+    order_id = Column(String(100), nullable=True, index=True)
     symbol = Column(String(80), nullable=False, index=True)
     direction = Column(String(10), nullable=False)
     offset = Column(String(20), nullable=False)
@@ -147,7 +147,7 @@ class OrderPo(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     account_id = Column(String(50), ForeignKey("accounts.account_id"), nullable=False, index=True)
-    order_id = Column(String(50), unique=True, nullable=False, index=True)
+    order_id = Column(String(100), unique=True, nullable=False, index=True)
     exchange_order_id = Column(String(50), nullable=True)
     symbol = Column(String(80), nullable=False, index=True)
     direction = Column(String(10), nullable=False)
