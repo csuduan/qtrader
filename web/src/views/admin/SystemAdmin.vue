@@ -593,19 +593,6 @@ async function handleStop(accountId: string) {
   }
 }
 
-async function handleRestart(accountId: string) {
-  actionLoading[accountId] = true
-  try {
-    await accountApi.restartTrader(accountId)
-    ElMessage.success(`账户 ${accountId} 已重启`)
-    await loadTradersStatus()
-  } catch (error: any) {
-    ElMessage.error(`重启失败: ${error.message}`)
-  } finally {
-    actionLoading[accountId] = false
-  }
-}
-
 // ==================== 定时任务列表（Manager级别） ====================
 const loadingJobs = ref(false)
 const jobList = ref<Job[]>([])
