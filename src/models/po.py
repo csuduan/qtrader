@@ -132,6 +132,8 @@ class TradePo(Base):
     price = Column(Numeric(20, 4), nullable=False)
     volume = Column(Integer, nullable=False)
     trade_date_time = Column(DateTime, nullable=False)
+    # 报单价格（用于计算滑点）
+    order_price = Column(Numeric(20, 4), nullable=True)
     created_at = Column(DateTime, default=datetime.now)
 
     account = relationship("AccountPo", back_populates="trades")

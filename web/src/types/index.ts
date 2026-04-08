@@ -63,6 +63,7 @@ export interface Trade {
   price: number
   volume: number
   trade_date_time: number | string  // Unix时间戳或ISO字符串
+  order_price: number | null  // 报单价格（用于计算滑点）
   created_at: string
 }
 
@@ -343,6 +344,7 @@ export interface TradeData {
   trading_day?: string
   trade_time?: string
   commission?: number
+  order_price?: number | null  // 报单价格（用于计算滑点）
   extras?: Record<string, any>
 }
 

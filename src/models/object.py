@@ -299,6 +299,9 @@ class TradeData(BaseModel):
     trade_time: Optional[DateTime] = Field(None, description="成交时间")
     commission: Optional[float] = Field(None, description="手续费")
 
+    # 报单价格（用于计算滑点）
+    order_price: Optional[float] = Field(None, description="报单价格")
+
     # 扩展字段
     extras: Dict[str, Any] = Field(default_factory=dict)
 

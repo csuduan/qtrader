@@ -429,6 +429,11 @@ class CtpGateway(BaseGateway):
 
     def on_trade(self, trade: TradeData) -> None:
         """处理成交回调"""
+        # 从订单缓存中获取报单价格（用于计算滑点）
+        order = self._orders.get(trade.order_id)
+        if order:
+            trade.order_price = order.price
+
         # 缓存成交数据
         self.add_trade(trade)
         self._push_to_queue(EventTypes.TRADE_UPDATE, trade)

@@ -168,6 +168,7 @@ class ManagerPersistence:
                     return
 
                 account_id = data.get("account_id") or data.get("extras", {}).get("account_id")
+                order_price = data.get("order_price")
                 trade_po = TradePo(
                     account_id=account_id,
                     trade_id=trade_id,
@@ -178,6 +179,7 @@ class ManagerPersistence:
                     price=Decimal(str(data.get("price", 0))),
                     volume=data.get("volume", 0),
                     trade_date_time=data.get("trade_time") or data.get("trade_date_time", 0),
+                    order_price=Decimal(str(order_price)) if order_price is not None else None,
                 )
 
                 session.add(trade_po)

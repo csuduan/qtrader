@@ -177,14 +177,6 @@
                   >
                     停止
                   </el-button>
-                  <el-button
-                    type="primary"
-                    size="small"
-                    @click="handleRestart(row.account_id)"
-                    :loading="actionLoading[row.account_id]"
-                  >
-                    重启
-                  </el-button>
                 </template>
               </el-table-column>
             </el-table>

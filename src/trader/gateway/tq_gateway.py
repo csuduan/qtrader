@@ -827,6 +827,11 @@ class TqGateway(BaseGateway):
 
     def _push_trade(self, trade_data: TradeData):
         """推送Trade数据到同步队列（非阻塞）"""
+        # 从挂单缓存中获取报单价格（用于计算滑点）
+        order = self._pending_orders.get(trade_data.order_id)
+        if order:
+            # TqSdk的Order对象有limit_price字段
+            trade_data.order_price = order.limit_price if hasattr(order, "limit_price") else None
         self._push_to_queue("trade", trade_data)
         logger.info(f"成交回报: {trade_data}")
 

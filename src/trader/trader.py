@@ -559,6 +559,7 @@ class Trader:
                     price=Decimal(str(data.price)) if hasattr(data, 'price') else Decimal("0"),
                     volume=data.volume if hasattr(data, 'volume') else 0,
                     trade_date_time=data.trade_time if hasattr(data, 'trade_time') else 0,
+                    order_price=Decimal(str(data.order_price)) if hasattr(data, 'order_price') and data.order_price is not None else None,
                 )
                 session.add(trade_po)
                 logger.debug(f"成交数据已持久化: {trade_id}")

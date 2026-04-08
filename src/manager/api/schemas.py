@@ -77,6 +77,7 @@ class TradeRes(BaseModel):
     price: float
     volume: int
     trade_date_time: datetime
+    order_price: Optional[float] = None  # 报单价格（用于计算滑点）
     created_at: datetime
 
     class Config:
