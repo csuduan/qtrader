@@ -99,6 +99,8 @@ class TraderProxy:
 
         # 启动 连接任务
         asyncio.create_task(self._connect_async())
+        # 启动定时全量同步任务
+        asyncio.create_task(self._periodic_sync_loop())
 
         logger.info(f"TraderProxy [{self.account_id}] 初始化完成，状态: STOPPED")
 
@@ -229,6 +231,7 @@ class TraderProxy:
             是否停止成功
         """
         self._manual_stop = True  # 标记为手动停止，健康检查不告警
+        self._running = False
         current_state = self._state
         logger.info(f"TraderProxy [{self.account_id}] 开始停止，当前状态: {current_state}")
 
@@ -877,6 +880,24 @@ class TraderProxy:
                 break
             except Exception as e:
                 logger.exception(f"WebSocket推送任务出错: {e}")
+
+    async def _periodic_sync_loop(self) -> None:
+        """定时从Trader同步全量数据（兜底机制）"""
+        self._sync_interval = 60.0
+        while self._running:
+            try:
+                await asyncio.sleep(self._sync_interval)
+                if not self.socket_client or not self.socket_client.is_connected():
+                    logger.debug(
+                        f"TraderProxy [{self.account_id}] 未连接，跳过本次定时同步"
+                    )
+                    continue
+                await self._sync_account_detail()
+                logger.info(f"TraderProxy [{self.account_id}] 定时全量同步完成")
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.exception(f"TraderProxy [{self.account_id}] 定时同步失败: {e}")
 
     def _calc_positions_from_cache(self) -> List[Dict]:
         """从内存缓存计算持仓盈亏（用最新Tick重新计算）"""
