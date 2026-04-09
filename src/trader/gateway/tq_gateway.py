@@ -270,7 +270,10 @@ class TqGateway(BaseGateway):
             # 订阅运行时的kline
             for symbol, interval in self.kline_subs:
                 self.subscribe_bars(symbol, interval)
-            
+
+            # 推送就绪通知（所有数据查询和订阅完成）
+            self._push_ready()
+
             logger.info("TqSdk开始轮询...")
             while self._running:
                 if self.api is None:
@@ -856,6 +859,11 @@ class TqGateway(BaseGateway):
         self._push_to_queue("order", order_data)
         logger.info(f"报单回报: {order_data}")
 
+    def _push_ready(self):
+        """推送就绪通知到同步队列（非阻塞）"""
+        self._push_to_queue("ready", None)
+        logger.info("TqSdk就绪通知已发送")
+
     def _push_contract(self, contract_data: ContractData):
         """推送Contract数据到同步队列（非阻塞）"""
         self._push_to_queue("contract", contract_data)
@@ -911,6 +919,7 @@ class TqGateway(BaseGateway):
             "position": EventTypes.POSITION_UPDATE,
             "account": EventTypes.ACCOUNT_UPDATE,
             "contract": EventTypes.CONTRACT_UPDATE,
+            "ready": EventTypes.ACCOUNT_READY,
         }
         return mapping.get(gateway_event)
 

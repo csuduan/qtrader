@@ -19,6 +19,7 @@ from src.utils.event_engine import EventTypes
 from src.utils.ipc import SocketClient
 from src.utils.logger import get_logger
 from src.utils.scheduler import Job
+from src.manager.service.alarm_service import AlarmService
 
 logger = get_logger(__name__)
 ctx: AppContext = get_app_context()
@@ -714,16 +715,17 @@ class TraderProxy:
                 logger.warning("应用上下文未初始化，无法处理通知")
                 return
 
-            alarm_service = ctx.get_alarm_service()
+            alarm_service: AlarmService = ctx.get_alarm_service()
             if not alarm_service:
                 logger.warning("告警服务未初始化，无法处理通知")
                 return
 
             # 异步处理通知
             import asyncio
-
-            asyncio.create_task(alarm_service.handle_notification(data))
-            logger.debug(f"通知已转交给AlarmService处理: [{self.account_id}]")
+            account_id = data.get("account_id", "SYSTEM")
+            title = data.get('title', '')
+            detail = data.get("detail", "")
+            asyncio.create_task(alarm_service.notify_alarm(account_id,"Trader",title,detail))
         except Exception as e:
             logger.exception(f"处理通知推送失败: {e}")
 
@@ -796,25 +798,6 @@ class TraderProxy:
                 session.refresh(alarm)
 
                 logger.info(f"异常告警已保存到数据库: [{self.account_id}] {alarm.title}")
-
-                # 触发告警更新事件（推送WebSocket给前端）
-                event_engine = ctx.get_event_engine()
-                if event_engine:
-                    alarm_dict = {
-                        "id": alarm.id,
-                        "account_id": alarm.account_id,
-                        "alarm_type": alarm.alarm_type,
-                        "indicator": alarm.indicator,
-                        "alarm_date": alarm.alarm_date,
-                        "alarm_time": alarm.alarm_time,
-                        "source": alarm.source,
-                        "title": alarm.title,
-                        "detail": alarm.detail,
-                        "status": alarm.status,
-                        "created_at": alarm.created_at.isoformat() if alarm.created_at else None,
-                    }
-                    event_engine.put(EventTypes.ALARM_UPDATE, alarm_dict)
-                    logger.debug(f"推送告警更新事件: {alarm.title}")
 
         except Exception as e:
             logger.error(f"处理告警数据失败: {e}")
@@ -1273,10 +1256,6 @@ class TraderProxy:
 
         Args:
             config: 告警配置字典
-                - immediate: 是否启用即时告警
-                - threshold: 是否启用阈值告警
-                - threshold_count: 阈值告警数量
-                - threshold_window: 阈值告警时间窗口（秒）
 
         Returns:
             是否成功

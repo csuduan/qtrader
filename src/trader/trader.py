@@ -731,18 +731,6 @@ class Trader:
             await self.socket_server.send_push("tick", data.model_dump())
             pass
 
-    async def _on_alarm_update(self, data):
-        """告警事件处理器 - 转发给Manager"""
-        try:
-            if self.socket_server:
-                alarm_dict = (
-                    data if isinstance(data, dict)
-                    else (data.model_dump() if hasattr(data, "model_dump") else data)
-                )
-                await self.socket_server.send_push("alarm", alarm_dict)
-        except Exception as e:
-            logger.exception(f"告警转发失败: {e}")
-
     def _register_event_handlers(self) -> None:
         """
         注册事件处理器（推送到Manager）
@@ -756,7 +744,6 @@ class Trader:
         event_engine.register(EventTypes.TRADE_UPDATE, self._on_trade_update)
         event_engine.register(EventTypes.POSITION_UPDATE, self._on_position_update)
         event_engine.register(EventTypes.TICK_UPDATE, self._on_tick_update)
-        event_engine.register(EventTypes.ALARM_UPDATE, self._on_alarm_update)
         logger.info(f"Trader [{self.account_id}] 事件处理器已注册")
 
     async def stop(self) -> None:

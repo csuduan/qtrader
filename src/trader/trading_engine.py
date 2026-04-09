@@ -564,15 +564,6 @@ class TradingEngine:
         if self._order_cmd_executor:
             self._order_cmd_executor.register(cmd)
 
-        # 策略报单指令告警 → 通过事件引擎推送，由 Manager 统一处理通知
-        if "策略-" in cmd.source:
-            self._emit_event(EventTypes.ALARM_UPDATE, {
-                "account_id": self.account_id,
-                "source": "ORDER_CMD",
-                "title": f"策略报单指令 {cmd.cmd_id}",
-                "detail": f"{cmd.symbol} {cmd.offset} {cmd.direction} {cmd.volume}手 (来源: {cmd.source})",
-            })
-
         logger.info(f"创建报单指令: {cmd.cmd_id} {cmd.symbol} {cmd.direction} {cmd.volume}手")
         return cmd.cmd_id
 

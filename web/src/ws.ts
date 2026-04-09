@@ -1,5 +1,5 @@
 import { ref, type Ref } from 'vue'
-import type { WSMessage, Account, Position, Trade, Order, SystemStatus, Alarm } from '@/types'
+import type { WSMessage, Account, Position, Trade, Order, SystemStatus } from '@/types'
 
 /**
  * 获取 WebSocket URL
@@ -33,7 +33,6 @@ class WebSocketManager {
    private onOrderUpdateCallbacks: Array<(data: Order) => void> = []
     private onSystemStatusCallbacks: Array<(data: SystemStatus) => void> = []
     private onTickUpdateCallbacks: Array<(data: any) => void> = []
-    private onAlarmUpdateCallbacks: Array<(data: Alarm) => void> = []
 
   // 连接状态
   public connected: Ref<boolean> = ref(false)
@@ -138,9 +137,6 @@ class WebSocketManager {
            case 'tick_update':
            case 'quote_update':
              this.onTickUpdateCallbacks.forEach(cb => cb(message.data))
-             break
-           case 'alarm_update':
-             this.onAlarmUpdateCallbacks.forEach(cb => cb(message.data))
              break
            default:
              console.warn('未知消息类型:', message.type)
@@ -260,19 +256,6 @@ class WebSocketManager {
          const index = this.onTickUpdateCallbacks.indexOf(callback)
          if (index > -1) {
            this.onTickUpdateCallbacks.splice(index, 1)
-         }
-       }
-     }
-
-     /**
-       * 订阅告警更新事件
-       */
-     onAlarmUpdate(callback: (data: Alarm) => void): () => void {
-       this.onAlarmUpdateCallbacks.push(callback)
-       return () => {
-         const index = this.onAlarmUpdateCallbacks.indexOf(callback)
-         if (index > -1) {
-           this.onAlarmUpdateCallbacks.splice(index, 1)
          }
        }
      }

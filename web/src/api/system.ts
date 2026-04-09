@@ -100,23 +100,6 @@ export const systemApi = {
   },
 
   /**
-   * 获取告警配置（账户级别，已废弃，请使用 getManagerAlertConfig）
-   */
-  getAlertConfig: async (accountId?: string): Promise<LegacyAlertConfig> => {
-    return api.get<LegacyAlertConfig>('/system/alert-config', { params: { account_id: accountId } })
-  },
-
-  /**
-   * 更新告警配置（账户级别，已废弃，请使用 updateManagerAlertConfig）
-   */
-  updateAlertConfig: async (config: Partial<LegacyAlertConfig>, accountId?: string): Promise<LegacyAlertConfig> => {
-    return api.put<LegacyAlertConfig>('/system/alert-config', {
-      ...config,
-      account_id: accountId
-    })
-  },
-
-  /**
    * 获取Manager全局告警配置（新结构：notification + exception）
    */
   getManagerAlertConfig: async (): Promise<AlertConfig> => {

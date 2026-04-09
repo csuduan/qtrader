@@ -7,6 +7,7 @@ import os
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from src.manager.service.alarm_service import AlarmService
 from src.models.po import AlarmPo
 from src.utils.database import get_session
 from src.utils.logger import get_logger
@@ -25,26 +26,25 @@ class ManagerJobManager:
             trading_manager: TradingManager 实例
         """
         self.trading_manager = trading_manager
-        # 告警压制集合：已触发故障告警的账户ID，恢复后移除
-        self._alarm_suppressed: set = set()
 
     def trader_health_check(self) -> None:
         """
         检查所有 Trader 进程的连接状态
 
         1. 跳过禁用账户和手动停止的 Trader
-        2. 故障的 Trader 首次发现时触发告警，后续压制（不重复告警）
-        3. 故障恢复后清除压制并发送恢复通知
+        2. 故障时发送通知告警（业务通知，不涉及压制）
+        3. 恢复时也发送通知告警
         """
         logger.info("开始执行 Trader 健康检查任务")
-        session = get_session()
-        if not session:
-            logger.error("无法获取数据库会话")
+
+        alarm_service:AlarmService = self.trading_manager.alarm_service
+        if not alarm_service:
+            logger.warning("AlarmService 未初始化，无法执行健康检查告警")
             return
 
-        try:
-            now = datetime.now()
+        from src.models.object import AlarmType
 
+        try:
             for account_id, trader_proxy in self.trading_manager.traders.items():
                 # 检查账户是否启用
                 account_config = self.trading_manager.account_configs_map.get(account_id)
@@ -54,52 +54,27 @@ class ManagerJobManager:
                 is_running = trader_proxy.is_running()
 
                 if is_running:
-                    # Trader 运行正常
-                    if account_id in self._alarm_suppressed:
-                        # 之前故障过，现在恢复了 → 清除压制并发恢复通知
-                        self._alarm_suppressed.discard(account_id)
-                        logger.info(f"Trader [{account_id}] 故障已恢复")
-                        self._create_alarm(
-                            session=session,
-                            account_id=account_id,
-                            source="TRADER_HEALTH_CHECK",
-                            title=f"Trader {account_id} 已恢复",
-                            detail="Trader 进程已恢复正常运行",
-                            now=now,
-                        )
+                    # Trader 运行正常，无需操作
+                    pass
                 else:
                     # Trader 不在运行
                     if trader_proxy.manual_stop:
                         # 手动停止，不告警
-                        logger.debug(f"Trader [{account_id}] 为手动停止，跳过告警")
+                        logger.info(f"Trader [{account_id}] 为手动停止，跳过告警")
                         continue
 
-                    if account_id in self._alarm_suppressed:
-                        # 已压制，不重复告警
-                        logger.debug(f"Trader [{account_id}] 告警已压制，跳过")
-                        continue
-
-                    # 首次发现故障 → 触发告警并压制
-                    self._alarm_suppressed.add(account_id)
-                    self._create_alarm(
-                        session=session,
+                    # 发送通知告警
+                    alarm_service.notify_alarm(
                         account_id=account_id,
-                        source="TRADER_HEALTH_CHECK",
-                        title=f"Trader {account_id} 连接异常",
+                        source="HEALTH_CHECK",
+                        title="进程异常",
                         detail="Trader 进程未运行，请检查进程状态",
-                        now=now,
                     )
 
-            suppressed_count = len(self._alarm_suppressed)
-            if suppressed_count > 0:
-                logger.warning(f"Trader 健康检查完成: {suppressed_count} 个账户告警已压制")
-            else:
-                logger.info("所有 Trader 连接正常")
+            logger.info("Trader 健康检查完成")
 
         except Exception as e:
             logger.exception(f"Trader 健康检查任务执行失败: {e}")
-        finally:
-            session.close()
 
     def cleanup_alarms(self) -> None:
         """
@@ -226,6 +201,7 @@ class ManagerJobManager:
                     title=issue["title"],
                     detail=issue["detail"],
                     now=now,
+                    alarm_type="exception",
                 )
 
             if not all_issues:
@@ -266,54 +242,35 @@ class ManagerJobManager:
         title: str,
         detail: str,
         now: datetime,
-        immediate_alert: bool = True,  # 是否发送即时告警
+        alarm_type: str = "exception",  # 告警类型: notification/exception
     ) -> None:
         """
-        创建告警记录
+        创建告警记录（通过 AlarmService 统一处理）
 
         Args:
-            session: 数据库会话
+            session: 数据库会话（未使用，保留参数兼容旧代码）
             account_id: 账户ID
             source: 告警来源
             title: 告警标题
             detail: 告警详情
-            now: 当前时间
-            immediate_alert: 是否发送即时告警（微信通知）
+            now: 当前时间（未使用，保留参数兼容旧代码）
+            alarm_type: 告警类型，exception-异常告警，notification-通知告警
         """
-        try:
-            alarm = AlarmPo(
-                account_id=account_id,
-                alarm_date=now.strftime("%Y-%m-%d"),
-                alarm_time=now.strftime("%H:%M:%S"),
-                source=source,
-                title=title,
-                detail=detail,
-                status="UNCONFIRMED",
-                created_at=now,
-            )
-            session.add(alarm)
-            session.commit()
-            logger.warning(f"已创建告警: {title} - {detail}")
+        alarm_service = self.trading_manager.alarm_service
+        if not alarm_service:
+            logger.warning("AlarmService 未初始化，无法创建告警")
+            return
 
-            # 发送即时告警通知（如果启用且非免打扰时段）
-            # 注意：旧版本的 alert.immediate 已废弃，现在通过 AlarmService 统一处理通知告警
-            if immediate_alert:
-                # 从全局配置获取告警配置
-                app_config = self.trading_manager.app_config
-                if app_config and app_config.alert.notification.enabled:
-                    try:
-                        from src.utils.wecomm import is_dnd_now, send_wechat
+        from src.models.object import AlarmType
 
-                        if is_dnd_now(app_config.alert.notification.dnd_start, app_config.alert.notification.dnd_end):
-                            logger.debug(f"当前为免打扰时段({app_config.alert.notification.dnd_start}-{app_config.alert.notification.dnd_end})，跳过告警通知: {title}")
-                        else:
-                            send_wechat(f"【即时告警】{title}\n{detail}")
-                    except Exception as e:
-                        logger.error(f"发送即时告警通知失败: {e}")
-
-        except Exception as e:
-            logger.error(f"创建告警失败: {e}")
-            session.rollback()
+        alarm_type_enum = AlarmType.NOTIFICATION if alarm_type == "notification" else AlarmType.EXCEPTION
+        alarm_service.create_alarm(
+            account_id=account_id,
+            source=source,
+            title=title,
+            detail=detail,
+            alarm_type=alarm_type_enum,
+        )
 
     def refresh_contracts(self) -> None:
         """定时刷新合约信息（由调度器调用）"""
@@ -422,7 +379,7 @@ class ManagerJobManager:
                             AlarmPo.account_id == account_id,
                             AlarmPo.created_at >= window_start,
                             AlarmPo.source.in_([
-                                "TRADER_HEALTH_CHECK",
+                                "HEALTH_CHECK",
                                 "PRE_MARKET_CHECK",
                                 "THRESHOLD_ALERT"
                             ])

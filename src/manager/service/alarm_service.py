@@ -5,7 +5,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Dict, Optional, TYPE_CHECKING
 
 from src.models.object import AlarmType
 from src.utils.logger import get_logger
@@ -13,7 +13,6 @@ from src.utils.wecomm import is_dnd_now, send_wechat
 
 if TYPE_CHECKING:
     from src.manager.trading_manager import TradingManager
-    from src.models.po import AlarmPo
 
 logger = get_logger(__name__)
 
@@ -36,61 +35,6 @@ class AlarmService:
         # 压制状态缓存（仅存内存）: {account_id: {indicator: SuppressionStatus}}
         self._suppression_cache: Dict[str, Dict[str, SuppressionStatus]] = {}
 
-    async def handle_notification(self, data: Dict) -> None:
-        """
-        处理通知告警
-
-        流程：检查开关 -> 检查免打扰 -> 发送微信 -> 保存数据库 -> 推送WebSocket
-        """
-        from src.manager.api.responses import success_response
-
-        app_config = self.trading_manager.app_config
-        if not app_config or not app_config.alert.notification.enabled:
-            return
-
-        # 免打扰检查
-        if self._is_dnd(
-            app_config.alert.notification.dnd_start, app_config.alert.notification.dnd_end
-        ):
-            logger.debug("免打扰时段，跳过通知告警")
-            return
-
-        account_id = data.get("account_id", "SYSTEM")
-        title = f"【通知】【{account_id}】{data.get('title', '')}"
-        detail = data.get("detail", "")
-
-        # 发送微信
-        try:
-            send_wechat(f"{title}\n{detail}")
-        except Exception as e:
-            logger.error(f"发送通知告警失败: {e}")
-
-        # 保存数据库
-        try:
-            alarm = self._save_alarm(
-                {
-                    "account_id": account_id,
-                    "title": data.get("title", ""),
-                    "detail": detail,
-                    "source": data.get("source", "TRADER"),
-                },
-                alarm_type=AlarmType.NOTIFICATION,
-                title=title,
-            )
-            # 推送WebSocket
-            self._emit_alarm_event(alarm)
-        except Exception as e:
-            logger.error(f"保存通知告警失败: {e}")
-
-    async def handle_exception(self, data: Dict) -> None:
-        """
-        处理异常日志（仅保存到数据库，统计由定时任务完成）
-
-        流程：保存异常记录 -> 供定时任务统计
-        """
-        # 异常记录已在 _save_alarm_to_db 中保存
-        # 定时任务 check_exception_thresholds 会每分钟查询统计
-        pass
 
     async def check_exception_thresholds(self) -> None:
         """
@@ -112,7 +56,6 @@ class AlarmService:
 
         try:
             now = datetime.now()
-
             for account_id in self.trading_manager.account_configs_map.keys():
                 for indicator_config in app_config.alert.exception.indicators:
                     indicator = indicator_config.name
@@ -184,28 +127,10 @@ class AlarmService:
             except Exception as e:
                 logger.error(f"发送异常告警通知失败: {e}")
 
-        # 保存告警到数据库
-        try:
-            alarm = self._save_alarm(
-                {
-                    "account_id": account_id,
-                    "title": title,
-                    "detail": detail,
-                    "source": "EXCEPTION_MONITOR",
-                },
-                alarm_type=AlarmType.EXCEPTION,
-                indicator=indicator,
-            )
+        # 设置压制状态（仅内存，不推送给前端）
+        self._set_suppression(account_id, indicator)
 
-            # 设置压制状态（仅内存）
-            self._set_suppression(account_id, indicator, int(alarm.id))  # type: ignore[arg-type]
-
-            # 推送WebSocket
-            self._emit_alarm_event(alarm)
-        except Exception as e:
-            logger.error(f"保存异常告警失败: {e}")
-
-    def _set_suppression(self, account_id: str, indicator: str, alarm_id: int) -> None:
+    def _set_suppression(self, account_id: str, indicator: str) -> None:
         """设置压制状态（仅内存）"""
         if account_id not in self._suppression_cache:
             self._suppression_cache[account_id] = {}
@@ -213,14 +138,11 @@ class AlarmService:
         self._suppression_cache[account_id][indicator] = SuppressionStatus(
             indicator=indicator,
             suppressed_at=datetime.now(),
-            alarm_id=alarm_id,
+            alarm_id=0,
             is_active=True,
         )
 
         logger.info(f"设置异常告警压制: [{account_id}] {indicator}")
-
-        # 广播压制状态更新
-        self._broadcast_suppression_update(account_id, indicator)
 
     def _is_suppressed(self, account_id: str, indicator: str) -> bool:
         """检查是否已压制"""
@@ -247,11 +169,9 @@ class AlarmService:
             if suppression:
                 suppression.is_active = False
                 logger.info(f"清除异常告警压制: [{account_id}] {indicator}")
-                self._broadcast_suppression_update(account_id, indicator)
         else:
             for ind in self._suppression_cache[account_id]:
                 self._suppression_cache[account_id][ind].is_active = False
-                self._broadcast_suppression_update(account_id, ind)
             logger.info(f"清除异常告警压制: [{account_id}] 所有指标")
 
     def clear_all_suppression(self) -> None:
@@ -287,78 +207,35 @@ class AlarmService:
         """检查是否免打扰时段"""
         return is_dnd_now(start, end)
 
-    def _save_alarm(self, data: Dict, alarm_type: str = "exception", **kwargs) -> "AlarmPo":
-        """保存告警到数据库"""
-        from src.models.po import AlarmPo
-        from src.utils.database import get_session
 
-        session = get_session()
-        if not session:
-            raise RuntimeError("无法获取数据库会话")
+    def notify_alarm(
+        self,
+        account_id: str,
+        source: str,
+        title: str,
+        detail: str,
+    ) -> None:
+        """
+        通知告警 - 仅发送微信通知，不保存到数据库（日志已自动保存）
 
+        Args:
+            account_id: 账户ID
+            source: 告警来源
+            title: 告警标题（不需要包含类型前缀）
+            detail: 告警详情
+        """
+        app_config = self.trading_manager.app_config
+        if not app_config:
+            return
+
+        config = app_config.alert.notification
+        full_title = f"【通知】【{account_id}】{title}"
+        logger.info(f"告警通知: {full_title}")
+
+        # 发送微信通知
         try:
-            now = datetime.now()
-            alarm = AlarmPo(
-                account_id=data.get("account_id", "SYSTEM"),
-                alarm_type=alarm_type,
-                indicator=kwargs.get("indicator"),
-                alarm_date=now.strftime("%Y-%m-%d"),
-                alarm_time=now.strftime("%H:%M:%S"),
-                source=data.get("source", "SYSTEM"),
-                title=kwargs.get("title", data.get("title", "")),
-                detail=data.get("detail"),
-                status="UNCONFIRMED",
-            )
-            session.add(alarm)
-            session.commit()
-            session.refresh(alarm)
-            logger.info(f"告警已保存: {alarm.title}")
-            return alarm
+            # 开启通知且不在免打扰时间
+            if config.enabled and not self._is_dnd(config.dnd_start, config.dnd_end):
+                send_wechat(f"{full_title}\n{detail}")
         except Exception as e:
-            session.rollback()
-            raise e
-        finally:
-            session.close()
-
-    def _emit_alarm_event(self, alarm: "AlarmPo") -> None:
-        """推送告警事件到WebSocket"""
-        from src.app_context import get_app_context
-        from src.utils.event_engine import EventTypes
-
-        ctx = get_app_context()
-        if not ctx:
-            return
-
-        event_engine = ctx.get_event_engine()
-        if not event_engine:
-            return
-
-        alarm_dict = {
-            "id": alarm.id,
-            "account_id": alarm.account_id,
-            "alarm_type": alarm.alarm_type,
-            "indicator": alarm.indicator,
-            "alarm_date": alarm.alarm_date,
-            "alarm_time": alarm.alarm_time,
-            "source": alarm.source,
-            "title": alarm.title,
-            "detail": alarm.detail,
-            "status": alarm.status,
-            "created_at": alarm.created_at.isoformat() if alarm.created_at else None,
-        }
-        event_engine.put(EventTypes.ALARM_UPDATE, alarm_dict)
-
-    def _broadcast_suppression_update(self, account_id: str, indicator: str) -> None:
-        """广播压制状态更新"""
-        from src.app_context import get_app_context
-
-        ctx = get_app_context()
-        if not ctx:
-            return
-
-        ws_manager = ctx.get_ws_manager()
-        if not ws_manager:
-            return
-
-        status = self.get_suppression_status(account_id)
-        ws_manager.broadcast_suppression_update(account_id, indicator, status)
+            logger.error(f"发送告警通知失败: {e}")

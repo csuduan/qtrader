@@ -8,10 +8,8 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from src.app_context import get_app_context
 from src.models.po import AlarmPo
 from src.utils.database import get_session
-from src.utils.event_engine import EventTypes
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -85,8 +83,8 @@ def create_alarm_from_log(
         if not account_id:
             account_id = "SYSTEM"
 
-        # 格式化标题：【即时告警】【账户ID】模块错误
-        title = f"【即时告警】【{account_id}】{module or '未知模块'}错误"
+        # 格式化标题：【异常】【账户ID】模块错误
+        title = f"【异常】【{account_id}】{module or '未知模块'}错误"
 
         alarm = AlarmPo(
             account_id=account_id,
@@ -102,23 +100,6 @@ def create_alarm_from_log(
         session.commit()
 
         logger.info(f"告警已创建: {alarm.title}")
-
-        # 触发告警更新事件
-        ctx = get_app_context()
-        event_engine = ctx.get_event_engine()
-        if event_engine:
-            alarm_dict = {
-                "id": alarm.id,
-                "account_id": alarm.account_id,
-                "alarm_date": alarm.alarm_date,
-                "alarm_time": alarm.alarm_time,
-                "source": alarm.source,
-                "title": alarm.title,
-                "detail": alarm.detail,
-                "status": alarm.status,
-                "created_at": alarm.created_at.isoformat(),
-            }
-            event_engine.put(EventTypes.ALARM_UPDATE, alarm_dict)
 
         return True
     except Exception as e:
