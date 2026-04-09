@@ -273,6 +273,7 @@ class CtpMdApi(mdapi.CThostFtdcMdSpi):
         """服务器连接断开回报"""
         self.connected = False
         logger.warning(f"CTP 行情服务器连接断开，原因: {reason}")
+        self.gateway.on_status()
 
     def OnRspUserLogin(
         self, pRspUserLogin: Any, pRspInfo: Any, nRequestID: int, bIsLast: bool
@@ -702,6 +703,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
         """服务器连接断开回报"""
         self.connected = False
         logger.error(f"CTP 交易服务器连接断开，原因: {reason}")
+        self.gateway.on_status()
 
     def OnRspAuthenticate(
         self,

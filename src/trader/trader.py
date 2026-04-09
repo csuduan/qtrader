@@ -768,9 +768,9 @@ class Trader:
         if self.task_scheduler:
             self.task_scheduler.shutdown()
 
-        # 断开连接
+        # 关闭交易引擎
         if self.trading_engine:
-            await self.trading_engine.disconnect()
+            await self.trading_engine.close()
 
         # 停止Socket服务器
         if self.socket_server:
@@ -2137,12 +2137,6 @@ class Trader:
             logger.exception(f"Trader [{self.account_id}] 刷新合约信息失败: {e}")
             return {"success": False, "message": f"刷新失败: {str(e)}"}
 
-    @request("stop")
-    async def _req_stop(self, data: dict) -> dict:
-        """处理停止Trader请求"""
-        logger.info(f"Trader [{self.account_id}] 收到停止请求")
-        asyncio.create_task(self.stop())
-        return {"success": True, "message": "停止命令已接收"}
 
     @request("init_public_data")
     async def _req_init_public_data(self, data: dict) -> dict:

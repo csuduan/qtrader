@@ -53,12 +53,20 @@ class BaseGateway(ABC):
         self.md_connected: bool = False  # 行情连接状态
         self.td_connected: bool = False  # 交易连接状态
         self.trading_day: Optional[str] = None
+        self.running: bool = True  # 运行状态
         self.contracts: Dict[str, ContractData] = {}
         self._contracts_update_date: Optional[str] = None
         self.positions: Dict[str, PositionData] = {}
         # 开仓限制配置 {symbol: min_open_volume}
         self._open_limit: Optional[Dict[str, int]] = None
         logger.info(f"{self.gateway_name} Gateway 初始化完成")
+
+    
+    async def close(self):
+        """关闭Gateway连接"""
+        self.running = False
+        await self.disconnect()
+        logger.info(f"{self.gateway_name} Gateway 已关闭")
 
 
     @property

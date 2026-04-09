@@ -60,7 +60,7 @@ class TqGateway(BaseGateway):
 
     def __init__(self, acct_config: TraderConfig):
         super().__init__()
-        self._running = False
+        self._tq_running = False
         self.config = acct_config.gateway
         self.account_id = self.config.account_id
         logger.info(f"TqGateway初始化, account_id: {self.account_id}, id: {id(self)}")
@@ -99,19 +99,18 @@ class TqGateway(BaseGateway):
         # tq主线程
         self._tq_thead: Optional[threading.Thread] = None
         # 事件分发协程
-        self._dispatcher_task: Optional[asyncio.Task] = None
+        self._dispatcher_task: Optional[asyncio.Task] = asyncio.create_task(self._event_dispatcher())
 
         # AsyncEventEngine引用（直接发送事件）
         self._event_engine: Optional[AsyncEventEngine] = ctx.get_event_engine()
 
-        # 加载最小开仓手数配置
-        self._open_limit = acct_config.trading.open_limit or {}
         # 先尝试从数据库加载合约信息
         self.load_contracts()
 
         # 从全局订阅配置加载合约列表
         if self.subs_config.subscribe_symbols:
             self.hist_subs.update(self.subs_config.subscribe_symbols)
+
 
     # ==================== 连接管理 ====================
     async def connect(self) -> bool:
@@ -123,18 +122,16 @@ class TqGateway(BaseGateway):
                 logger.warning("TqSdk已连接，无需重复连接")
                 return True
             
-            # 先停止轮询
-            self.running = False
-
+            # 先停止tq轮询
+            if self._tq_running:
+                await self.disconnect()
+            self._tq_running = True
             # 启动tq主线程
             self._tq_thead = threading.Thread(
                 target=self._tq_run, name=f"TqSdk_Thread", daemon=True
             )
             self._tq_thead.start()
-            self._running = True
 
-            # 启动事件分发协程
-            self._dispatcher_task = asyncio.create_task(self._event_dispatcher())
             logger.info("TqSdk启动完成")
             return True
 
@@ -148,20 +145,13 @@ class TqGateway(BaseGateway):
         """断开TqSdk连接（线程优化版本）"""
         try:
             logger.info("正在断开TqSdk连接...")
-
             # 停止轮询
-            self._running = False
+            self._tq_running = False
             self.md_connected = False
             self.td_connected = False
-            self._push_account(self._convert_account(self._account))
 
-            # 取消事件分发协程
-            if self._dispatcher_task:
-                self._dispatcher_task.cancel()
-                try:
-                    await self._dispatcher_task
-                except asyncio.CancelledError:
-                    pass
+            # 推送最新账户信息
+            self._push_account(self._convert_account(self._account))                   
             logger.info("TqSdk已断开连接")
             return True
 
@@ -179,8 +169,6 @@ class TqGateway(BaseGateway):
         3. 将变化数据推送到同步队列
         """
         try:
-            # 开始连接
-            self._running = True
 
             # 创建认证
             tianqin_config: Any = self.config.tianqin if self.config.tianqin else None
@@ -275,13 +263,11 @@ class TqGateway(BaseGateway):
             self._push_ready()
 
             logger.info("TqSdk开始轮询...")
-            while self._running:
+            while self._tq_running:
                 if self.api is None:
                     break
-
                 try:
                     has_data = self.api.wait_update(deadline=time.time() + 3)
-
                     if has_data:
                         self._collect_and_push_updates()
 
@@ -879,8 +865,7 @@ class TqGateway(BaseGateway):
         """
         try:
             logger.info("事件分发协程已启动")
-
-            while self._running:
+            while self.running:
                 try:
                     # 从同步队列获取数据（使用get_nowait避免阻塞）
                     if self._sync_queue.empty():
@@ -899,7 +884,6 @@ class TqGateway(BaseGateway):
                     continue
                 except Exception as e:
                     logger.exception(f"事件分发异常: {e}")
-
             logger.info("事件分发协程已退出")
 
         except asyncio.CancelledError:

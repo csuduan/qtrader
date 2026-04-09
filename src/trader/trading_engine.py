@@ -261,6 +261,12 @@ class TradingEngine:
             return self.config.risk_control
         finally:
             session.close()
+    
+    async def close(self):
+        """
+        关闭交易引擎（通过Gateway）
+        """
+        await self.gateway.close()
 
     async def connect(self) -> bool:
         """

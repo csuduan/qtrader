@@ -293,6 +293,8 @@ class SocketServer:
             except asyncio.CancelledError:
                 pass
             self._health_check_task = None
+            logger.info("健康检查任务已停止")
+
 
         # 关闭服务器
         if self.server:

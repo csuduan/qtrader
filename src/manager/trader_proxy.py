@@ -6,6 +6,7 @@ Trader Proxy 模块
 
 import asyncio
 import os
+import signal
 import sys
 from datetime import datetime
 from enum import Enum
@@ -140,12 +141,13 @@ class TraderProxy:
         if new_state == TraderState.CONNECTED and old_state != TraderState.CONNECTED:
             self._start_ws_push_task()
         elif old_state == TraderState.CONNECTED and new_state != TraderState.CONNECTED:
-            # 从连接状态变为非连接状态，重置网关连接状态
-            await self._stop_ws_push_task()
+            # 从连接状态变为非连接状态，重置网关连接状态并推送
             if self._account_cache:
                 self._account_cache["md_connected"] = False
                 self._account_cache["td_connected"] = False
                 logger.info(f"Trader [{self.account_id}] 断开，重置网关连接状态")
+                self._emit_data("account", self._account_cache.copy())
+            await self._stop_ws_push_task()
         elif new_state == TraderState.STOPPED and old_state != TraderState.STOPPED:
             await self._stop_ws_push_task()
 
@@ -230,29 +232,57 @@ class TraderProxy:
         current_state = self._state
         logger.info(f"TraderProxy [{self.account_id}] 开始停止，当前状态: {current_state}")
 
-        # 步骤1: 如果已连接，发送stop命令给Trader
+        # 步骤1: 发送stop命令给Trader
+        stop_sent = False
         if self.socket_client and self.socket_client.is_connected():
             try:
                 logger.info(f"TraderProxy [{self.account_id}] 发送stop命令给Trader...")
                 await self.socket_client.request("stop", {}, timeout=5.0)
                 logger.info(f"TraderProxy [{self.account_id}] stop命令已发送")
+                stop_sent = True
             except Exception as e:
                 logger.warning(f"TraderProxy [{self.account_id}] 发送stop命令失败: {e}")
+        elif self.socket_client and await self._get_process():
+            # Socket临时断开但进程仍在，尝试快速重连后发送stop
+            logger.info(f"TraderProxy [{self.account_id}] 当前未连接，尝试重连后发送stop命令...")
+            try:
+                connected = await self.socket_client.connect(retry_interval=1.0, max_retries=3)
+                if connected:
+                    await self.socket_client.request("stop", {}, timeout=5.0)
+                    logger.info(f"TraderProxy [{self.account_id}] 重连后stop命令已发送")
+                    stop_sent = True
+                else:
+                    logger.warning(f"TraderProxy [{self.account_id}] 重连失败，无法发送stop命令")
+            except Exception as e:
+                logger.warning(f"TraderProxy [{self.account_id}] 重连或发送stop命令失败: {e}")
         else:
-            logger.warning(f"TraderProxy [{self.account_id}] 未连接，跳过stop命令")
+            logger.warning(f"TraderProxy [{self.account_id}] 未连接且无进程，跳过stop命令")
 
-        # 步骤2 优雅待5秒优雅停止Trader进程
+        # 步骤2: 等待5秒让Trader自己停止
         await asyncio.sleep(5)
-        logger.info(f"TraderProxy [{self.account_id}] 优雅停止Trader进程...")
+        logger.info(f"TraderProxy [{self.account_id}] 检查Trader是否已自行停止...")
+
+        # 步骤3: 如果进程还在，发送SIGTERM
         pid = await self._get_process()
         if pid:
             try:
                 os.kill(pid, 0)
-                os.kill(pid, 15)  # SIGKILL
-                logger.warning(f"TraderProxy [{self.account_id}] 进程 {pid} 优雅停止")
+                os.kill(pid, signal.SIGTERM)
+                logger.warning(f"TraderProxy [{self.account_id}] 进程 {pid} 已发送SIGTERM")
             except Exception as e:
-                logger.warning(f"TraderProxy [{self.account_id}] kill进程失败: {e}")
-        
+                logger.warning(f"TraderProxy [{self.account_id}] 发送SIGTERM失败: {e}")
+
+            # 步骤4: 再等待5秒
+            await asyncio.sleep(5)
+
+            # 步骤5: 如果进程还在，发送SIGKILL强制停止
+            pid = await self._get_process()
+            if pid:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                    logger.error(f"TraderProxy [{self.account_id}] 进程 {pid} 已强制SIGKILL停止")
+                except Exception as e:
+                    logger.error(f"TraderProxy [{self.account_id}] 发送SIGKILL失败: {e}")
 
         # 清理PID文件
         Path(self.pid_file).unlink(missing_ok=True)
