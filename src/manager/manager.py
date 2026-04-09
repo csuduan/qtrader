@@ -957,9 +957,9 @@ class TradingManager:
         # 停止资源采样任务
         self._stop_resource_sampler()
 
-        # 停止所有Trader
-        for account_id in list(self.traders.keys()):
-            await self.stop_trader(account_id)
+        # 注意：Manager 退出时不停止 Trader 进程，让 Trader 继续独立运行
+        # 这样可以实现 Manager 重启而不影响交易进程
+        logger.info("Trader 进程保持运行（Manager 退出不影响）")
 
         # 停止 ManagerScheduler
         if self._scheduler:
