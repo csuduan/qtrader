@@ -273,6 +273,8 @@ class AlarmPo(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     account_id = Column(String(50), nullable=False, index=True)
+    alarm_type = Column(String(20), nullable=False, default="exception", index=True)  # notification/exception
+    indicator = Column(String(20), nullable=True)  # 1min/5min/1hour
     alarm_date = Column(String(10), nullable=False, index=True)
     alarm_time = Column(String(8), nullable=False)
     source = Column(String(20), nullable=False)
@@ -282,7 +284,7 @@ class AlarmPo(Base):
     created_at = Column(DateTime, default=datetime.now, index=True)
 
     def __repr__(self):
-        return f"<AlarmPo(account_id={self.account_id}, title={self.title}, status={self.status})>"
+        return f"<AlarmPo(account_id={self.account_id}, type={self.alarm_type}, title={self.title})>"
 
 
 class SystemParamPo(Base):

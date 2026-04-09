@@ -37,6 +37,7 @@ def get_db(request: Request):
 @router.get("/list")
 async def get_today_alarms(
     request: Request,
+    account_id: Optional[str] = Query(None, description="账户ID，不传则返回所有账户"),
     status_filter: Optional[str] = Query(
         None, description="状态筛选: UNCONFIRMED未处理/CONFIRMED已处理，不传则返回全部"
     ),
@@ -44,13 +45,17 @@ async def get_today_alarms(
     """
     获取当日告警列表
 
-    支持按状态筛选：未处理/已处理/全部
+    支持按账户和状态筛选：未处理/已处理/全部
     """
     db = get_db(request)
     session: Session = db.get_session_sync()
     try:
         today = datetime.now().strftime("%Y-%m-%d")
         query = session.query(AlarmPo).filter(AlarmPo.alarm_date == today)
+
+        # 按账户筛选
+        if account_id:
+            query = query.filter(AlarmPo.account_id == account_id)
 
         if status_filter:
             query = query.filter(AlarmPo.status == status_filter)
@@ -67,11 +72,15 @@ async def get_today_alarms(
 
 
 @router.get("/stats")
-async def get_alarm_stats(request: Request):
+async def get_alarm_stats(
+    request: Request,
+    account_id: Optional[str] = Query(None, description="账户ID，不传则统计所有账户"),
+):
     """
     获取告警统计信息
 
     返回今日总告警数、未处理告警数、最近1小时告警数、最近5分钟告警数
+    支持按账户筛选
     """
     db = get_db(request)
     session: Session = db.get_session_sync()
@@ -81,14 +90,24 @@ async def get_alarm_stats(request: Request):
         one_hour_ago = now - timedelta(hours=1)
         five_minutes_ago = now - timedelta(minutes=5)
 
+        # 构建基础查询
+        def build_base_query():
+            query = session.query(func.count(AlarmPo.id))
+            if account_id:
+                query = query.filter(AlarmPo.account_id == account_id)
+            return query
+
         # 今日总告警数
         today_total = (
-            session.query(func.count(AlarmPo.id)).filter(AlarmPo.alarm_date == today).scalar() or 0
+            build_base_query()
+            .filter(AlarmPo.alarm_date == today)
+            .scalar()
+            or 0
         )
 
         # 未处理告警数
         unconfirmed = (
-            session.query(func.count(AlarmPo.id))
+            build_base_query()
             .filter(and_(AlarmPo.alarm_date == today, AlarmPo.status == "UNCONFIRMED"))
             .scalar()
             or 0
@@ -96,7 +115,7 @@ async def get_alarm_stats(request: Request):
 
         # 最近1小时告警数
         last_hour = (
-            session.query(func.count(AlarmPo.id))
+            build_base_query()
             .filter(AlarmPo.created_at >= one_hour_ago)
             .scalar()
             or 0
@@ -104,7 +123,7 @@ async def get_alarm_stats(request: Request):
 
         # 最近5分钟告警数
         last_five_minutes = (
-            session.query(func.count(AlarmPo.id))
+            build_base_query()
             .filter(AlarmPo.created_at >= five_minutes_ago)
             .scalar()
             or 0
@@ -199,3 +218,80 @@ async def confirm_all_alarms(
         return error_response(code=500, message=f"批量确认告警失败: {str(e)}")
     finally:
         session.close()
+
+
+@router.get("/suppression")
+async def get_suppression_status(
+    request: Request,
+    account_id: Optional[str] = Query(None, description="账户ID，不传则返回所有账户"),
+):
+    """
+    获取异常告警压制状态
+
+    返回各账户各指标的压制状态
+    """
+    try:
+        from src.app_context import get_app_context
+
+        ctx = get_app_context()
+        alarm_service = ctx.get_alarm_service()
+
+        if not alarm_service:
+            return error_response(code=500, message="告警服务未初始化")
+
+        status = alarm_service.get_suppression_status(account_id)
+        return success_response(data=status, message="获取成功")
+    except Exception as e:
+        logger.exception(f"获取压制状态失败: {e}")
+        return error_response(code=500, message=f"获取压制状态失败: {str(e)}")
+
+
+@router.post("/suppression/clear/{account_id}")
+async def clear_suppression(
+    account_id: str,
+    indicator: Optional[str] = Query(None, description="指标类型(1min/5min/1hour)，不传则清除该账户所有压制"),
+):
+    """
+    清除指定账户的异常告警压制状态
+
+    Args:
+        account_id: 账户ID
+        indicator: 指标类型，不传则清除该账户所有压制
+    """
+    try:
+        from src.app_context import get_app_context
+
+        ctx = get_app_context()
+        alarm_service = ctx.get_alarm_service()
+
+        if not alarm_service:
+            return error_response(code=500, message="告警服务未初始化")
+
+        alarm_service.clear_suppression(account_id, indicator)
+
+        if indicator:
+            return success_response(message=f"已清除 [{account_id}] {indicator} 的压制状态")
+        else:
+            return success_response(message=f"已清除 [{account_id}] 所有压制状态")
+    except Exception as e:
+        logger.exception(f"清除压制状态失败: {e}")
+        return error_response(code=500, message=f"清除压制状态失败: {str(e)}")
+
+
+@router.post("/suppression/clear_all")
+async def clear_all_suppression():
+    """清除所有异常告警压制状态（管理员用）"""
+    try:
+        from src.app_context import get_app_context
+
+        ctx = get_app_context()
+        alarm_service = ctx.get_alarm_service()
+
+        if not alarm_service:
+            return error_response(code=500, message="告警服务未初始化")
+
+        alarm_service.clear_all_suppression()
+        return success_response(message="已清除所有压制状态")
+    except Exception as e:
+        logger.exception(f"清除所有压制状态失败: {e}")
+        return error_response(code=500, message=f"清除所有压制状态失败: {str(e)}")

@@ -23,21 +23,21 @@ const routes: RouteRecordRaw[] = [
     path: '/account',
     name: 'Account',
     component: AccountCombined,
-    meta: { title: '账户' }
+    meta: { title: '账户', showAccountInfo: true }
   },
   // 一级菜单：换仓
   {
     path: '/rotation',
     name: 'Rotation',
     component: () => import('@/views/Rotation.vue'),
-    meta: { title: '换仓' }
+    meta: { title: '换仓', showAccountInfo: true }
   },
   // 一级菜单：策略
   {
     path: '/strategy',
     name: 'Strategy',
     component: () => import('@/views/Strategy.vue'),
-    meta: { title: '策略' }
+    meta: { title: '策略', showAccountInfo: true }
   },
   // 一级菜单：监控
   {

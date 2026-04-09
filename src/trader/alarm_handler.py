@@ -30,6 +30,29 @@ class TraderAlarmHandler:
         self.account_id = account_id
         self.socket_server = socket_server
 
+    async def send_notify(self, title: str, detail: str = "") -> None:
+        """
+        发送通知告警到Manager
+
+        Args:
+            title: 通知标题
+            detail: 通知详情
+        """
+        now = datetime.now()
+        notify_data = {
+            "type": "notification",
+            "account_id": self.account_id,
+            "title": title,
+            "detail": detail,
+            "timestamp": now.isoformat(),
+        }
+
+        if self.socket_server:
+            await self.socket_server.send_push("notify", notify_data)
+            logger.info(f"通知已推送到Manager: [{self.account_id}] {title}")
+        else:
+            logger.warning("Socket服务器未初始化，通知未推送")
+
     async def __call__(self, message) -> None:
         """
         处理日志记录

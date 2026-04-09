@@ -165,6 +165,28 @@ class WebSocketManager:
         }
         await self.broadcast(message)
 
+    async def broadcast_suppression_update(
+        self, account_id: str, indicator: str, status: dict
+    ) -> None:
+        """
+        广播异常告警压制状态更新
+
+        Args:
+            account_id: 账户ID
+            indicator: 指标类型
+            status: 压制状态数据
+        """
+        message = {
+            "type": "suppression_update",
+            "data": {
+                "account_id": account_id,
+                "indicator": indicator,
+                "status": status.get(account_id, {}),
+            },
+            "timestamp": datetime.now().isoformat(),
+        }
+        await self.broadcast(message)
+
 
 # 创建全局实例
 websocket_manager = WebSocketManager()

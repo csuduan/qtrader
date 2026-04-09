@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 
 from src.app_context import AppContext, get_app_context
 from src.manager.public_data_service import PublicDataService
+from src.manager.service.alarm_service import AlarmService
 from src.manager.trader_proxy import TraderProxy
 from src.models.object import AccountData, Direction, Offset, OrderData, OrderRequest
 from src.utils.config_loader import AccountConfig, AppConfig, DatabaseConfig, SocketConfig, get_config_loader
@@ -75,6 +76,9 @@ class TradingManager:
 
         # 公共数据服务
         self.public_data_service: Optional[PublicDataService] = None
+
+        # 告警服务
+        self.alarm_service: Optional[AlarmService] = None
 
         # 服务器资源监控历史缓存（5秒采样一次，默认保存2880条约4小时）
         self._resource_history: deque = deque(maxlen=2880)
@@ -784,6 +788,11 @@ class TradingManager:
         # 启动资源采样任务
         self._start_resource_sampler()
 
+        # 初始化告警服务
+        self.alarm_service = AlarmService(self)
+        ctx.register(ctx.KEY_ALARM_SERVICE, self.alarm_service)
+        logger.info("告警服务已初始化")
+
         # 初始化并启动 Scheduler（复用 utils/scheduler.py）
         from src.manager.job_mgr import ManagerJobManager
         from src.utils.scheduler import TaskScheduler
@@ -956,6 +965,13 @@ class TradingManager:
         if self._scheduler:
             self._scheduler.shutdown()
             logger.info("ManagerScheduler 已停止")
+
+        # 清理告警服务
+        if self.alarm_service:
+            self.alarm_service.clear_all_suppression()
+            ctx.remove(ctx.KEY_ALARM_SERVICE)
+            self.alarm_service = None
+            logger.info("告警服务已清理")
 
         # 关闭共享数据库
         from src.utils.shared_database import close_shared_database

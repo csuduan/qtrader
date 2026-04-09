@@ -633,6 +633,9 @@ class TraderProxy:
             elif msg_type == "trader_ready":
                 # Trader就绪通知，触发全量同步
                 self._handle_trader_ready_push(data)
+            elif msg_type == "notify":
+                # 通知告警，交给AlarmService处理
+                self._handle_notify_push(data)
             else:
                 self._emit_data(msg_type, data)
         except Exception as e:
@@ -696,6 +699,34 @@ class TraderProxy:
         except Exception as e:
             logger.exception(f"处理Trader就绪通知失败: {e}")
 
+    def _handle_notify_push(self, data: Dict) -> None:
+        """
+        处理Trader推送的通知告警
+
+        Args:
+            data: 通知数据
+        """
+        try:
+            from src.app_context import get_app_context
+
+            ctx = get_app_context()
+            if not ctx:
+                logger.warning("应用上下文未初始化，无法处理通知")
+                return
+
+            alarm_service = ctx.get_alarm_service()
+            if not alarm_service:
+                logger.warning("告警服务未初始化，无法处理通知")
+                return
+
+            # 异步处理通知
+            import asyncio
+
+            asyncio.create_task(alarm_service.handle_notification(data))
+            logger.debug(f"通知已转交给AlarmService处理: [{self.account_id}]")
+        except Exception as e:
+            logger.exception(f"处理通知推送失败: {e}")
+
     def _emit_data(self, data_type: str, data: Dict) -> None:
         """
         提交到事件驱动中
@@ -728,14 +759,17 @@ class TraderProxy:
 
     def _handle_alarm_data(self, data: Dict) -> None:
         """
-        处理告警数据
-        保存到数据库，检查告警配置后发送即时通知，并触发告警更新事件
+        处理异常告警数据（来自Trader的ERROR日志）
 
-        Manager 统一负责：告警持久化 + 即时通知（含DND检查）+ 事件推送
+        保存异常记录到数据库，交由AlarmService的定时任务统计阈值
+        并触发告警更新事件推送前端
 
         Args:
             data: 告警数据
         """
+        from datetime import datetime
+
+        from src.models.object import AlarmType
         from src.models.po import AlarmPo
         from src.utils.database import get_database
 
@@ -746,10 +780,12 @@ class TraderProxy:
 
         try:
             with db.get_session() as session:
+                now = datetime.now()
                 alarm = AlarmPo(
                     account_id=data.get("account_id", self.account_id),
-                    alarm_date=data.get("alarm_date"),
-                    alarm_time=data.get("alarm_time"),
+                    alarm_type=AlarmType.EXCEPTION,  # 标记为异常类型
+                    alarm_date=data.get("alarm_date", now.strftime("%Y-%m-%d")),
+                    alarm_time=data.get("alarm_time", now.strftime("%H:%M:%S")),
                     source=data.get("source", "TRADER"),
                     title=data.get("title"),
                     detail=data.get("detail"),
@@ -759,24 +795,7 @@ class TraderProxy:
                 session.commit()
                 session.refresh(alarm)
 
-                logger.info(f"告警已保存到数据库: {alarm.title}")
-
-                # 即时告警通知：检查全局告警配置 + DND
-                app_config = ctx.get_config()
-                if app_config and app_config.alert.immediate:
-                    try:
-                        from src.utils.wecomm import is_dnd_now, send_wechat
-
-                        if is_dnd_now(app_config.alert.dnd_start, app_config.alert.dnd_end):
-                            logger.debug(
-                                f"当前为免打扰时段({app_config.alert.dnd_start}-"
-                                f"{app_config.alert.dnd_end})，跳过告警通知: {alarm.title}"
-                            )
-                        else:
-                            # 标题已包含【即时告警】【账户ID】前缀
-                            send_wechat(f"{alarm.title}\n{alarm.detail}")
-                    except Exception as e:
-                        logger.error(f"发送即时告警通知失败: {e}")
+                logger.info(f"异常告警已保存到数据库: [{self.account_id}] {alarm.title}")
 
                 # 触发告警更新事件（推送WebSocket给前端）
                 event_engine = ctx.get_event_engine()
@@ -784,13 +803,15 @@ class TraderProxy:
                     alarm_dict = {
                         "id": alarm.id,
                         "account_id": alarm.account_id,
+                        "alarm_type": alarm.alarm_type,
+                        "indicator": alarm.indicator,
                         "alarm_date": alarm.alarm_date,
                         "alarm_time": alarm.alarm_time,
                         "source": alarm.source,
                         "title": alarm.title,
                         "detail": alarm.detail,
                         "status": alarm.status,
-                        "created_at": alarm.created_at.isoformat(),
+                        "created_at": alarm.created_at.isoformat() if alarm.created_at else None,
                     }
                     event_engine.put(EventTypes.ALARM_UPDATE, alarm_dict)
                     logger.debug(f"推送告警更新事件: {alarm.title}")

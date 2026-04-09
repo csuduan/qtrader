@@ -158,15 +158,15 @@
     <!-- 主体内容 -->
     <el-container class="main-container">
       <!-- 顶部栏：移动端始终显示，桌面端非简化页面显示 -->
-      <el-header v-if="isMobile || !isSimpleHeaderPage" class="header" :class="{ 'is-mobile': isMobile, 'simple-header': isSimpleHeaderPage }">
+      <el-header v-if="isMobile || showAccountInfo" class="header" :class="{ 'is-mobile': isMobile, 'simple-header': !showAccountInfo }">
         <div class="header-left">
           <!-- 移动端菜单按钮 -->
           <el-button v-if="isMobile" text class="menu-btn" @click="drawerVisible = true">
             <el-icon :size="20"><Fold /></el-icon>
           </el-button>
 
-          <!-- 简化header页面不显示账户选择器等内容 -->
-          <template v-if="!isSimpleHeaderPage && store.accounts.length > 0">
+          <!-- 只在账户/换仓/策略页面显示账户选择器等内容 -->
+          <template v-if="showAccountInfo && store.accounts.length > 0">
             <el-dropdown @command="handleSwitchAccount" trigger="click">
               <div class="account-selector">
                 <span class="account-name">{{ currentAccountName }}</span>
@@ -283,8 +283,8 @@
 
         </div>
         <div class="header-right">
-          <!-- 非简化header页面显示资产信息 -->
-          <template v-if="!isSimpleHeaderPage">
+          <!-- 只在账户/换仓/策略页面显示资产信息 -->
+          <template v-if="showAccountInfo">
             <span>总资产: ¥{{ formatNumber(store.currentAccount?.balance || 0) }}</span>
             <el-divider direction="vertical" />
             <span :class="(store.currentAccount?.today_profit || 0) >= 0 ? 'profit' : 'loss'">
@@ -340,10 +340,9 @@ const canTrade = computed(() => {
   return userRole.value === 'admin' || userRole.value === 'trader'
 })
 
-// 是否是简化header页面（总览、日志、系统）
-const isSimpleHeaderPage = computed(() => {
-  const simplePaths = ['/dashboard', '/admin/log', '/admin/system']
-  return simplePaths.includes(route.path)
+// 是否显示账户信息（只在账户/换仓/策略页面显示）
+const showAccountInfo = computed(() => {
+  return route.meta.showAccountInfo === true
 })
 
 // 保留参考

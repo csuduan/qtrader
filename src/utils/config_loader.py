@@ -140,21 +140,50 @@ class GatewayConfig(BaseModel):
     subscribe_bars: List[str] = []
 
 
-class AlertConfig(BaseModel):
-    """告警通知配置"""
+class IndicatorConfig(BaseModel):
+    """异常指标配置"""
 
-    # 即时告警：检查到异常立即发送（如Trader异常、连接断开等）
-    immediate: bool = True
-    # 阈值告警：异常日志达到阈值时发送
-    threshold: bool = True
-    # 阈值：单位时间内异常日志数量达到此值触发告警
-    threshold_count: int = 5
-    # 时间窗口：统计异常日志的时间窗口（秒）
-    threshold_window: int = 300  # 5分钟
-    # 免打扰开始时间（小时，默认23点），此时间段内不发送微信/即时告警
-    dnd_start: int = 23
-    # 免打扰结束时间（小时，默认次日8点）
-    dnd_end: int = 8
+    name: str = Field(..., description="指标名称: 1min/5min/1hour")
+    window: int = Field(..., description="时间窗口（秒）")
+    threshold: int = Field(..., description="阈值（异常次数）")
+    description: str = Field(default="", description="指标描述")
+
+
+class NotificationAlertConfig(BaseModel):
+    """通知告警配置"""
+
+    enabled: bool = Field(default=True, description="是否启用通知告警")
+    dnd_start: int = Field(default=23, description="免打扰开始时间（小时）")
+    dnd_end: int = Field(default=8, description="免打扰结束时间（小时）")
+
+
+class ExceptionAlertConfig(BaseModel):
+    """异常告警配置"""
+
+    enabled: bool = Field(default=True, description="是否启用异常告警")
+    dnd_start: int = Field(default=23, description="免打扰开始时间（小时）")
+    dnd_end: int = Field(default=8, description="免打扰结束时间（小时）")
+    indicators: List[IndicatorConfig] = Field(
+        default_factory=lambda: [
+            IndicatorConfig(name="1min", window=60, threshold=1, description="最近1分钟异常次数超过1"),
+            IndicatorConfig(name="5min", window=300, threshold=5, description="最近5分钟异常次数超过5"),
+            IndicatorConfig(name="1hour", window=3600, threshold=10, description="最近1小时异常次数超过10"),
+        ],
+        description="异常指标配置列表"
+    )
+
+
+class AlertConfig(BaseModel):
+    """告警通知配置（新结构）"""
+
+    notification: NotificationAlertConfig = Field(
+        default_factory=NotificationAlertConfig,
+        description="通知告警配置"
+    )
+    exception: ExceptionAlertConfig = Field(
+        default_factory=ExceptionAlertConfig,
+        description="异常告警配置"
+    )
 
 
 class AccountConfig(BaseModel):
@@ -163,10 +192,8 @@ class AccountConfig(BaseModel):
     account_id: Optional[str] = None
     account_type: str | None = "kq"
     enabled: bool | None = True
-    # 告警配置（新结构）
+    # 告警配置
     alert: AlertConfig = Field(default_factory=AlertConfig)
-    # 兼容旧配置：alert_wechat 已废弃，请使用 alert.immediate 和 alert.threshold
-    alert_wechat: bool | None = None
 
     gateway: Optional[GatewayConfig] = None
     paths: PathsConfig | None= None
@@ -175,17 +202,6 @@ class AccountConfig(BaseModel):
 
     class Config:
         extra = "allow"  # 允许额外字段
-
-    def model_post_init(self, __context: Any) -> None:
-        """兼容旧配置：如果设置了 alert_wechat，同步到新的 alert 配置"""
-        if self.alert_wechat is not None:
-            # 如果旧配置存在，同步到新配置
-            self.alert.immediate = self.alert_wechat
-            self.alert.threshold = self.alert_wechat
-            logger.warning(
-                f"account {self.account_id}: alert_wechat 已废弃，"
-                f"请使用 alert.immediate 和 alert.threshold"
-            )
 
 
 class SocketConfig(BaseModel):

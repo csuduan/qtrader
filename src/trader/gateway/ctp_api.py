@@ -208,15 +208,20 @@ class CtpMdApi(mdapi.CThostFtdcMdSpi):
 
     def close(self) -> None:
         """关闭行情接口"""
+        self._running = False
+        self.connected = False
+
         if self.api:
             try:
+                # 先注销SPI，避免回调中访问已释放资源
+                self.api.RegisterSpi(None)
+                # 释放API资源
                 self.api.Release()
             except Exception as e:
                 logger.warning(f"关闭行情接口异常: {e}")
-            self.api = None
+            finally:
+                self.api = None
 
-        self._running = False
-        self.connected = False
         logger.info("CTP 行情接口已关闭")
 
     def login(self) -> None:
@@ -449,15 +454,20 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
 
     def close(self) -> None:
         """关闭交易接口"""
+        self._running = False
+        self.connected = False
+
         if self.api:
             try:
+                # 先注销SPI，避免回调中访问已释放资源
+                self.api.RegisterSpi(None)
+                # 释放API资源
                 self.api.Release()
             except Exception as e:
                 logger.warning(f"关闭交易接口异常: {e}")
-            self.api = None
+            finally:
+                self.api = None
 
-        self._running = False
-        self.connected = False
         logger.info("CTP 交易接口已关闭")
 
     def authenticate(self) -> None:

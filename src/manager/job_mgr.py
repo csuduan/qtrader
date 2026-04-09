@@ -296,15 +296,16 @@ class ManagerJobManager:
             logger.warning(f"已创建告警: {title} - {detail}")
 
             # 发送即时告警通知（如果启用且非免打扰时段）
+            # 注意：旧版本的 alert.immediate 已废弃，现在通过 AlarmService 统一处理通知告警
             if immediate_alert:
                 # 从全局配置获取告警配置
                 app_config = self.trading_manager.app_config
-                if app_config and app_config.alert.immediate:
+                if app_config and app_config.alert.notification.enabled:
                     try:
                         from src.utils.wecomm import is_dnd_now, send_wechat
 
-                        if is_dnd_now(app_config.alert.dnd_start, app_config.alert.dnd_end):
-                            logger.debug(f"当前为免打扰时段({app_config.alert.dnd_start}-{app_config.alert.dnd_end})，跳过告警通知: {title}")
+                        if is_dnd_now(app_config.alert.notification.dnd_start, app_config.alert.notification.dnd_end):
+                            logger.debug(f"当前为免打扰时段({app_config.alert.notification.dnd_start}-{app_config.alert.notification.dnd_end})，跳过告警通知: {title}")
                         else:
                             send_wechat(f"【即时告警】{title}\n{detail}")
                     except Exception as e:
@@ -397,8 +398,9 @@ class ManagerJobManager:
                 now = datetime.now()
 
                 # 从全局配置获取阈值告警配置
+                # 注意：旧版本的 alert.threshold 已废弃，现在通过 AlarmService 统一处理异常告警
                 app_config = self.trading_manager.app_config
-                if not app_config or not app_config.alert.threshold:
+                if not app_config or not app_config.alert.exception.enabled:
                     return
 
                 threshold_count = app_config.alert.threshold_count
@@ -471,3 +473,16 @@ class ManagerJobManager:
 
         except Exception as e:
             logger.exception(f"检查阈值告警失败: {e}")
+
+    async def check_exception_thresholds(self) -> None:
+        """
+        检查异常阈值告警（每分钟执行）
+
+        调用 AlarmService 的 check_exception_thresholds 方法
+        """
+        try:
+            alarm_service = self.trading_manager.alarm_service
+            if alarm_service:
+                await alarm_service.check_exception_thresholds()
+        except Exception as e:
+            logger.exception(f"检查异常阈值失败: {e}")

@@ -591,13 +591,28 @@ class OrderCmdFinishReason(str, Enum):
     ORDER_ERROR = "ORDER_ERROR"  # 报单异常
 
 
+class AlarmType(str, Enum):
+    """告警类型"""
+    NOTIFICATION = "notification"  # 通知告警
+    EXCEPTION = "exception"        # 异常告警
+
+
+class AlarmIndicator(str, Enum):
+    """异常指标类型"""
+    MIN_1 = "1min"
+    MIN_5 = "5min"
+    HOUR_1 = "1hour"
+
+
 class AlarmData(BaseModel):
     """告警数据传输对象"""
 
     account_id: str = Field(..., description="账户ID")
+    alarm_type: str = Field(default="exception", description="告警类型: notification/exception")
+    indicator: Optional[str] = Field(None, description="异常指标: 1min/5min/1hour")
     alarm_date: str = Field(..., description="告警日期 YYYY-MM-DD")
     alarm_time: str = Field(..., description="告警时间 HH:MM:SS")
-    source: str = Field(..., description="告警来源 TRADER/MANAGER")
+    source: str = Field(..., description="告警来源 TRADER/MANAGER/EXCEPTION_MONITOR")
     title: str = Field(..., description="告警标题")
     detail: Optional[str] = Field(None, description="告警详情")
     status: str = Field(default="UNCONFIRMED", description="告警状态")

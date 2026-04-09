@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, Query, Request
+from pydantic import BaseModel
 
 from src.manager.api.dependencies import get_trading_manager
 from src.manager.api.responses import error_response, success_response
@@ -499,23 +500,37 @@ async def toggle_manager_scheduler_job(
 @router.get("/manager/alert-config")
 async def get_manager_alert_config():
     """
-    获取Manager全局告警配置
+    获取Manager全局告警配置（新结构）
 
-    返回config.yaml中配置的alert配置
+    返回config.yaml中配置的alert配置（notification + exception）
     """
     try:
         config_loader = get_config_loader()
         app_config = config_loader.load_config()
         alert_config = app_config.alert
 
+        # 新结构：notification + exception
         return success_response(
             data={
-                "immediate": alert_config.immediate,
-                "threshold": alert_config.threshold,
-                "threshold_count": alert_config.threshold_count,
-                "threshold_window": alert_config.threshold_window,
-                "dnd_start": alert_config.dnd_start,
-                "dnd_end": alert_config.dnd_end,
+                "notification": {
+                    "enabled": alert_config.notification.enabled,
+                    "dnd_start": alert_config.notification.dnd_start,
+                    "dnd_end": alert_config.notification.dnd_end,
+                },
+                "exception": {
+                    "enabled": alert_config.exception.enabled,
+                    "dnd_start": alert_config.exception.dnd_start,
+                    "dnd_end": alert_config.exception.dnd_end,
+                    "indicators": [
+                        {
+                            "name": ind.name,
+                            "window": ind.window,
+                            "threshold": ind.threshold,
+                            "description": ind.description,
+                        }
+                        for ind in alert_config.exception.indicators
+                    ],
+                },
             },
             message="获取成功",
         )
@@ -524,25 +539,35 @@ async def get_manager_alert_config():
         return error_response(code=500, message=f"获取告警配置失败: {str(e)}")
 
 
+class NotificationConfigUpdate(BaseModel):
+    """通知告警配置更新（支持部分更新）"""
+    enabled: bool
+    dnd_start: Optional[int] = None
+    dnd_end: Optional[int] = None
+
+
+class ExceptionConfigUpdate(BaseModel):
+    """异常告警配置更新（支持部分更新）"""
+    enabled: bool
+    dnd_start: Optional[int] = None
+    dnd_end: Optional[int] = None
+
+
 @router.put("/manager/alert-config")
 async def update_manager_alert_config(
-    immediate: bool = Body(..., description="是否启用即时告警"),
-    threshold: bool = Body(..., description="是否启用阈值告警"),
-    threshold_count: Optional[int] = Body(None, description="阈值告警数量"),
-    threshold_window: Optional[int] = Body(None, description="阈值告警时间窗口（秒）"),
-    dnd_start: Optional[int] = Body(None, description="免打扰开始时间（小时，默认23点）"),
-    dnd_end: Optional[int] = Body(None, description="免打扰结束时间（小时，默认次日8点）"),
+    notification: NotificationConfigUpdate = Body(..., description="通知告警配置"),
+    exception: ExceptionConfigUpdate = Body(..., description="异常告警配置"),
 ):
     """
-    更新Manager全局告警配置
+    更新Manager全局告警配置（新结构）
 
-    更新config.yaml中的alert配置
-    - **immediate**: 是否启用即时告警（如Trader异常、连接断开等立即发送）
-    - **threshold**: 是否启用阈值告警（异常日志达到阈值时发送）
-    - **threshold_count**: 阈值告警数量，默认5
-    - **threshold_window**: 阈值告警时间窗口（秒），默认300（5分钟）
-    - **dnd_start**: 免打扰开始时间（小时，默认23点），此时间段内不发送即时告警
-    - **dnd_end**: 免打扰结束时间（小时，默认次日8点）
+    更新config.yaml中的alert配置（notification + exception）
+    - **notification.enabled**: 是否启用通知告警
+    - **notification.dnd_start**: 免打扰开始时间（小时）
+    - **notification.dnd_end**: 免打扰结束时间（小时）
+    - **exception.enabled**: 是否启用异常告警
+    - **exception.dnd_start**: 免打扰开始时间（小时）
+    - **exception.dnd_end**: 免打扰结束时间（小时）
     """
     try:
         import yaml
@@ -551,17 +576,18 @@ async def update_manager_alert_config(
         config_loader = get_config_loader()
         app_config = config_loader.load_config()
 
-        # 更新内存中的配置
-        app_config.alert.immediate = immediate
-        app_config.alert.threshold = threshold
-        if threshold_count is not None:
-            app_config.alert.threshold_count = threshold_count
-        if threshold_window is not None:
-            app_config.alert.threshold_window = threshold_window
-        if dnd_start is not None:
-            app_config.alert.dnd_start = dnd_start
-        if dnd_end is not None:
-            app_config.alert.dnd_end = dnd_end
+        # 更新内存中的配置（只更新传入的字段）
+        app_config.alert.notification.enabled = notification.enabled
+        if notification.dnd_start is not None:
+            app_config.alert.notification.dnd_start = notification.dnd_start
+        if notification.dnd_end is not None:
+            app_config.alert.notification.dnd_end = notification.dnd_end
+
+        app_config.alert.exception.enabled = exception.enabled
+        if exception.dnd_start is not None:
+            app_config.alert.exception.dnd_start = exception.dnd_start
+        if exception.dnd_end is not None:
+            app_config.alert.exception.dnd_end = exception.dnd_end
 
         # 读取现有配置文件
         config_path = Path(config_loader.config_dir) / "config.yaml"
@@ -571,30 +597,56 @@ async def update_manager_alert_config(
         else:
             config_data = {}
 
-        # 更新alert配置
+        # 更新alert配置（新结构）
         config_data["alert"] = {
-            "immediate": app_config.alert.immediate,
-            "threshold": app_config.alert.threshold,
-            "threshold_count": app_config.alert.threshold_count,
-            "threshold_window": app_config.alert.threshold_window,
-            "dnd_start": app_config.alert.dnd_start,
-            "dnd_end": app_config.alert.dnd_end,
+            "notification": {
+                "enabled": app_config.alert.notification.enabled,
+                "dnd_start": app_config.alert.notification.dnd_start,
+                "dnd_end": app_config.alert.notification.dnd_end,
+            },
+            "exception": {
+                "enabled": app_config.alert.exception.enabled,
+                "dnd_start": app_config.alert.exception.dnd_start,
+                "dnd_end": app_config.alert.exception.dnd_end,
+                "indicators": [
+                    {
+                        "name": ind.name,
+                        "window": ind.window,
+                        "threshold": ind.threshold,
+                        "description": ind.description,
+                    }
+                    for ind in app_config.alert.exception.indicators
+                ],
+            },
         }
 
         # 写回文件
         with open(config_path, "w", encoding="utf-8") as f:
             yaml.dump(config_data, f, allow_unicode=True, sort_keys=False)
 
-        logger.info(f"Manager告警配置已更新: immediate={immediate}, threshold={threshold}")
+        logger.info(f"Manager告警配置已更新: notification={notification.enabled}, exception={exception.enabled}")
 
         return success_response(
             data={
-                "immediate": app_config.alert.immediate,
-                "threshold": app_config.alert.threshold,
-                "threshold_count": app_config.alert.threshold_count,
-                "threshold_window": app_config.alert.threshold_window,
-                "dnd_start": app_config.alert.dnd_start,
-                "dnd_end": app_config.alert.dnd_end,
+                "notification": {
+                    "enabled": app_config.alert.notification.enabled,
+                    "dnd_start": app_config.alert.notification.dnd_start,
+                    "dnd_end": app_config.alert.notification.dnd_end,
+                },
+                "exception": {
+                    "enabled": app_config.alert.exception.enabled,
+                    "dnd_start": app_config.alert.exception.dnd_start,
+                    "dnd_end": app_config.alert.exception.dnd_end,
+                    "indicators": [
+                        {
+                            "name": ind.name,
+                            "window": ind.window,
+                            "threshold": ind.threshold,
+                            "description": ind.description,
+                        }
+                        for ind in app_config.alert.exception.indicators
+                    ],
+                },
             },
             message="告警配置已更新",
         )

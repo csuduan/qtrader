@@ -139,6 +139,7 @@ async def lifespan(app: FastAPI):
 
     # 启动 WebSocket 管理器
     websocket_manager.start()
+    ctx.set(AppContext.KEY_WS_MANAGER, websocket_manager)
 
     # 存储到app.state
     app.state.config = _app_config

@@ -17,6 +17,8 @@ class AppContext:
     KEY_TASK_SCHEDULER = "task_scheduler"
     KEY_SWITCH_POS_MANAGER = "switch_pos_manager"
     KEY_TRADING_MANAGER = "trading_manager"
+    KEY_ALARM_SERVICE = "alarm_service"
+    KEY_WS_MANAGER = "ws_manager"
 
     """应用上下文"""
 
@@ -95,6 +97,14 @@ class AppContext:
     def get_trading_manager(self) -> Optional[Any]:
         """获取交易管理器"""
         return self.get(self.KEY_TRADING_MANAGER)
+
+    def get_alarm_service(self) -> Optional[Any]:
+        """获取告警服务"""
+        return self.get(self.KEY_ALARM_SERVICE)
+
+    def get_ws_manager(self) -> Optional[Any]:
+        """获取WebSocket管理器"""
+        return self.get(self.KEY_WS_MANAGER)
 
 
 # 全局应用上下文实例

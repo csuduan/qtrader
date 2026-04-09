@@ -159,6 +159,8 @@ class AlarmRes(BaseModel):
 
     id: int
     account_id: str
+    alarm_type: str = "exception"
+    indicator: Optional[str] = None
     alarm_date: str
     alarm_time: str
     source: str

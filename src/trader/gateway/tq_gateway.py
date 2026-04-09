@@ -874,18 +874,20 @@ class TqGateway(BaseGateway):
 
             while self._running:
                 try:
-                    # 从同步队列获取数据（超时1秒）
+                    # 从同步队列获取数据（使用get_nowait避免阻塞）
                     if self._sync_queue.empty():
-                        await asyncio.sleep(0)
+                        await asyncio.sleep(0.001)
                         continue
-                    event_type, data = await asyncio.to_thread(self._sync_queue.get, timeout=1.0)
+                    event_type, data = self._sync_queue.get_nowait()
                     # 映射到AsyncEventEngine事件类型
                     engine_event_type = self._map_event_type(event_type)
                     # 直接推送到AsyncEventEngine
                     if self._event_engine and engine_event_type:
                         self._event_engine.put(engine_event_type, data)
 
-                except asyncio.TimeoutError:
+                except queue.Empty:
+                    # 队列已空，继续循环
+                    await asyncio.sleep(0.001)
                     continue
                 except Exception as e:
                     logger.exception(f"事件分发异常: {e}")

@@ -17,73 +17,31 @@
           <el-form label-width="160px">
             <el-row :gutter="20">
               <el-col :xs="24" :sm="12">
-                <el-form-item label="即时告警">
+                <el-form-item label="通知告警">
                   <el-switch
-                    v-model="alertConfig.immediate"
+                    v-model="alertConfig.notification.enabled"
                     active-text="开启"
                     inactive-text="关闭"
                   />
-                  <div class="form-help">Trader异常、连接断开等立即发送告警</div>
+                  <div class="form-help">业务通知（如开盘检查、策略信号等）</div>
                 </el-form-item>
               </el-col>
               <el-col :xs="24" :sm="12">
-                <el-form-item label="阈值告警">
+                <el-form-item label="异常告警">
                   <el-switch
-                    v-model="alertConfig.threshold"
+                    v-model="alertConfig.exception.enabled"
                     active-text="开启"
                     inactive-text="关闭"
                   />
-                  <div class="form-help">异常日志达到阈值时发送告警</div>
+                  <div class="form-help">异常日志统计达到阈值时发送告警</div>
                 </el-form-item>
               </el-col>
             </el-row>
-            <el-row :gutter="20">
-              <el-col :xs="24" :sm="12">
-                <el-form-item label="阈值告警数量">
-                  <el-input-number
-                    v-model="alertConfig.threshold_count"
-                    :min="1"
-                    :max="100"
-                    :disabled="!alertConfig.threshold"
-                  />
-                  <span class="ml-2">次</span>
-                </el-form-item>
-              </el-col>
-              <el-col :xs="24" :sm="12">
-                <el-form-item label="阈值时间窗口">
-                  <el-input-number
-                    v-model="alertConfig.threshold_window"
-                    :min="60"
-                    :max="3600"
-                    :step="60"
-                    :disabled="!alertConfig.threshold"
-                  />
-                  <span class="ml-2">秒</span>
-                </el-form-item>
-              </el-col>
-            </el-row>
-            <el-row :gutter="20">
-              <el-col :xs="24" :sm="12">
-                <el-form-item label="免打扰开始时间">
-                  <el-input-number
-                    v-model="alertConfig.dnd_start"
-                    :min="0"
-                    :max="23"
-                  />
-                  <span class="ml-2">点</span>
-                  <div class="form-help">此时间段内不发送即时告警（默认23点）</div>
-                </el-form-item>
-              </el-col>
-              <el-col :xs="24" :sm="12">
-                <el-form-item label="免打扰结束时间">
-                  <el-input-number
-                    v-model="alertConfig.dnd_end"
-                    :min="0"
-                    :max="23"
-                  />
-                  <span class="ml-2">点</span>
-                  <div class="form-help">免打扰结束时间（默认次日8点）</div>
-                </el-form-item>
+            <el-row>
+              <el-col :span="24">
+                <div class="form-help" style="color: #909399; margin-top: 10px;">
+                  提示：详细配置（免打扰时间、指标阈值等）请在 config.yaml 中修改
+                </div>
               </el-col>
             </el-row>
           </el-form>
@@ -379,23 +337,40 @@ import type { User, CreateUserRequest, UpdateUserRequest } from '@/api/user'
 // ==================== 告警设置（Manager级别）====================
 const savingAlert = ref(false)
 const alertConfig = reactive({
-  immediate: true,
-  threshold: true,
-  threshold_count: 5,
-  threshold_window: 300,
-  dnd_start: 23,
-  dnd_end: 8
+  notification: {
+    enabled: true,
+    dnd_start: 23,
+    dnd_end: 8
+  },
+  exception: {
+    enabled: true,
+    dnd_start: 23,
+    dnd_end: 8,
+    indicators: [
+      { name: '1min', window: 60, threshold: 1, description: '最近1分钟异常次数超过1' },
+      { name: '5min', window: 300, threshold: 5, description: '最近5分钟异常次数超过5' },
+      { name: '1hour', window: 3600, threshold: 10, description: '最近1小时异常次数超过10' }
+    ]
+  }
 })
 
 async function loadAlertConfig() {
   try {
     const res = await systemApi.getManagerAlertConfig()
-    alertConfig.immediate = res.immediate
-    alertConfig.threshold = res.threshold
-    alertConfig.threshold_count = res.threshold_count ?? 5
-    alertConfig.threshold_window = res.threshold_window ?? 300
-    alertConfig.dnd_start = res.dnd_start ?? 23
-    alertConfig.dnd_end = res.dnd_end ?? 8
+    // 新结构：notification + exception
+    if (res.notification) {
+      alertConfig.notification.enabled = res.notification.enabled ?? true
+      alertConfig.notification.dnd_start = res.notification.dnd_start ?? 23
+      alertConfig.notification.dnd_end = res.notification.dnd_end ?? 8
+    }
+    if (res.exception) {
+      alertConfig.exception.enabled = res.exception.enabled ?? true
+      alertConfig.exception.dnd_start = res.exception.dnd_start ?? 23
+      alertConfig.exception.dnd_end = res.exception.dnd_end ?? 8
+      if (res.exception.indicators) {
+        alertConfig.exception.indicators = res.exception.indicators
+      }
+    }
   } catch (error: any) {
     ElMessage.error(`加载告警配置失败: ${error.message}`)
   }
@@ -404,13 +379,14 @@ async function loadAlertConfig() {
 async function saveAlertConfig() {
   savingAlert.value = true
   try {
+    // 只提交 enabled 字段，其他配置从yaml读取
     await systemApi.updateManagerAlertConfig({
-      immediate: alertConfig.immediate,
-      threshold: alertConfig.threshold,
-      threshold_count: alertConfig.threshold_count,
-      threshold_window: alertConfig.threshold_window,
-      dnd_start: alertConfig.dnd_start,
-      dnd_end: alertConfig.dnd_end
+      notification: {
+        enabled: alertConfig.notification.enabled
+      },
+      exception: {
+        enabled: alertConfig.exception.enabled
+      }
     })
     ElMessage.success('告警配置已保存')
   } catch (error: any) {
@@ -814,6 +790,7 @@ onMounted(() => {
   margin-top: 4px;
   line-height: 1.4;
 }
+
 
 .header-actions {
   display: flex;

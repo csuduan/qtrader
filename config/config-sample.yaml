@@ -9,14 +9,31 @@ paths:
   params: "/opt/data/qtrader/params"
   export: "/opt/data/qtrader/export"
 
-# 全局告警配置（所有账户共享）
+# 全局告警配置
 alert:
-  immediate: true     # 即时告警（Trader异常、连接断开等）
-  threshold: false     # 阈值告警（异常日志达到阈值时发送）
-  threshold_count: 5  # 阈值：异常次数
-  threshold_window: 300  # 时间窗口（秒）
-  dnd_start: 23       # 免打扰开始时间（小时，默认23点）
-  dnd_end: 8          # 免打扰结束时间（小时，默认次日8点）
+  # 通知告警配置
+  notification:
+    enabled: true
+    dnd_start: 23
+    dnd_end: 8
+  # 异常告警配置
+  exception:
+    enabled: true
+    dnd_start: 23
+    dnd_end: 8
+    indicators:
+      - name: "1min"
+        window: 60
+        threshold: 1
+        description: "最近1分钟异常次数超过1"
+      - name: "5min"
+        window: 300
+        threshold: 5
+        description: "最近5分钟异常次数超过5"
+      - name: "1hour"
+        window: 3600
+        threshold: 10
+        description: "最近1小时异常次数超过10"
 
 # db配置
 data_base:
@@ -83,6 +100,15 @@ scheduler:
       job_method: "pre_market_check"
       enabled: true
 
+    # 异常检查
+    - job_id: check_exception_thresholds
+      job_name: 异常阈值检查
+      job_group: 监控
+      job_description: 每分钟检查各账户异常日志数量是否超过阈值
+      cron_expression: 0 * * * * *
+      job_method: check_exception_thresholds
+      enabled: true
+
     # 清理告警
     - job_id: "cleanup_alarms"
       job_name: "清理告警"
@@ -100,6 +126,8 @@ scheduler:
       cron_expression: "0 0 3 * * *"  # 每天凌晨 3:00
       job_method: "cleanup_logs"
       enabled: true
+
+
 
 # 账户定时任务配置（所有Trader进程共享）
 account_scheduler:
