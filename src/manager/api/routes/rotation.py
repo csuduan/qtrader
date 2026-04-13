@@ -76,6 +76,9 @@ class RotationInstructionUpdate(BaseModel):
     enabled: Optional[bool] = None
     status: Optional[str] = None
     filled_volume: Optional[int] = None
+    direction: Optional[str] = None
+    offset: Optional[str] = None
+    volume: Optional[int] = None
 
 
 @router.get("")

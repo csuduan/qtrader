@@ -522,7 +522,8 @@ class Trader:
                 order_po.exchange_order_id = data.order_id if hasattr(data, 'exchange_order_id') else None
                 order_po.status_msg = data.status_msg if hasattr(data, 'status_msg') else None
                 order_po.update_date_time = data.update_time if hasattr(data, 'update_time') else None
-                order_po.insert_date_time = data.insert_time if hasattr(data, 'insert_time') else None
+                insert_time = data.insert_time if hasattr(data, 'insert_time') else None
+                order_po.insert_date_time = insert_time or order_po.update_date_time or datetime.now()
 
                 session.add(order_po)
                 logger.debug(f"订单数据已持久化: {order_id}")

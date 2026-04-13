@@ -56,7 +56,7 @@
               />
             </template>
           </el-table-column>
-          <el-table-column v-if="!isMobile" label="持仓" width="100" align="center">
+          <el-table-column label="持仓" :width="isMobile ? 70 : 100" align="center">
             <template #default="{ row }">
               <div class="position-info">
                 <span class="pos-long">{{ row.pos_long }}</span>
@@ -65,7 +65,7 @@
               </div>
             </template>
           </el-table-column>
-          <el-table-column v-if="!isMobile" label="信号" width="100" align="center">
+          <el-table-column label="信号" :width="isMobile ? 70 : 100" align="center">
             <template #default="{ row }">
               <el-tooltip v-if="row.signal && row.signal.side !== 0" placement="left" :show-after="200">
                 <template #content>

@@ -160,7 +160,7 @@ class OrderPo(Base):
     price_type = Column(String(10), nullable=False)
     status = Column(String(20), nullable=False, index=True)
     status_msg = Column(Text, nullable=True)
-    insert_date_time = Column(DateTime, nullable=False)
+    insert_date_time = Column(DateTime, nullable=True)
     update_date_time = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)

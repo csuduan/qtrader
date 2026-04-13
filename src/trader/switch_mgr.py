@@ -109,6 +109,14 @@ class SwitchPosManager:
             instruction.status = data["status"]
         if data.get("filled_volume") is not None:
             instruction.filled_volume = data["filled_volume"]
+        if data.get("direction") is not None:
+            instruction.direction = data["direction"]
+        if data.get("offset") is not None:
+            instruction.offset = data["offset"]
+        if data.get("volume") is not None:
+            instruction.volume = data["volume"]
+            # 同步调整剩余手数
+            instruction.remaining_volume = max(0, instruction.volume - instruction.filled_volume)
         instruction.updated_at = datetime.now()
 
         # 更新数据库

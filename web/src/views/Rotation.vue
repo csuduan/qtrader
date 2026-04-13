@@ -84,6 +84,18 @@
               />
             </template>
           </el-table-column>
+          <el-table-column label="操作" :width="isMobile ? 60 : 80" align="center">
+            <template #default="{ row }">
+              <el-button
+                type="primary"
+                :size="isMobile ? 'small' : 'default'"
+                @click="openEditDialog(row)"
+                :disabled="rotationStatus.working"
+              >
+                编辑
+              </el-button>
+            </template>
+          </el-table-column>
           <el-table-column v-if="!isMobile" prop="updated_at" label="更新时间" width="180">
             <template #default="{ row }">
               {{ formatDateTime(row.updated_at) }}
@@ -226,6 +238,40 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 编辑指令对话框 -->
+    <el-dialog v-model="showEditDialog" title="编辑换仓指令" width="90%" style="max-width: 500px">
+      <el-form :model="editForm" label-width="100px">
+        <el-form-item label="合约">
+          <span>{{ editForm.symbol }}</span>
+        </el-form-item>
+        <el-form-item label="策略编号">
+          <span>{{ editForm.strategy_id }}</span>
+        </el-form-item>
+        <el-form-item label="买卖方向">
+          <el-select v-model="editForm.direction" placeholder="请选择">
+            <el-option label="买入" value="BUY" />
+            <el-option label="卖出" value="SELL" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="开平标志">
+          <el-select v-model="editForm.offset" placeholder="请选择">
+            <el-option label="开仓" value="OPEN" />
+            <el-option label="平仓" value="CLOSE" />
+            <el-option label="平今" value="CLOSETODAY" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="手数">
+          <el-input-number v-model="editForm.volume" :min="1" :max="100" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showEditDialog = false">取消</el-button>
+        <el-button type="primary" @click="handleEdit" :loading="editing">
+          保存
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -241,9 +287,11 @@ const store = useStore()
 
  const loading = ref(false)
  const creating = ref(false)
+ const editing = ref(false)
  const rotating = ref(false)
  const batchDeleting = ref(false)
  const showCreateDialog = ref(false)
+ const showEditDialog = ref(false)
  const showImportDialog = ref(false)
  const importMode = ref('append')
  const uploading = ref(false)
@@ -258,6 +306,15 @@ const store = useStore()
  const csvHeaders = ref<string[]>([])
  const importForm = reactive({ file: null as UploadUserFile | null })
  const isMobile = ref(false)
+
+ const editForm = reactive({
+   id: 0,
+   strategy_id: '',
+   symbol: '',
+   direction: 'BUY',
+   offset: 'OPEN',
+   volume: 1
+ })
 
  const updateIsMobile = () => {
    isMobile.value = window.innerWidth <= 768
@@ -444,6 +501,43 @@ async function handleCreate() {
     ElMessage.error(`创建失败: ${error.message}`)
   } finally {
     creating.value = false
+  }
+}
+
+function openEditDialog(row: RotationInstruction) {
+  editForm.id = row.id
+  editForm.strategy_id = row.strategy_id
+  editForm.symbol = row.symbol
+  editForm.direction = row.direction
+  editForm.offset = row.offset
+  editForm.volume = row.volume
+  showEditDialog.value = true
+}
+
+async function handleEdit() {
+  if (!store.selectedAccountId) {
+    ElMessage.error('请先选择账户')
+    return
+  }
+  if (editForm.volume <= 0) {
+    ElMessage.warning('手数必须大于0')
+    return
+  }
+
+  editing.value = true
+  try {
+    await rotationApi.updateRotationInstruction(editForm.id, {
+      direction: editForm.direction,
+      offset: editForm.offset,
+      volume: editForm.volume
+    }, store.selectedAccountId)
+    ElMessage.success('更新成功')
+    showEditDialog.value = false
+    await loadData()
+  } catch (error: any) {
+    ElMessage.error(`更新失败: ${error.message}`)
+  } finally {
+    editing.value = false
   }
 }
 

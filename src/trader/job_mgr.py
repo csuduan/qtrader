@@ -265,7 +265,7 @@ class JobManager:
             unfinished = []
             for inst in instructions:
                 # 判断是否未完成：状态不是 FINISHED 或者还有剩余手数
-                if inst.status != "FINISHED" or inst.remaining_volume > 0:
+                if inst.status == "FAILED" and inst.is_deleted == False:
                     unfinished.append(
                         {
                             "id": inst.id,
