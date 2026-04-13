@@ -684,12 +684,12 @@ class Trader:
         if not account_po:
             account_po = AccountPo(account_id=account_id)
 
-        account_po.balance = Decimal(str(data.get("balance", 0)))
-        account_po.available = Decimal(str(data.get("available", 0)))
-        account_po.margin = Decimal(str(data.get("margin", 0)))
-        account_po.position_profit = Decimal(str(data.get("hold_profit", 0)))
-        account_po.close_profit = Decimal(str(data.get("close_profit", 0)))
-        account_po.risk_ratio = Decimal(str(data.get("risk_ratio", 0)))
+        account_po.balance = Decimal(str(data.get("balance") or 0))
+        account_po.available = Decimal(str(data.get("available") or 0))
+        account_po.margin = Decimal(str(data.get("margin") or 0))
+        account_po.position_profit = Decimal(str(data.get("hold_profit") or 0))
+        account_po.close_profit = Decimal(str(data.get("close_profit") or 0))
+        account_po.risk_ratio = Decimal(str(data.get("risk_ratio") or 0))
         account_po.updated_at = datetime.now()
 
         session.add(account_po)
@@ -709,16 +709,16 @@ class Trader:
                 exchange=data.get("exchange", ""),
             )
 
-        position_po.pos_long_td = data.get("pos_long_td", 0)
-        position_po.pos_long_yd = data.get("pos_long_yd", 0)
-        position_po.pos_short_td = data.get("pos_short_td", 0)
-        position_po.pos_short_yd = data.get("pos_short_yd", 0)
-        position_po.hold_price_long = Decimal(str(data.get("hold_price_long", 0)))
-        position_po.hold_price_short = Decimal(str(data.get("hold_price_short", 0)))
-        position_po.hold_profit_long = Decimal(str(data.get("hold_profit_long", 0)))
-        position_po.hold_profit_short = Decimal(str(data.get("hold_profit_short", 0)))
-        margin_long = Decimal(str(data.get("margin_long", 0)))
-        margin_short = Decimal(str(data.get("margin_short", 0)))
+        position_po.pos_long_td = data.get("pos_long_td") or 0
+        position_po.pos_long_yd = data.get("pos_long_yd") or 0
+        position_po.pos_short_td = data.get("pos_short_td") or 0
+        position_po.pos_short_yd = data.get("pos_short_yd") or 0
+        position_po.hold_price_long = Decimal(str(data.get("hold_price_long") or 0))
+        position_po.hold_price_short = Decimal(str(data.get("hold_price_short") or 0))
+        position_po.hold_profit_long = Decimal(str(data.get("hold_profit_long") or 0))
+        position_po.hold_profit_short = Decimal(str(data.get("hold_profit_short") or 0))
+        margin_long = Decimal(str(data.get("margin_long") or 0))
+        margin_short = Decimal(str(data.get("margin_short") or 0))
         position_po.margin = margin_long + margin_short
         position_po.updated_at = datetime.now()
 
