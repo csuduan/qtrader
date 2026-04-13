@@ -296,13 +296,7 @@ class SocketServer:
             logger.info("健康检查任务已停止")
 
 
-        # 关闭服务器
-        if self.server:
-            self.server.close()
-            await self.server.wait_closed()
-            logger.info(f"SocketServer V2 已停止")
-
-        # 关闭所有客户端连接
+        # 先关闭所有客户端连接（关键！否则 wait_closed 会阻塞在 handler 上）
         async with self._clients_lock:
             for conn_id, conn in list(self._clients.items()):
                 try:
@@ -310,6 +304,15 @@ class SocketServer:
                 except Exception as e:
                     logger.warning(f"关闭连接失败: {conn_id}, {e}")
             self._clients.clear()
+
+        # 关闭服务器
+        if self.server:
+            self.server.close()
+            try:
+                await asyncio.wait_for(self.server.wait_closed(), timeout=2.0)
+            except asyncio.TimeoutError:
+                logger.warning("SocketServer 等待连接关闭超时，强制停止")
+            logger.info(f"SocketServer V2 已停止")
 
         # 删除socket文件
         try:
