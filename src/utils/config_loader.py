@@ -165,11 +165,17 @@ class ExceptionAlertConfig(BaseModel):
     dnd_end: int = Field(default=8, description="免打扰结束时间（小时）")
     indicators: List[IndicatorConfig] = Field(
         default_factory=lambda: [
-            IndicatorConfig(name="1min", window=60, threshold=1, description="最近1分钟异常次数超过1"),
-            IndicatorConfig(name="5min", window=300, threshold=5, description="最近5分钟异常次数超过5"),
-            IndicatorConfig(name="1hour", window=3600, threshold=10, description="最近1小时异常次数超过10"),
+            IndicatorConfig(
+                name="1min", window=60, threshold=1, description="最近1分钟异常次数超过1"
+            ),
+            IndicatorConfig(
+                name="5min", window=300, threshold=5, description="最近5分钟异常次数超过5"
+            ),
+            IndicatorConfig(
+                name="1hour", window=3600, threshold=10, description="最近1小时异常次数超过10"
+            ),
         ],
-        description="异常指标配置列表"
+        description="异常指标配置列表",
     )
 
 
@@ -177,12 +183,10 @@ class AlertConfig(BaseModel):
     """告警通知配置（新结构）"""
 
     notification: NotificationAlertConfig = Field(
-        default_factory=NotificationAlertConfig,
-        description="通知告警配置"
+        default_factory=NotificationAlertConfig, description="通知告警配置"
     )
     exception: ExceptionAlertConfig = Field(
-        default_factory=ExceptionAlertConfig,
-        description="异常告警配置"
+        default_factory=ExceptionAlertConfig, description="异常告警配置"
     )
 
 
@@ -190,13 +194,14 @@ class AccountConfig(BaseModel):
     """完整账户配置（来自account-{ID}.yaml）"""
 
     account_id: Optional[str] = None
+    name: Optional[str] = None
     account_type: str | None = "kq"
     enabled: bool | None = True
     # 告警配置
     alert: AlertConfig = Field(default_factory=AlertConfig)
 
     gateway: Optional[GatewayConfig] = None
-    paths: PathsConfig | None= None
+    paths: PathsConfig | None = None
     trading: TradingConfig | None = None
     strategies: Optional[Dict[str, StrategyConfig]] = None
 
@@ -263,7 +268,9 @@ class SubsConfig(BaseModel):
     """订阅配置（全局）"""
 
     subscribe_symbols: List[str] = Field(default_factory=list, description="订阅的合约列表")
-    subscribe_bars: List[str] = Field(default_factory=list, description="订阅的K线列表，格式: symbol-interval")
+    subscribe_bars: List[str] = Field(
+        default_factory=list, description="订阅的K线列表，格式: symbol-interval"
+    )
 
 
 class AdminConfig(BaseModel):
@@ -285,7 +292,7 @@ class AppConfig(BaseModel):
     account_scheduler: Optional[SchedulerConfig] = None  # 账户定时任务
     trading: TradingConfig | None = Field(default_factory=TradingConfig)
     # 数据库连接配置
-    data_base: DataBaseConfig|None = Field(default_factory=DataBaseConfig)
+    data_base: DataBaseConfig | None = Field(default_factory=DataBaseConfig)
     # 数据服务配置
     data_service: Dict[str, Dict[str, str]] = Field(default_factory=dict)
     # 全局订阅配置
@@ -425,7 +432,6 @@ class ConfigLoader:
 
         account = AccountConfig(**config_data)
         return account
-
 
 
 # 全局配置加载器实例

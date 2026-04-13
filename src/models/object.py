@@ -337,7 +337,6 @@ class PositionData(BaseModel):
     margin_long: Optional[float] = Field(0, description="多头持仓保证金占用")
     margin_short: Optional[float] = Field(0, description="空头持仓保证金占用")
 
-
     # 扩展字段
     extras: Dict[str, Any] = Field(default_factory=dict)
     last_price: Optional[float] = Field(None, description="最新价格")
@@ -364,12 +363,12 @@ class PositionData(BaseModel):
     def total_pos(self) -> int:
         """总持仓（双向合计）"""
         return self.pos_long + self.pos_short
-    
+
     @property
     def close_profit(self) -> float:
         """平仓盈亏"""
         return self.close_profit_long + self.close_profit_short
-    
+
     @property
     def hold_profit(self) -> float:
         """持仓盈亏"""
@@ -389,24 +388,27 @@ class PositionData(BaseModel):
             updated_at=DateTime.now(),
         )
 
-    
-    def update_position(self, data: TradeData|TickData) -> None:
+    def update_position(self, data: TradeData | TickData) -> None:
         """根据成交更新持仓"""
 
         if self.auto_updated:
             return
-        
+
         self.updated_at = DateTime.now()
-        if isinstance(data, TickData):     
-            if not data.last_price:   
+        if isinstance(data, TickData):
+            if not data.last_price:
                 return
             self.last_price = data.last_price
-            self.hold_profit_long = (self.last_price - self.hold_price_long) * self.pos_long * self.multiple
-            self.hold_profit_short = (self.hold_price_short - self.last_price) * self.pos_short * self.multiple
+            self.hold_profit_long = (
+                (self.last_price - self.hold_price_long) * self.pos_long * self.multiple
+            )
+            self.hold_profit_short = (
+                (self.hold_price_short - self.last_price) * self.pos_short * self.multiple
+            )
             self.updated_at = data.datetime
 
         if isinstance(data, TradeData):
-            trade = data 
+            trade = data
             symbol = trade.symbol
             volume = trade.volume
             price = trade.price
@@ -415,21 +417,25 @@ class PositionData(BaseModel):
             if trade.offset == Offset.OPEN:
                 # 开仓：增加持仓
                 if trade.direction == Direction.BUY:
-                    # 开多 
+                    # 开多
                     cost = self.hold_price_long * self.pos_long + price * volume
                     self.pos_long_td += volume
-                    self.hold_price_long = round(cost / self.pos_long, 2)if self.pos_long > 0 else 0.0
+                    self.hold_price_long = (
+                        round(cost / self.pos_long, 2) if self.pos_long > 0 else 0.0
+                    )
                 else:
                     # 开空
                     cost = self.hold_price_short * self.pos_short + price * volume
                     self.pos_short_td += volume
-                    self.hold_price_short = round(cost / self.pos_short, 2)if self.pos_short > 0 else 0.0
+                    self.hold_price_short = (
+                        round(cost / self.pos_short, 2) if self.pos_short > 0 else 0.0
+                    )
             else:
                 # 平仓：减少持仓
                 if trade.direction == Direction.BUY:
                     # 平空（买入平空）
                     if self.pos_short > 0:
-        
+
                         # 处理今仓/昨仓
                         pos_short_td = self.pos_short_td or 0
                         pos_short_yd = self.pos_short_yd or 0
@@ -464,12 +470,11 @@ class PositionData(BaseModel):
                             remaining = volume - yd_to_close
                             if remaining > 0:
                                 self.pos_long_td = max(0, pos_long_td - remaining)
-                        
+
                         # 更新平仓盈亏
                         self.close_profit_long += (
                             (price - self.hold_price_long) * volume * self.multiple
                         )
-
 
 
 class AccountData(BaseModel):
@@ -502,6 +507,7 @@ class AccountData(BaseModel):
     extras: Dict[str, Any] = Field(default_factory=dict)
     broker_type: Optional[str] = Field(None, description="经纪商类型")
     broker_name: Optional[str] = Field(None, description="经纪商名称")
+    name: Optional[str] = Field(None, description="账户名称")
     currency: Optional[str] = Field(None, description="交易货币")
     user_id: Optional[str] = Field(None, description="用户ID")
     trade_paused: bool = False  # 是否暂停交易
@@ -593,12 +599,14 @@ class OrderCmdFinishReason(str, Enum):
 
 class AlarmType(str, Enum):
     """告警类型"""
+
     NOTIFICATION = "notification"  # 通知告警
-    EXCEPTION = "exception"        # 异常告警
+    EXCEPTION = "exception"  # 异常告警
 
 
 class AlarmIndicator(str, Enum):
     """异常指标类型"""
+
     MIN_1 = "1min"
     MIN_5 = "5min"
     HOUR_1 = "1hour"

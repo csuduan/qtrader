@@ -13,6 +13,7 @@ export interface ApiResponse<T = any> {
 export interface Account {
   id: number
   account_id: string
+  name: string | null
   broker_type: string | null
   broker_name: string | null
   currency: string

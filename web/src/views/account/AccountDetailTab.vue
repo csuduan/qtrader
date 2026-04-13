@@ -14,6 +14,8 @@
       </template>
 
       <el-descriptions :column="descColumn" border>
+        <el-descriptions-item label="账户编号">{{ store.currentAccount.account_id || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="账户名称">{{ store.currentAccount.name || '-' }}</el-descriptions-item>
         <el-descriptions-item label="用户ID">{{ store.currentAccount.user_id || '-'}}</el-descriptions-item>
         <el-descriptions-item label="经纪商">
           {{ store.currentAccount.broker_name || '-' }}

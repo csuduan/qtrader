@@ -145,6 +145,7 @@ class TradingEngine:
         else:
             account.broker_type = broke_type
         account.currency = "CNY"
+        account.name = self.config.name
         return account
 
     @property
@@ -173,7 +174,7 @@ class TradingEngine:
         if self.gateway is None:
             return {}
         return self.gateway.get_quotes()
-    
+
     def get_contract(self, symbol: str):
         return self.gateway.get_contracts().get(symbol, None)
 
@@ -203,13 +204,14 @@ class TradingEngine:
         logger.info(f"创建Gateway，类型: {gateway_type}")
         if gateway_type == "CTP":
             from src.trader.gateway.ctp_gateway import CtpGateway
+
             self.gateway = CtpGateway(self.config)
             logger.info("CTP Gateway创建成功(框架实现，需CTP SDK)")
         else:  # 默认TQSDK
             from src.trader.gateway.tq_gateway import TqGateway
+
             self.gateway = TqGateway(self.config)
             logger.info("TqSdk Gateway创建成功")
-
 
         # 初始化异步事件引擎
         self.event_engine = ctx.get_event_engine()
@@ -261,7 +263,7 @@ class TradingEngine:
             return self.config.risk_control
         finally:
             session.close()
-    
+
     async def close(self):
         """
         关闭交易引擎（通过Gateway）

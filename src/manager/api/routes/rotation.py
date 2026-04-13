@@ -85,6 +85,7 @@ async def get_rotation_instructions(
     offset: int = Query(0, description="偏移量"),
     status: Optional[str] = Query(None, description="状态筛选"),
     enabled: Optional[bool] = Query(None, description="是否启用筛选"),
+    trading_date: Optional[str] = Query(None, description="交易日筛选"),
     trading_manager: TradingManager = Depends(get_trading_manager),
 ):
     """
@@ -95,6 +96,7 @@ async def get_rotation_instructions(
     - **offset**: 偏移量
     - **status**: 状态筛选
     - **enabled**: 是否启用筛选
+    - **trading_date**: 交易日筛选(格式yyyyMMdd)
     """
     try:
         db = get_database()
@@ -115,6 +117,11 @@ async def get_rotation_instructions(
             # 应用启用状态筛选
             if enabled is not None:
                 query = query.filter(RotationInstructionPo.enabled.is_(enabled))
+
+            # 应用交易日筛选，默认今日
+            if trading_date is None:
+                trading_date = datetime.now().strftime("%Y%m%d")
+            query = query.filter(RotationInstructionPo.trading_date == trading_date)
 
             # 获取总数
             total = query.count()

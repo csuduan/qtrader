@@ -39,6 +39,7 @@ async def get_account_info(
         # 如果没有指定 account_id，使用配置中的第一个账户
         if account_id is None:
             from src.utils.config_loader import get_config_loader
+
             config = get_config_loader().load_config()
             if config.account_ids:
                 account_id = config.account_ids[0]
@@ -52,12 +53,13 @@ async def get_account_info(
         return success_response(
             data=AccountRes(
                 account_id=account_id,
+                name=account_data.name or "--",
                 broker_type=account_data.broker_type or "--",
                 broker_name=account_data.broker_name or "--",
                 currency=account_data.currency or "CNY",
                 balance=float(account_data.balance or 0),
                 available=float(account_data.available or 0),
-                pre_balance=float(account_data.pre_balance or 0),     
+                pre_balance=float(account_data.pre_balance or 0),
                 static_balance=float(account_data.static_balance or 0),
                 margin=float(account_data.margin or 0),
                 today_profit=float(account_data.hold_profit or 0)
@@ -106,6 +108,7 @@ async def get_all_accounts(
             accounts_list.append(
                 AccountRes(
                     account_id=account_info.account_id,
+                    name=account_info.name or "--",
                     broker_type=account_info.broker_type or "--",
                     broker_name=account_info.broker_name or "--",
                     currency=account_info.currency or "CNY",
@@ -242,8 +245,6 @@ async def stop_account_trader(
         return error_response(code=500, message="Trader停止失败")
 
 
-
-
 @router.post("/{account_id}/connect")
 async def connect_account_gateway(
     account_id: str,
@@ -359,7 +360,7 @@ async def sync_all_accounts(
             all_success = all(r.get("success", False) for r in results.values())
             return success_response(
                 data={"results": results, "all_success": all_success},
-                message="全量同步完成" if all_success else "部分账户同步失败"
+                message="全量同步完成" if all_success else "部分账户同步失败",
             )
     except Exception as e:
         logger.exception(f"同步账户数据失败: {e}")

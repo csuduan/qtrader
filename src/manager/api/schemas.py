@@ -13,6 +13,7 @@ class AccountRes(BaseModel):
     """账户信息响应"""
 
     account_id: str
+    name: Optional[str] = None
     broker_type: Optional[str] = None
     broker_name: Optional[str] = None
     currency: str = "CNY"

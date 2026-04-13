@@ -13,6 +13,7 @@ export const rotationApi = {
     offset?: number
     status?: string
     enabled?: boolean
+    trading_date?: string
   }): Promise<{ instructions: RotationInstruction[], rotation_status: { working: boolean, is_manual: boolean } }> => {
     return await api.get<{ instructions: RotationInstruction[], rotation_status: { working: boolean, is_manual: boolean } }>('/rotation', { params: { ...params, account_id: accountId } })
   },

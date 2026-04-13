@@ -1,6 +1,6 @@
 account_id: "xxx"
-account_type: "kq"
-
+name: "xxx"
+enabled: true
 
 gateway:
   type: "TQSDK"
