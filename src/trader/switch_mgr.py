@@ -265,10 +265,10 @@ class SwitchPosManager:
 
         if mode == "replace":
             with session_scope() as session:
-                # 先删除已存在的记录
-                session.query(RotationInstructionPo).filter_by(trading_date=trading_date).update(
-                    {"is_deleted": True}
-                )
+                # 先删除本账户已存在的记录
+                session.query(RotationInstructionPo).filter_by(
+                    trading_date=trading_date, account_id=self.config.account_id
+                ).update({"is_deleted": True})
                 session.bulk_save_objects(add_instruction)
         else:
             with session_scope() as session:
