@@ -214,7 +214,7 @@ class OrderCmdExecutor:
             try:
                 # 遍历所有 cmd，检查并执行报单
                 if len(self._pending_cmds) == 0:
-                    await asyncio.sleep(0)
+                    await asyncio.sleep(0.05)
                     continue
                 remove_list = []
                 for cmd_id, cmd in self._pending_cmds.items():
@@ -235,7 +235,7 @@ class OrderCmdExecutor:
                 await self._maybe_log_stats()
             except Exception as e:
                 self.logger.exception(f"执行循环异常: {e}")
-            await asyncio.sleep(0)
+            await asyncio.sleep(0.05)
         self.logger.info("执行器主循环退出")
 
     def _process_cmd(self, cmd: "OrderCmd") -> None:

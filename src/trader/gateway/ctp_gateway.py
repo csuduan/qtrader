@@ -377,7 +377,7 @@ class CtpGateway(BaseGateway):
 
                 except queue.Empty:
                     # 队列为空或超时，继续循环
-                    await asyncio.sleep(0)
+                    await asyncio.sleep(0.01)
                     continue
                 except Exception as e:
                     logger.exception(f"事件分发异常: {e}")
