@@ -18,32 +18,32 @@
       </template>
 
       <div class="table-wrapper">
-        <el-table :data="sortedOrderCmds" stripe v-loading="loading">
+        <el-table :data="sortedOrderCmds" stripe v-loading="loading" :size="isMobile ? 'small' : 'default'">
           <template #empty>
             <el-empty description="暂无报单指令" />
           </template>
-          <el-table-column prop="cmd_id" label="指令ID" width="180" show-overflow-tooltip />
-          <el-table-column prop="source" label="来源" width="150" show-overflow-tooltip>
+          <el-table-column v-if="!isMobile" prop="cmd_id" label="指令ID" width="180" show-overflow-tooltip />
+          <el-table-column v-if="!isMobile" prop="source" label="来源" width="150" show-overflow-tooltip>
             <template #default="{ row }">
               {{ row.source || '-' }}
             </template>
           </el-table-column>
-          <el-table-column prop="symbol" label="合约" width="120" />
-          <el-table-column prop="status" label="状态" width="100">
+          <el-table-column prop="symbol" label="合约" width="80" />
+          <el-table-column prop="status" label="状态" :width="isMobile ? 70 : 100">
             <template #default="{ row }">
               <el-tag :type="getOrderCmdStatusType(row.status)" size="small">
                 {{ row.status }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="volume" label="总手数" width="100" />
-          <el-table-column prop="filled_volume" label="已成交手数" width="120" />
-          <el-table-column prop="limit_price" label="限价" width="100">
+          <el-table-column prop="volume" label="总手" :width="isMobile ? 60 : 100" />
+          <el-table-column prop="filled_volume" label="成交" :width="isMobile ? 60 : 120" />
+          <el-table-column prop="limit_price" label="限价" :width="isMobile ? 60 : 100">
             <template #default="{ row }">
               {{ row.limit_price ? formatNumber(row.limit_price) : '市价' }}
             </template>
           </el-table-column>
-          <el-table-column prop="direction" label="方向" width="80">
+          <el-table-column prop="direction" label="方向" :width="isMobile ? 50 : 80">
             <template #default="{ row }">
               <el-tag :type="row.direction === 'BUY' ? 'success' : 'danger'" size="small" v-if="row.direction">
                 {{ row.direction === 'BUY' ? '买' : '卖' }}
@@ -51,33 +51,33 @@
               <span v-else>-</span>
             </template>
           </el-table-column>
-          <el-table-column prop="offset" label="开平" width="80">
+          <el-table-column prop="offset" label="开平" :width="isMobile ? 60 : 80">
             <template #default="{ row }">
               {{ row.offset || '-' }}
             </template>
           </el-table-column>
-          <el-table-column prop="started_at" label="开始时间" width="180">
+          <el-table-column v-if="!isMobile" prop="started_at" label="开始时间" width="180">
             <template #default="{ row }">
               {{ formatDateTime(row.started_at) }}
             </template>
           </el-table-column>
-          <el-table-column prop="finished_at" label="结束时间" width="180">
+          <el-table-column v-if="!isMobile" prop="finished_at" label="结束时间" width="180">
             <template #default="{ row }">
               {{ formatDateTime(row.finished_at) }}
             </template>
           </el-table-column>
-          <el-table-column prop="total_orders" label="总报单数" width="100" />
-          <el-table-column prop="finish_reason" label="结束原因" width="180" show-overflow-tooltip />
+          <el-table-column v-if="!isMobile" prop="total_orders" label="总报单" width="100" />
+          <el-table-column v-if="!isMobile" prop="finish_reason" label="结束原因" width="180" show-overflow-tooltip />
           <el-table-column
             v-if="localStatus === 'active'"
             label="操作"
-            width="100"
+            :width="isMobile ? 60 : 100"
             fixed="right"
           >
             <template #default="{ row }">
               <el-button
                 type="danger"
-                size="small"
+                :size="isMobile ? 'small' : 'default'"
                 @click="emit('cancelOrderCmd', row.cmd_id)"
                 :loading="cancellingCmdId === row.cmd_id"
               >
@@ -92,7 +92,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import type { OrderCmd } from '@/types'
 
 const props = defineProps<{
@@ -111,6 +111,21 @@ const emit = defineEmits<{
 const localStatus = computed({
   get: () => props.status,
   set: (val) => emit('update:status', val)
+})
+
+const isMobile = ref(false)
+
+const updateIsMobile = () => {
+  isMobile.value = window.innerWidth <= 768
+}
+
+onMounted(() => {
+  updateIsMobile()
+  window.addEventListener('resize', updateIsMobile)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', updateIsMobile)
 })
 
 // 按开始时间倒序排序的报单指令

@@ -35,28 +35,29 @@
             :data="instructions"
             :row-class-name="tableRowClassName"
             table-layout="fixed"
+            :size="isMobile ? 'small' : 'default'"
             @selection-change="handleSelectionChange"
           >
             <template #empty>
               <el-empty description="暂无换仓指令" />
             </template>
           <el-table-column type="selection" width="55" />
-          <el-table-column prop="strategy_id" label="策略编号" width="150" />
-          <el-table-column label="合约" width="100" fixed>
+          <el-table-column v-if="!isMobile" prop="strategy_id" label="策略编号" width="150" />
+          <el-table-column label="合约" width="80">
             <template #default="{ row }">
               {{ row.symbol }}
             </template>
           </el-table-column>
-          <el-table-column prop="direction" label="方向" width="70">
+          <el-table-column prop="direction" label="方向" :width="isMobile ? 50 : 70">
             <template #default="{ row }">
               <el-tag :type="row.direction === 'BUY' ? 'success' : 'danger'" size="small">
                 {{ row.direction === 'BUY' ? '买' : '卖' }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="offset" label="开平" width="120" />
-          <el-table-column prop="volume" label="手数" width="70" />
-          <el-table-column label="进度" width="120">
+          <el-table-column prop="offset" label="开平" :width="isMobile ? 70 : 120" />
+          <el-table-column prop="volume" label="手数" :width="isMobile ? 50 : 70" />
+          <el-table-column label="进度" :width="isMobile ? 100 : 120">
             <template #default="{ row }">
               <el-progress
                 :percentage="getProgress(row.volume, row.remaining_volume)"
@@ -64,18 +65,18 @@
               />
             </template>
           </el-table-column>
-          <el-table-column label="信息"  show-overflow-tooltip>
+          <el-table-column label="信息" show-overflow-tooltip :min-width="isMobile ? 80 : 120">
             <template #default="{ row }">
               <span v-if="row.status === 'COMPLETED'" style="color: #67c23a">已完成</span>
               <span v-else style="color: #f56c6c">{{ row.error_message || '待执行' }}</span>
             </template>
           </el-table-column>
-          <el-table-column prop="order_time" label="报单时间" width="100">
+          <el-table-column v-if="!isMobile" prop="order_time" label="报单时间" width="100">
             <template #default="{ row }">
               {{ row.order_time || '-' }}
             </template>
           </el-table-column>
-          <el-table-column prop="enabled" label="启用" width="70">
+          <el-table-column prop="enabled" label="启用" :width="isMobile ? 60 : 70">
             <template #default="{ row }">
               <el-switch
                 v-model="row.enabled"
@@ -83,12 +84,12 @@
               />
             </template>
           </el-table-column>
-          <el-table-column prop="updated_at" label="更新时间" width="180">
+          <el-table-column v-if="!isMobile" prop="updated_at" label="更新时间" width="180">
             <template #default="{ row }">
               {{ formatDateTime(row.updated_at) }}
             </template>
           </el-table-column>
-          <el-table-column prop="source" label="来源" width="150" show-overflow-tooltip>
+          <el-table-column v-if="!isMobile" prop="source" label="来源" width="150" show-overflow-tooltip>
             <template #default="{ row }">
               {{ row.source || '-' }}
             </template>
@@ -229,7 +230,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, watch, onMounted } from 'vue'
+import { ref, reactive, watch, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox, type UploadInstance, type UploadUserFile } from 'element-plus'
 import { VideoPlay, Refresh, Delete, Upload } from '@element-plus/icons-vue'
 import { rotationApi } from '@/api'
@@ -256,6 +257,11 @@ const store = useStore()
  const csvPreview = ref<Record<string, string>[]>([])
  const csvHeaders = ref<string[]>([])
  const importForm = reactive({ file: null as UploadUserFile | null })
+ const isMobile = ref(false)
+
+ const updateIsMobile = () => {
+   isMobile.value = window.innerWidth <= 768
+ }
 
 // uploadRef is used in template via ref="uploadRef"
 void uploadRef
@@ -514,7 +520,13 @@ watch(() => store.selectedAccountId, (newId) => {
 })
 
 onMounted(() => {
+  updateIsMobile()
+  window.addEventListener('resize', updateIsMobile)
   loadData()
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', updateIsMobile)
 })
 </script>
 

@@ -131,33 +131,33 @@
           </template>
 
           <div class="table-wrapper">
-            <el-table :data="tasks" stripe v-loading="loadingTasks" table-layout="fixed">
+            <el-table :data="tasks" stripe v-loading="loadingTasks" table-layout="fixed" :size="isMobile ? 'small' : 'default'">
               <template #empty>
                 <el-empty description="暂无定时任务" />
               </template>
-              <el-table-column prop="job_name" label="任务名称" min-width="200" />
-              <el-table-column prop="job_group" label="分组" width="120" />
-              <el-table-column prop="job_description" label="描述" min-width="200" show-overflow-tooltip />
-              <el-table-column prop="cron_expression" label="Cron表达式" width="150" />
-              <el-table-column label="上次触发时间" width="180">
+              <el-table-column prop="job_name" label="任务名称" :min-width="isMobile ? 120 : 200" />
+              <el-table-column prop="job_group" label="分组" :width="isMobile ? 70 : 120" />
+              <el-table-column v-if="!isMobile" prop="job_description" label="描述" min-width="200" show-overflow-tooltip />
+              <el-table-column v-if="!isMobile" prop="cron_expression" label="Cron表达式" width="150" />
+              <el-table-column v-if="!isMobile" label="上次触发时间" width="180">
                 <template #default="{ row }">
                   {{ row.last_trigger_time ? formatDateTime(row.last_trigger_time) : '-' }}
                 </template>
               </el-table-column>
-              <el-table-column label="状态" width="100">
+              <el-table-column label="状态" :width="isMobile ? 60 : 100">
                 <template #default="{ row }">
                   <el-tag :type="row.enabled ? 'success' : 'info'" size="small">
                     {{ row.enabled ? '就绪' : '暂停' }}
                   </el-tag>
                 </template>
               </el-table-column>
-              <el-table-column label="操作" width="200" fixed="right">
+              <el-table-column label="操作" :width="isMobile ? 160 : 200">
                 <template #default="{ row }">
                   <el-space>
                     <el-button
                       v-if="row.enabled"
                       type="warning"
-                      size="small"
+                      :size="isMobile ? 'small' : 'default'"
                       @click="handleOperateJob(row, 'pause')"
                       :loading="operatingJob === `${row.job_id}_pause`"
                     >
@@ -166,7 +166,7 @@
                     <el-button
                       v-else
                       type="success"
-                      size="small"
+                      :size="isMobile ? 'small' : 'default'"
                       @click="handleOperateJob(row, 'resume')"
                       :loading="operatingJob === `${row.job_id}_resume`"
                     >
@@ -174,7 +174,7 @@
                     </el-button>
                     <el-button
                       type="primary"
-                      size="small"
+                      :size="isMobile ? 'small' : 'default'"
                       @click="handleOperateJob(row, 'trigger')"
                       :loading="operatingJob === `${row.job_id}_trigger`"
                     >
@@ -254,6 +254,7 @@ const loadingTasks = ref(false)
 const operatingJob = ref<string | null>(null)
 const tasks = ref<Job[]>([])
 const descColumn = ref(2)
+const isMobile = ref(false)
 const connectForm = reactive({
   username: '',
   password: ''
@@ -290,16 +291,23 @@ watch(() => store.selectedAccountId, () => {
 
 onMounted(() => {
   updateDescColumn()
+  updateIsMobile()
   window.addEventListener('resize', updateDescColumn)
+  window.addEventListener('resize', updateIsMobile)
   loadTasks()
 })
 
 onUnmounted(() => {
   window.removeEventListener('resize', updateDescColumn)
+  window.removeEventListener('resize', updateIsMobile)
 })
 
 function updateDescColumn() {
   descColumn.value = window.innerWidth <= 768 ? 1 : 2
+}
+
+function updateIsMobile() {
+  isMobile.value = window.innerWidth <= 768
 }
 
 async function handleConnect() {

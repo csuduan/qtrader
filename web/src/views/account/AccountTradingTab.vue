@@ -27,6 +27,7 @@
               table-layout="fixed"
               row-key="symbol"
               :default-sort="{ prop: 'symbol', order: 'ascending' }"
+              :size="isMobile ? 'small' : 'default'"
             >
               <template #empty>
                 <el-empty description="暂无订阅行情" />
@@ -37,22 +38,22 @@
                 </template>
               </el-table-column>
 
-              <el-table-column prop="last_price" label="最新价" width="90">
+              <el-table-column prop="last_price" label="最新价" :width="isMobile ? 80 : 90">
                 <template #default="{ row }">
                   {{ formatNumber(row.last_price) }}
                 </template>
               </el-table-column>
-              <el-table-column prop="bid_price1" label="买一价" width="90">
+              <el-table-column prop="bid_price1" label="买一价" :width="isMobile ? 70 : 90">
                 <template #default="{ row }">
                   {{ formatNumber(row.bid_price1) }}
                 </template>
               </el-table-column>
-              <el-table-column prop="ask_price1" label="卖一价" width="90">
+              <el-table-column prop="ask_price1" label="卖一价" :width="isMobile ? 70 : 90">
                 <template #default="{ row }">
                   {{ formatNumber(row.ask_price1) }}
                 </template>
               </el-table-column>
-              <el-table-column prop="datetime" label="时间" :sortable="true">
+              <el-table-column prop="datetime" label="时间" :width="isMobile ? 80 : undefined" :sortable="true">
                 <template #default="{ row }">
                   {{ formatTime(row.datetime) }}
                 </template>
@@ -90,37 +91,38 @@
               stripe
               v-loading="loading"
               table-layout="fixed"
+              :size="isMobile ? 'small' : 'default'"
               @selection-change="emit('orderSelectionChange', $event)"
             >
               <template #empty>
                 <el-empty description="暂无委托单" />
               </template>
-              <el-table-column prop="order_id" label="委托单ID" width="180" show-overflow-tooltip />
-              <el-table-column prop="symbol" label="合约" width="120" />
-              <el-table-column prop="direction" label="方向" width="80">
+              <el-table-column v-if="!isMobile" prop="order_id" label="委托单ID" width="180" show-overflow-tooltip />
+              <el-table-column prop="symbol" label="合约" width="80" />
+              <el-table-column prop="direction" label="方向" :width="isMobile ? 50 : 80">
                 <template #default="{ row }">
                   <el-tag :type="row.direction === 'BUY' ? 'success' : 'danger'" size="small">
                     {{ row.direction === 'BUY' ? '买' : '卖' }}
                   </el-tag>
                 </template>
               </el-table-column>
-              <el-table-column prop="offset" label="开平" width="80" />
-              <el-table-column prop="volume_orign" label="报单手数" width="100" />
-              <el-table-column prop="volume_left" label="剩余手数" width="100" />
-              <el-table-column prop="limit_price" label="限价" width="100">
+              <el-table-column prop="offset" label="开平" :width="isMobile ? 60 : 80" />
+              <el-table-column prop="volume_orign" label="报单手数" :width="isMobile ? 60 : 100" />
+              <el-table-column prop="volume_left" label="剩余手数" :width="isMobile ? 60 : 100" />
+              <el-table-column prop="limit_price" label="限价" :width="isMobile ? 60 : 100">
                 <template #default="{ row }">
                   {{ row.limit_price ? formatNumber(row.limit_price) : '市价' }}
                 </template>
               </el-table-column>
-              <el-table-column prop="status" label="状态" width="100">
+              <el-table-column prop="status" label="状态" :width="isMobile ? 70 : 100">
                 <template #default="{ row }">
                   <el-tag :type="getStatusType(row.status)" size="small">
                     {{ getStatusText(row.status) }}
                   </el-tag>
                 </template>
               </el-table-column>
-              <el-table-column prop="last_msg" label="最后消息" width="200" show-overflow-tooltip />
-              <el-table-column prop="updated_at" label="报单时间">
+              <el-table-column prop="last_msg" label="最后消息" :width="isMobile ? 120 : 200" :min-width="isMobile ? 100 : undefined" show-overflow-tooltip />
+              <el-table-column prop="updated_at" label="报单时间" :min-width="isMobile ? 120 : 160">
                 <template #default="{ row }">
                   {{ formatDateTime(row.insert_date_time) }}
                 </template>
@@ -128,13 +130,12 @@
               <el-table-column
                 v-if="localOrderTab === 'PENDING'"
                 label="操作"
-                width="100"
-                fixed="right"
+                :width="isMobile ? 70 : 100"
               >
                 <template #default="{ row }">
                   <el-button
                     type="danger"
-                    size="small"
+                    :size="isMobile ? 'small' : 'default'"
                     @click="emit('cancelOrder', row.order_id)"
                   >
                     撤单
@@ -150,7 +151,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import type { Order, Quote } from '@/types'
 
 const props = defineProps<{
@@ -173,6 +174,20 @@ const emit = defineEmits<{
 const localOrderTab = computed({
   get: () => props.orderTab,
   set: (val) => emit('update:orderTab', val)
+})
+
+const isMobile = ref(false)
+const updateIsMobile = () => {
+  isMobile.value = window.innerWidth <= 768
+}
+
+onMounted(() => {
+  updateIsMobile()
+  window.addEventListener('resize', updateIsMobile)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', updateIsMobile)
 })
 
 function onOrderTabChange() {

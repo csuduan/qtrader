@@ -94,33 +94,34 @@
               v-loading="loadingTraders"
               stripe
               ref="tableRef"
+              :size="isMobile ? 'small' : 'default'"
               @selection-change="handleSelectionChange"
             >
               <el-table-column type="selection" width="55" />
-              <el-table-column prop="account_id" label="账户ID" min-width="120" />
-              <el-table-column prop="state" label="状态" min-width="100">
+              <el-table-column prop="account_id" label="账户ID" width="80" />
+              <el-table-column prop="state" label="状态" :width="isMobile ? 70 : 100">
                 <template #default="{ row }">
                   <el-tag :type="getStateTagType(row.state)" size="small">
                     {{ getStateLabel(row.state) }}
                   </el-tag>
                 </template>
               </el-table-column>
-              <el-table-column prop="pid" label="PID" min-width="100">
+              <el-table-column v-if="!isMobile" prop="pid" label="PID" min-width="100">
                 <template #default="{ row }">
                   <span>{{ row.pid ?? '-' }}</span>
                 </template>
               </el-table-column>
-              <el-table-column prop="start_time" label="启动时间" min-width="180">
+              <el-table-column v-if="!isMobile" prop="start_time" label="启动时间" min-width="180">
                 <template #default="{ row }">
                   <span>{{ formatDateTime(row.start_time) }}</span>
                 </template>
               </el-table-column>
-              <el-table-column label="操作" min-width="220" fixed="right">
+              <el-table-column label="操作" :width="isMobile ? 100 : 220">
                 <template #default="{ row }">
                   <el-button
                     v-if="!row.running"
                     type="success"
-                    size="small"
+                    :size="isMobile ? 'small' : 'default'"
                     @click="handleStart(row.account_id)"
                     :loading="actionLoading[row.account_id]"
                   >
@@ -129,7 +130,7 @@
                   <el-button
                     v-if="row.running"
                     type="danger"
-                    size="small"
+                    :size="isMobile ? 'small' : 'default'"
                     @click="handleStop(row.account_id)"
                     :loading="actionLoading[row.account_id]"
                   >
@@ -158,33 +159,33 @@
           </template>
 
           <div class="table-wrapper">
-            <el-table :data="jobList" stripe v-loading="loadingJobs" table-layout="fixed">
+            <el-table :data="jobList" stripe v-loading="loadingJobs" table-layout="fixed" :size="isMobile ? 'small' : 'default'">
               <template #empty>
                 <el-empty description="暂无定时任务" />
               </template>
-              <el-table-column prop="job_name" label="任务名称" min-width="200" />
-              <el-table-column prop="job_group" label="分组" width="120" />
-              <el-table-column prop="job_description" label="描述" min-width="200" show-overflow-tooltip />
-              <el-table-column prop="cron_expression" label="Cron表达式" width="150" />
-              <el-table-column label="上次触发时间" width="180">
+              <el-table-column prop="job_name" label="任务名称" :min-width="isMobile ? 120 : 200" />
+              <el-table-column prop="job_group" label="分组" :width="isMobile ? 70 : 120" />
+              <el-table-column v-if="!isMobile" prop="job_description" label="描述" min-width="200" show-overflow-tooltip />
+              <el-table-column v-if="!isMobile" prop="cron_expression" label="Cron表达式" width="150" />
+              <el-table-column v-if="!isMobile" label="上次触发时间" width="180">
                 <template #default="{ row }">
                   {{ row.last_trigger_time ? formatDateTime(row.last_trigger_time) : '-' }}
                 </template>
               </el-table-column>
-              <el-table-column label="状态" width="100">
+              <el-table-column label="状态" :width="isMobile ? 60 : 100">
                 <template #default="{ row }">
                   <el-tag :type="row.enabled ? 'success' : 'info'" size="small">
                     {{ row.enabled ? '就绪' : '暂停' }}
                   </el-tag>
                 </template>
               </el-table-column>
-              <el-table-column label="操作" width="200" fixed="right">
+              <el-table-column label="操作" :width="isMobile ? 160 : 200">
                 <template #default="{ row }">
                   <el-space>
                     <el-button
                       v-if="row.enabled"
                       type="warning"
-                      size="small"
+                      :size="isMobile ? 'small' : 'default'"
                       @click="handleOperateJob(row, 'pause')"
                       :loading="operatingJob === `${row.job_id}_pause`"
                     >
@@ -193,7 +194,7 @@
                     <el-button
                       v-else
                       type="success"
-                      size="small"
+                      :size="isMobile ? 'small' : 'default'"
                       @click="handleOperateJob(row, 'resume')"
                       :loading="operatingJob === `${row.job_id}_resume`"
                     >
@@ -201,7 +202,7 @@
                     </el-button>
                     <el-button
                       type="primary"
-                      size="small"
+                      :size="isMobile ? 'small' : 'default'"
                       @click="handleOperateJob(row, 'trigger')"
                       :loading="operatingJob === `${row.job_id}_trigger`"
                     >
@@ -231,30 +232,30 @@
           </template>
 
           <div class="table-wrapper">
-            <el-table :data="userList" stripe v-loading="loadingUsers" table-layout="fixed">
+            <el-table :data="userList" stripe v-loading="loadingUsers" table-layout="fixed" :size="isMobile ? 'small' : 'default'">
               <template #empty>
                 <el-empty description="暂无用户" />
               </template>
-              <el-table-column prop="username" label="用户名" min-width="150" />
-              <el-table-column prop="user_id" label="用户ID" min-width="150" />
-              <el-table-column prop="role" label="角色" width="120">
+              <el-table-column prop="username" label="用户名" :min-width="isMobile ? 100 : 150" />
+              <el-table-column v-if="!isMobile" prop="user_id" label="用户ID" min-width="150" />
+              <el-table-column prop="role" label="角色" :width="isMobile ? 70 : 120">
                 <template #default="{ row }">
                   <el-tag :type="getRoleTagType(row.role)" size="small">
                     {{ getRoleLabel(row.role) }}
                   </el-tag>
                 </template>
               </el-table-column>
-              <el-table-column prop="created_at" label="创建时间" min-width="180">
+              <el-table-column v-if="!isMobile" prop="created_at" label="创建时间" min-width="180">
                 <template #default="{ row }">
                   {{ row.created_at ? formatDateTime(row.created_at) : '-' }}
                 </template>
               </el-table-column>
-              <el-table-column label="操作" width="200" fixed="right">
+              <el-table-column label="操作" :width="isMobile ? 130 : 200">
                 <template #default="{ row }">
                   <el-space>
                     <el-button
                       type="primary"
-                      size="small"
+                      :size="isMobile ? 'small' : 'default'"
                       @click="handleEditUser(row)"
                     >
                       <el-icon><Edit /></el-icon>
@@ -262,7 +263,7 @@
                     </el-button>
                     <el-button
                       type="danger"
-                      size="small"
+                      :size="isMobile ? 'small' : 'default'"
                       @click="handleDeleteUser(row)"
                     >
                       <el-icon><Delete /></el-icon>
@@ -327,7 +328,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, onMounted, computed } from 'vue'
+import { reactive, ref, onMounted, onUnmounted, computed } from 'vue'
 import { ElMessage, ElMessageBox, ElSpace } from 'element-plus'
 import { VideoPlay, VideoPause, Refresh, Check, Plus, Edit, Delete } from '@element-plus/icons-vue'
 import { systemApi, accountApi, userApi } from '@/api'
@@ -747,11 +748,22 @@ function getRoleLabel(role: string): string {
   }
 }
 
+const isMobile = ref(false)
+const updateIsMobile = () => {
+  isMobile.value = window.innerWidth <= 768
+}
+
 onMounted(() => {
+  updateIsMobile()
+  window.addEventListener('resize', updateIsMobile)
   loadAlertConfig()
   loadTradersStatus()
   loadJobs()
   loadUsers()
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', updateIsMobile)
 })
 </script>
 

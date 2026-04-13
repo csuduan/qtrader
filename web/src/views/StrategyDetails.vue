@@ -190,39 +190,40 @@
             style="margin-bottom: 20px;"
             v-loading="positionLoading"
             :empty-text="positionLoading ? '加载中...' : '暂无持仓'"
+            :size="isMobile ? 'small' : 'default'"
           >
-            <el-table-column prop="symbol" label="合约" width="140" />
-            <el-table-column label="多头持仓" width="160">
+            <el-table-column prop="symbol" label="合约" width="80" />
+            <el-table-column label="多头持仓" :width="isMobile ? 70 : 160">
               <template #default="{ row }">
-                <span>{{ row.pos_long }} (今{{ row.pos_long_td }}/昨{{ row.pos_long_yd }})</span>
+                <span>{{ row.pos_long }}<span v-if="!isMobile"> (今{{ row.pos_long_td }}/昨{{ row.pos_long_yd }})</span></span>
               </template>
             </el-table-column>
-            <el-table-column label="空头持仓" width="160">
+            <el-table-column label="空头持仓" :width="isMobile ? 70 : 160">
               <template #default="{ row }">
-                <span>{{ row.pos_short }} (今{{ row.pos_short_td }}/昨{{ row.pos_short_yd }})</span>
+                <span>{{ row.pos_short }}<span v-if="!isMobile"> (今{{ row.pos_short_td }}/昨{{ row.pos_short_yd }})</span></span>
               </template>
             </el-table-column>
-            <el-table-column label="多头均价" width="130">
+            <el-table-column v-if="!isMobile" label="多头均价" width="130">
               <template #default="{ row }">
                 {{ row.hold_price_long?.toFixed(2) || '-' }}
               </template>
             </el-table-column>
-            <el-table-column label="空头均价" width="130">
+            <el-table-column v-if="!isMobile" label="空头均价" width="130">
               <template #default="{ row }">
                 {{ row.hold_price_short?.toFixed(2) || '-' }}
               </template>
             </el-table-column>
-            <el-table-column label="平仓盈亏" width="120">
+            <el-table-column label="平仓盈亏" width="90">
               <template #default="{ row }">
                 <span :class="row.close_profit > 0 ? 'profit-positive' : row.close_profit < 0 ? 'profit-negative' : ''">
                   {{ row.close_profit?.toFixed(2) || '0.00' }}
                 </span>
               </template>
             </el-table-column>
-            <el-table-column label="操作" fixed="right">
+            <el-table-column label="操作" :width="isMobile ? 100 : undefined">
               <template #default="{ row, $index }">
-                <el-button type="primary" size="small" text @click="handleEditPosition(row)">编辑</el-button>
-                <el-button type="danger" size="small" text @click="handleDeletePosition(row, $index)">删除</el-button>
+                <el-button type="primary" :size="isMobile ? 'small' : 'default'" text @click="handleEditPosition(row)">编辑</el-button>
+                <el-button type="danger" :size="isMobile ? 'small' : 'default'" text @click="handleDeletePosition(row, $index)">删除</el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -311,36 +312,36 @@
         </div>
       </template>
       <div class="table-wrapper">
-        <el-table :data="sortedOrderCmds" stripe v-loading="orderCmdsLoading" table-layout="auto">
-          <el-table-column prop="cmd_id" label="指令ID" width="120" show-overflow-tooltip/>
-          <el-table-column prop="symbol" label="合约" width="120" />
-          <el-table-column label="方向" width="80">
+        <el-table :data="sortedOrderCmds" stripe v-loading="orderCmdsLoading" table-layout="auto" :size="isMobile ? 'small' : 'default'">
+          <el-table-column v-if="!isMobile" prop="cmd_id" label="指令ID" width="120" show-overflow-tooltip/>
+          <el-table-column prop="symbol" label="合约" width="80" />
+          <el-table-column label="方向" :width="isMobile ? 50 : 80">
             <template #default="{ row }">
               <el-tag :type="row.direction === 'BUY' ? 'danger' : 'primary'" size="small">
                 {{ row.direction === 'BUY' ? '买' : '卖' }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="开平" width="80">
+          <el-table-column label="开平" :width="isMobile ? 60 : 80">
             <template #default="{ row }">
               <el-tag size="small">{{ getOffsetText(row.offset) }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="volume" label="目标手数" width="100" />
-          <el-table-column prop="filled_volume" label="已成交" width="100" />
-          <el-table-column prop="filled_price" label="成交均价" width="100">
+          <el-table-column prop="volume" label="目标手数" :width="isMobile ? 60 : 100" />
+          <el-table-column prop="filled_volume" label="已成交" :width="isMobile ? 60 : 100" />
+          <el-table-column prop="filled_price" label="成交均价" :width="isMobile ? 70 : 100">
             <template #default="{ row }">{{ row.filled_price?.toFixed(2) || '-' }}</template>
           </el-table-column>
-          <el-table-column prop="status" label="状态" width="100">
+          <el-table-column prop="status" label="状态" :width="isMobile ? 70 : 100">
             <template #default="{ row }">
               <el-tag :type="getStatusType(row.status)" size="small">
                 {{ getStatusText(row.status) }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="finish_reason" label="完成原因" width="180"  show-overflow-tooltip/>
-          <el-table-column prop="total_orders" label="报单次数" width="100"/>
-          <el-table-column prop="created_at" label="创建时间" width="180">
+          <el-table-column v-if="!isMobile" prop="finish_reason" label="完成原因" width="180" show-overflow-tooltip/>
+          <el-table-column v-if="!isMobile" prop="total_orders" label="报单次数" width="100"/>
+          <el-table-column v-if="!isMobile" prop="created_at" label="创建时间" width="180">
             <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
           </el-table-column>
         </el-table>
@@ -402,6 +403,11 @@ const saveLoading = ref(false)
 const saveSignalLoading = ref(false)
 const savePositionLoading = ref(false)
 const descColumn = ref(3)
+const isMobile = ref(false)
+
+const updateIsMobile = () => {
+  isMobile.value = window.innerWidth <= 768
+}
 
 const paramsForm = ref<Record<string, any>>({
   symbol: '',
@@ -863,13 +869,16 @@ function updateDescColumn() {
 
 onMounted(async () => {
   updateDescColumn()
+  updateIsMobile()
   window.addEventListener('resize', updateDescColumn)
+  window.addEventListener('resize', updateIsMobile)
   await loadStrategy()
   await loadOrderCmds()
 })
 
 onUnmounted(() => {
   window.removeEventListener('resize', updateDescColumn)
+  window.removeEventListener('resize', updateIsMobile)
 })
 </script>
 

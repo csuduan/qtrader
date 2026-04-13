@@ -18,18 +18,18 @@
       </template>
 
       <div class="table-wrapper">
-        <el-table :data="strategies" stripe v-loading="loading" table-layout="auto">
+        <el-table :data="strategies" stripe v-loading="loading" table-layout="fixed" :size="isMobile ? 'small' : 'default'">
           <template #empty>
             <el-empty description="暂无策略" />
           </template>
-          <el-table-column prop="strategy_id" label="策略ID" width="180" fixed />
-          <el-table-column prop="symbol" label="合约" width="120" />
-          <el-table-column prop="config.bar" label="K线" width="100">
+          <el-table-column prop="strategy_id" label="策略ID" :width="isMobile ? 100 : 180" />
+          <el-table-column prop="symbol" label="合约" width="80" />
+          <el-table-column v-if="!isMobile" prop="config.bar" label="K线" width="100">
             <template #default="{ row }">
               <el-tag size="small" type="info">{{ row.config.bar || '-' }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="启用状态" width="100">
+          <el-table-column label="启用状态" :width="isMobile ? 70 : 100">
             <template #default="{ row }">
               <el-switch
                 v-model="row.enabled"
@@ -38,7 +38,7 @@
               />
             </template>
           </el-table-column>
-          <el-table-column label="停开" width="80">
+          <el-table-column label="停开" :width="isMobile ? 50 : 80">
             <template #default="{ row }">
               <el-checkbox
                 v-model="row.opening_paused"
@@ -47,7 +47,7 @@
               />
             </template>
           </el-table-column>
-          <el-table-column label="停平" width="80">
+          <el-table-column label="停平" :width="isMobile ? 50 : 80">
             <template #default="{ row }">
               <el-checkbox
                 v-model="row.closing_paused"
@@ -56,7 +56,7 @@
               />
             </template>
           </el-table-column>
-          <el-table-column label="持仓" width="100" align="center">
+          <el-table-column v-if="!isMobile" label="持仓" width="100" align="center">
             <template #default="{ row }">
               <div class="position-info">
                 <span class="pos-long">{{ row.pos_long }}</span>
@@ -65,7 +65,7 @@
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="信号" width="100" align="center">
+          <el-table-column v-if="!isMobile" label="信号" width="100" align="center">
             <template #default="{ row }">
               <el-tooltip v-if="row.signal && row.signal.side !== 0" placement="left" :show-after="200">
                 <template #content>
@@ -90,7 +90,7 @@
               <span v-else class="text-empty">-</span>
             </template>
           </el-table-column>
-          <el-table-column label="交易状态" width="100" align="center">
+          <el-table-column v-if="!isMobile" label="交易状态" width="100" align="center">
             <template #default="{ row }">
               <el-tag v-if="row.trading_status" :type="getTradingStatusType(row.trading_status)" size="small">
                 {{ row.trading_status }}
@@ -98,11 +98,11 @@
               <span v-else class="text-empty">-</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作">
+          <el-table-column label="操作" :width="isMobile ? 60 : undefined">
             <template #default="{ row }">
               <el-button
                 type="primary"
-                size="small"
+                :size="isMobile ? 'small' : 'default'"
                 @click="navigateToDetails(row.strategy_id)"
               >
                 详情
@@ -116,7 +116,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useStore } from '@/stores'
@@ -133,6 +133,21 @@ const store = useStore()
 const loading = ref(false)
 const strategies = ref<StrategyWithLoading[]>([])
 const replayAllLoading = ref(false)
+const isMobile = ref(false)
+
+const updateIsMobile = () => {
+  isMobile.value = window.innerWidth <= 768
+}
+
+onMounted(async () => {
+  updateIsMobile()
+  window.addEventListener('resize', updateIsMobile)
+  loadStrategies()
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', updateIsMobile)
+})
 
 function navigateToDetails(strategyId: string) {
   router.push(`/strategy/${strategyId}`)
@@ -252,9 +267,6 @@ watch(() => store.selectedAccountId, (newId) => {
   }
 })
 
-onMounted(async () => {
-  loadStrategies()
-})
 </script>
 
 <style scoped>

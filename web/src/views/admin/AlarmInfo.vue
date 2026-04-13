@@ -122,25 +122,25 @@
       </el-row>
 
       <div class="table-wrapper">
-        <el-table :data="alarms" stripe v-loading="loading" table-layout="fixed" empty-text="暂无告警信息">
-          <el-table-column prop="id" label="ID" width="80" />
-          <el-table-column prop="alarm_time" label="时间" width="100" />
-          <el-table-column prop="source" label="来源" width="100" />
-          <el-table-column prop="title" label="标题" min-width="200" show-overflow-tooltip />
-          <el-table-column prop="detail" label="详情" min-width="300" show-overflow-tooltip />
-          <el-table-column prop="status" label="状态" width="120">
+        <el-table :data="alarms" stripe v-loading="loading" table-layout="fixed" empty-text="暂无告警信息" :size="isMobile ? 'small' : 'default'">
+          <el-table-column prop="id" label="ID" :width="isMobile ? 60 : 80" />
+          <el-table-column prop="alarm_time" label="时间" :width="isMobile ? 80 : 100" />
+          <el-table-column v-if="!isMobile" prop="source" label="来源" width="100" />
+          <el-table-column prop="title" label="标题" :min-width="isMobile ? 120 : 200" show-overflow-tooltip />
+          <el-table-column v-if="!isMobile" prop="detail" label="详情" min-width="300" show-overflow-tooltip />
+          <el-table-column prop="status" label="状态" :width="isMobile ? 70 : 120">
             <template #default="{ row }">
-              <el-tag :type="getStatusType(row.status)">
+              <el-tag :type="getStatusType(row.status)" size="small">
                 {{ getStatusText(row.status) }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="120">
+          <el-table-column label="操作" :width="isMobile ? 90 : 120">
             <template #default="{ row }">
               <el-button
                 v-if="row.status === 'UNCONFIRMED'"
                 type="primary"
-                size="small"
+                :size="isMobile ? 'small' : 'default'"
                 @click="handleConfirm(row.id)"
                 :loading="confirmingId === row.id"
               >
@@ -380,7 +380,14 @@ function getStatusText(status: string): string {
   return texts[status] ?? status
 }
 
+const isMobile = ref(false)
+const updateIsMobile = () => {
+  isMobile.value = window.innerWidth <= 768
+}
+
 onMounted(async () => {
+  updateIsMobile()
+  window.addEventListener('resize', updateIsMobile)
   // 监控
   await loadResourceHistory()
   await loadResourceCurrent()
@@ -407,6 +414,7 @@ onUnmounted(() => {
     statsTimer.value = null
   }
   window.removeEventListener('resize', handleResize)
+  window.removeEventListener('resize', updateIsMobile)
   chartInstance?.dispose()
   chartInstance = null
 })

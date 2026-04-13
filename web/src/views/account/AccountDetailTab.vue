@@ -65,66 +65,67 @@
           stripe
           v-loading="loading"
           table-layout="fixed"
+          :size="isMobile ? 'small' : 'default'"
         >
           <template #empty>
             <el-empty description="暂无持仓" />
           </template>
-          <el-table-column prop="symbol" label="合约" width="100" fixed>
+          <el-table-column prop="symbol" label="合约" width="80">
             <template #default="{ row }">
               {{ row.symbol }}
             </template>
           </el-table-column>
-          <el-table-column label="多头持仓" width="100">
+          <el-table-column label="多头持仓" :width="isMobile ? 70 : 100">
             <template #default="{ row }">
               <span v-if="row.pos_long > 0" class="long">{{ row.pos_long }}</span>
               <span v-else>-</span>
             </template>
           </el-table-column>
-          <el-table-column label="空头持仓" width="100">
+          <el-table-column label="空头持仓" :width="isMobile ? 70 : 100">
             <template #default="{ row }">
               <span v-if="row.pos_short > 0" class="short">{{ row.pos_short }}</span>
               <span v-else>-</span>
             </template>
           </el-table-column>
-          <el-table-column label="多头均价" width="110">
+          <el-table-column v-if="!isMobile" label="多头均价" width="110">
             <template #default="{ row }">
               {{ row.pos_long > 0 ? formatNumber(row.hold_price_long) : '-' }}
             </template>
           </el-table-column>
-          <el-table-column label="空头均价" width="110">
+          <el-table-column v-if="!isMobile" label="空头均价" width="110">
             <template #default="{ row }">
               {{ row.pos_short > 0 ? formatNumber(row.hold_price_short) : '-' }}
             </template>
           </el-table-column>
-          <el-table-column label="保证金" width="110">
+          <el-table-column v-if="!isMobile" label="保证金" width="110">
             <template #default="{ row }">
               ¥{{ formatNumber((row.margin_long || 0) + (row.margin_short || 0)) }}
             </template>
           </el-table-column>
-          <el-table-column label="持仓盈亏" width="130">
+          <el-table-column label="持仓盈亏" :width="isMobile ? 90 : 130">
             <template #default="{ row }">
               <span :class="(row.hold_profit_long || 0) + (row.hold_profit_short || 0) >= 0 ? 'profit' : 'loss'">
                 ¥{{ formatNumber((row.hold_profit_long || 0) + (row.hold_profit_short || 0)) }}
               </span>
             </template>
           </el-table-column>
-          <el-table-column label="平仓盈亏" width="130">
+          <el-table-column label="平仓盈亏" :width="isMobile ? 90 : 130">
             <template #default="{ row }">
               <span :class="(row.close_profit_long || 0) + (row.close_profit_short || 0) >= 0 ? 'profit' : 'loss'">
                 ¥{{ formatNumber((row.close_profit_long || 0) + (row.close_profit_short || 0)) }}
               </span>
             </template>
           </el-table-column>
-          <el-table-column prop="updated_at" label="更新时间" width="180">
+          <el-table-column v-if="!isMobile" prop="updated_at" label="更新时间" width="180">
             <template #default="{ row }">
               {{ formatDateTime(row.updated_at) }}
             </template>
           </el-table-column>
-          <el-table-column label="操作"  fixed="right">
+          <el-table-column label="操作" :width="isMobile ? 110 : undefined">
             <template #default="{ row }">
               <el-button
                 type="danger"
-                size="small"
+                :size="isMobile ? 'small' : 'default'"
                 :disabled="row.pos_long <= 0"
                 @click="emit('closePosition', row, 'SELL')"
               >
@@ -132,7 +133,7 @@
               </el-button>
               <el-button
                 type="primary"
-                size="small"
+                :size="isMobile ? 'small' : 'default'"
                 :disabled="row.pos_short <= 0"
                 @click="emit('closePosition', row, 'BUY')"
               >
@@ -164,6 +165,11 @@ const emit = defineEmits<{
   closePosition: [position: Position, direction: 'BUY' | 'SELL']
 }>()
 
+const isMobile = ref(false)
+const updateIsMobile = () => {
+  isMobile.value = window.innerWidth <= 768
+}
+
 function updateDescColumn() {
   descColumn.value = window.innerWidth < 768 ? 1 : 2
 }
@@ -193,11 +199,14 @@ function getBrokerTypeName(type: string | null): string {
 
 onMounted(() => {
   updateDescColumn()
+  updateIsMobile()
   window.addEventListener('resize', updateDescColumn)
+  window.addEventListener('resize', updateIsMobile)
 })
 
 onUnmounted(() => {
   window.removeEventListener('resize', updateDescColumn)
+  window.removeEventListener('resize', updateIsMobile)
 })
 </script>
 

@@ -22,28 +22,28 @@
       </template>
 
       <div class="table-wrapper">
-        <el-table :data="sortedTrades" stripe v-loading="loading">
+        <el-table :data="sortedTrades" stripe v-loading="loading" :size="isMobile ? 'small' : 'default'">
           <template #empty>
             <el-empty description="暂无成交记录" />
           </template>
-          <el-table-column prop="trade_id" label="成交ID" width="180" show-overflow-tooltip />
-          <el-table-column prop="symbol" label="合约" width="120" />
-          <el-table-column prop="direction" label="方向" width="80">
+          <el-table-column v-if="!isMobile" prop="trade_id" label="成交ID" width="180" show-overflow-tooltip />
+          <el-table-column prop="symbol" label="合约" width="80" />
+          <el-table-column prop="direction" label="方向" :width="isMobile ? 50 : 80">
             <template #default="{ row }">
               <el-tag :type="row.direction === 'BUY' ? 'success' : 'danger'" size="small">
                 {{ row.direction === 'BUY' ? '买' : '卖' }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="offset" label="开平" width="80" />
-          <el-table-column prop="price" label="成交价" width="100">
+          <el-table-column prop="offset" label="开平" :width="isMobile ? 60 : 80" />
+          <el-table-column prop="price" label="成交价" :width="isMobile ? 70 : 100">
             <template #default="{ row }">
               {{ formatNumber(row.price) }}
             </template>
           </el-table-column>
-          <el-table-column prop="volume" label="手数" width="80" />
-          <el-table-column prop="order_id" label="委托单ID" width="180" show-overflow-tooltip />
-          <el-table-column prop="created_at" label="成交时间">
+          <el-table-column prop="volume" label="手数" :width="isMobile ? 50 : 80" />
+          <el-table-column v-if="!isMobile" prop="order_id" label="委托单ID" width="180" show-overflow-tooltip />
+          <el-table-column prop="created_at" label="成交时间" :min-width="isMobile ? 120 : 160">
             <template #default="{ row }">
               {{ formatDateTime(row.trade_date_time) }}
             </template>
@@ -55,7 +55,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import type { Trade } from '@/types'
 
 const props = defineProps<{
@@ -72,6 +72,20 @@ const emit = defineEmits<{
 const localDateFilter = computed({
   get: () => props.dateFilter,
   set: (val) => emit('update:dateFilter', val || new Date().toISOString().split('T')[0])
+})
+
+const isMobile = ref(false)
+const updateIsMobile = () => {
+  isMobile.value = window.innerWidth <= 768
+}
+
+onMounted(() => {
+  updateIsMobile()
+  window.addEventListener('resize', updateIsMobile)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', updateIsMobile)
 })
 
 // 按时间倒序排序的成交记录
