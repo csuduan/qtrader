@@ -83,16 +83,16 @@ class TraderProxy:
         # 最新行情缓存 (symbol -> tick_data)
         self._tick_cache: Dict[str, Dict] = {}
         # 持仓缓存（由Trader推送维护，全量快照 + 增量更新）
-        self._position_cache: Dict[str, Dict] = {}  # key: symbol
+        self._position_cache: Dict[str, PositionData] = {}  # key: symbol
         # 订单缓存（由Trader推送维护，order_id -> order_dict）
-        self._order_cache: Dict[str, Dict] = {}
+        self._order_cache: Dict[str, OrderData] = {}
         # 成交缓存（由Trader推送维护，trade_id -> trade_dict）
-        self._trade_cache: Dict[str, Dict] = {}
+        self._trade_cache: Dict[str, TradeData] = {}
         # 账户内存缓存（常驻，由DB初始化 + Trader推送更新）
         self._account_cache: Optional[AccountData] = None
-        # WebSocket推送任务
-        self._ws_push_task: Optional[asyncio.Task] = None
-        self._ws_push_interval: float = 2.0  # 每2秒推送一次
+        # WebSocket推送限制
+        self._ws_push_interval: float = 2.0  # 持仓最小推送间隔2秒
+        self._last_position_push_time: Dict[str, float] = {}
 
         # 从DB加载初始账户数据
         self._load_account_from_db()
@@ -138,19 +138,16 @@ class TraderProxy:
         except Exception as e:
             logger.error(f"推送账户状态更新事件失败: {e}")
 
-        # 根据状态启动/停止WebSocket推送任务，并更新连接状态
-        if new_state == TraderState.CONNECTED and old_state != TraderState.CONNECTED:
-            self._start_ws_push_task()
-        elif old_state == TraderState.CONNECTED and new_state != TraderState.CONNECTED:
+        # 根据状态更新连接状态
+        if old_state == TraderState.CONNECTED and new_state != TraderState.CONNECTED:
             # 从连接状态变为非连接状态，重置网关连接状态并推送
             if self._account_cache:
                 self._account_cache.md_connected = False
                 self._account_cache.td_connected = False
                 logger.info(f"Trader [{self.account_id}] 断开，重置网关连接状态")
                 self._emit_data("account", self._account_cache.model_dump())
-            await self._stop_ws_push_task()
         elif new_state == TraderState.STOPPED and old_state != TraderState.STOPPED:
-            await self._stop_ws_push_task()
+            self._last_position_push_time.clear()
 
     def _is_state(self, state: TraderState) -> bool:
         """检查是否为指定状态"""
@@ -426,9 +423,8 @@ class TraderProxy:
             if isinstance(positions_data, list):
                 self._position_cache.clear()
                 for pos in positions_data:
-                    symbol = pos.get("symbol") if isinstance(pos, dict) else None
-                    if symbol:
-                        self._position_cache[symbol] = pos
+                    if isinstance(pos, dict) and pos.get("symbol"):
+                        self._position_cache[pos["symbol"]] = PositionData.model_validate(pos)
                 logger.info(
                     f"TraderProxy [{self.account_id}] 已同步 {len(self._position_cache)} 个持仓"
                 )
@@ -438,9 +434,8 @@ class TraderProxy:
             if isinstance(orders_data, list):
                 self._order_cache.clear()
                 for order in orders_data:
-                    order_id = order.get("order_id") if isinstance(order, dict) else None
-                    if order_id:
-                        self._order_cache[order_id] = order
+                    if isinstance(order, dict) and order.get("order_id"):
+                        self._order_cache[order["order_id"]] = OrderData.model_validate(order)
                 logger.info(
                     f"TraderProxy [{self.account_id}] 已同步 {len(self._order_cache)} 个订单"
                 )
@@ -450,9 +445,8 @@ class TraderProxy:
             if isinstance(trades_data, list):
                 self._trade_cache.clear()
                 for trade in trades_data:
-                    trade_id = trade.get("trade_id") if isinstance(trade, dict) else None
-                    if trade_id:
-                        self._trade_cache[trade_id] = trade
+                    if isinstance(trade, dict) and trade.get("trade_id"):
+                        self._trade_cache[trade["trade_id"]] = TradeData.model_validate(trade)
                 logger.info(
                     f"TraderProxy [{self.account_id}] 已同步 {len(self._trade_cache)} 个成交"
                 )
@@ -521,26 +515,23 @@ class TraderProxy:
             if isinstance(positions_data, list):
                 self._position_cache.clear()
                 for pos in positions_data:
-                    symbol = pos.get("symbol") if isinstance(pos, dict) else None
-                    if symbol:
-                        self._position_cache[symbol] = pos
+                    if isinstance(pos, dict) and pos.get("symbol"):
+                        self._position_cache[pos["symbol"]] = PositionData.model_validate(pos)
 
             # 更新订单缓存
             orders_data = data.get("orders", [])
             if isinstance(orders_data, list):
                 for order in orders_data:
-                    order_id = order.get("order_id") if isinstance(order, dict) else None
-                    if order_id:
-                        self._order_cache[order_id] = order
+                    if isinstance(order, dict) and order.get("order_id"):
+                        self._order_cache[order["order_id"]] = OrderData.model_validate(order)
 
             # 更新成交缓存
             trades_data = data.get("trades", [])
             if isinstance(trades_data, list):
                 self._trade_cache.clear()
                 for trade in trades_data:
-                    trade_id = trade.get("trade_id") if isinstance(trade, dict) else None
-                    if trade_id:
-                        self._trade_cache[trade_id] = trade
+                    if isinstance(trade, dict) and trade.get("trade_id"):
+                        self._trade_cache[trade["trade_id"]] = TradeData.model_validate(trade)
 
             # 更新行情缓存
             quotes_data = data.get("quotes", [])
@@ -577,30 +568,30 @@ class TraderProxy:
             elif msg_type == "tick":
                 # 缓存最新行情，用于本地计算盈亏
                 symbol = data.get("symbol")
-                if symbol:
-                    self._tick_cache[symbol] = data
+                if not symbol:
+                    return
+                self._tick_cache[symbol] = data
                 # 推送行情到前端
                 self._emit_data("tick", data)
+                # 根据tick刷新持仓缓存盈亏并推送
+                self.update_hold_profit(TickData.model_validate(data))
             elif msg_type == "account":
                 # Trader推送完整账户数据（网关状态变化时），直接更新缓存
                 self._handle_account_status_push(data)
             elif msg_type == "order":
                 # 更新订单缓存并推送
-                order_id = data.get("order_id") if isinstance(data, dict) else None
-                if order_id:
-                    self._order_cache[order_id] = data
+                if isinstance(data, dict) and data.get("order_id"):
+                    self._order_cache[data["order_id"]] = OrderData.model_validate(data)
                 self._emit_data("order", data)
             elif msg_type == "trade":
                 # 更新成交缓存并推送
-                trade_id = data.get("trade_id") if isinstance(data, dict) else None
-                if trade_id:
-                    self._trade_cache[trade_id] = data
+                if isinstance(data, dict) and data.get("trade_id"):
+                    self._trade_cache[data["trade_id"]] = TradeData.model_validate(data)
                 self._emit_data("trade", data)
             elif msg_type == "position":
                 # 更新持仓缓存并推送
-                symbol = data.get("symbol") if isinstance(data, dict) else None
-                if symbol:
-                    self._position_cache[symbol] = data
+                if isinstance(data, dict) and data.get("symbol"):
+                    self._position_cache[data["symbol"]] = PositionData.model_validate(data)
                 self._emit_data("position", data)
             elif msg_type == "trader_ready":
                 # Trader就绪通知，触发全量同步
@@ -699,6 +690,8 @@ class TraderProxy:
         event_type = None
         if data_type == "account":
             event_type = EventTypes.ACCOUNT_UPDATE
+            if isinstance(data, dict) and "update_time" in data:
+                data = {**data, "updated_at": data["update_time"]}
         elif data_type == "order":
             event_type = EventTypes.ORDER_UPDATE
         elif data_type == "trade":
@@ -761,52 +754,6 @@ class TraderProxy:
         except Exception as e:
             logger.error(f"处理告警数据失败: {e}")
 
-    # ==================== WebSocket推送任务 ====================
-
-    def _start_ws_push_task(self) -> None:
-        """启动WebSocket定期推送任务"""
-        if self._ws_push_task is None or self._ws_push_task.done():
-            self._ws_push_task = asyncio.create_task(self._periodic_ws_push())
-            logger.info(
-                f"TraderProxy [{self.account_id}] WebSocket推送任务已启动(间隔{self._ws_push_interval}秒)"
-            )
-
-    async def _stop_ws_push_task(self) -> None:
-        """停止WebSocket定期推送任务"""
-        if self._ws_push_task and not self._ws_push_task.done():
-            self._ws_push_task.cancel()
-            try:
-                await self._ws_push_task
-            except asyncio.CancelledError:
-                pass
-            logger.info(f"TraderProxy [{self.account_id}] WebSocket推送任务已停止")
-
-    async def _periodic_ws_push(self) -> None:
-        """定期推送持仓和账户数据到前端（使用内存缓存+Tick计算盈亏）"""
-        while self._running and self._is_state(TraderState.CONNECTED):
-            try:
-                await asyncio.sleep(self._ws_push_interval)
-
-                # 从内存缓存获取持仓并用最新Tick计算盈亏
-                positions = self._calc_positions_from_cache()
-                for pos in positions:
-                    self._emit_data("position", pos)
-
-                # 从内存缓存获取账户，用最新持仓计算总盈亏后推送
-                if self._account_cache:
-                    account_data = self._account_cache.model_copy()
-                    total_profit = sum(
-                        (p.get("hold_profit_long") or 0) + (p.get("hold_profit_short") or 0)
-                        for p in positions
-                    )
-                    account_data.hold_profit = total_profit
-                    self._emit_data("account", account_data.model_dump())
-
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.exception(f"WebSocket推送任务出错: {e}")
-
     async def _periodic_sync_loop(self) -> None:
         """定时从Trader同步全量数据（兜底机制）"""
         self._sync_interval = 60.0
@@ -823,65 +770,77 @@ class TraderProxy:
             except Exception as e:
                 logger.exception(f"TraderProxy [{self.account_id}] 定时同步失败: {e}")
 
-    def _calc_positions_from_cache(self) -> List[Dict]:
-        """从内存缓存计算持仓盈亏（用最新Tick重新计算）"""
-        return self._calc_positions_with_tick(self._position_cache)
+    def update_hold_profit(self, tick: TickData) -> None:
+        """更新所有持仓的盈亏"""
+        if not tick or not tick.last_price or tick.last_price <= 0 or self._account_cache is None:
+            return
 
-    def _calc_positions_with_tick(self, positions: Dict[str, Dict]) -> List[Dict]:
-        """用最新Tick计算持仓盈亏"""
-        result = []
-        for symbol, pos in positions.items():
-            # 复制一份数据，避免修改缓存
-            pos_data = pos.copy()
-            tick = self._tick_cache.get(symbol)
-            if tick:
-                last_price = tick.get("last_price", 0)
-                # 重新计算持仓盈亏
-                pos_data = self._recalc_position_profit(pos_data, last_price)
-            result.append(pos_data)
-        return result
+        symbol = tick.symbol
+        pos = self._position_cache.get(symbol)
+        if not pos:
+            return
 
-    def _recalc_position_profit(self, pos: Dict, last_price: float) -> Dict:
+        try:
+            multiple = pos.multiple or 1
+            last_price = tick.last_price
+            # 计算多头盈亏
+            pos_long = (pos.pos_long_td or 0) + (pos.pos_long_yd or 0)
+            hold_price_long = pos.hold_price_long or 0
+            if pos_long > 0 and hold_price_long > 0:
+                pos.hold_profit_long = (last_price - hold_price_long) * pos_long * multiple
+
+            # 计算空头盈亏
+            pos_short = (pos.pos_short_td or 0) + (pos.pos_short_yd or 0)
+            hold_price_short = pos.hold_price_short or 0
+            if pos_short > 0 and hold_price_short > 0:
+                pos.hold_profit_short = (hold_price_short - last_price) * pos_short * multiple
+
+            pos.updated_at = datetime.now()
+            # 刷新账户盈亏
+            total_profit = sum(
+                (p.hold_profit_long or 0) + (p.hold_profit_short or 0)
+                for p in self._position_cache.values()
+            )
+            self._account_cache.hold_profit = total_profit
+            self._account_cache.update_time = datetime.now()
+        except Exception as e:
+            logger.exception(f"更新持仓盈亏失败: {tick.symbol} {e}")
+        try:
+            # 推送判断
+            now = asyncio.get_event_loop().time()
+            last_time = self._last_position_push_time.get(symbol)
+            if last_time is not None and (now - last_time) < self._ws_push_interval:
+                return
+
+            self._last_position_push_time[symbol] = now
+            self._emit_data("position", pos.model_dump())
+            self._emit_data("account", self._account_cache.model_dump())
+        except Exception as e:
+            logger.exception(f"Tick驱动持仓/账户推送失败 [{tick.symbol}]: {e}")
+
+    def _recalc_position_profit(self, pos: PositionData, last_price: float) -> PositionData:
         """根据最新价格重新计算持仓盈亏"""
         if not last_price or last_price <= 0:
             return pos
 
         # 获取合约乘数（从tick缓存中获取，如果没有则使用默认值）
-        symbol = pos.get("symbol", "")
+        symbol = pos.symbol
         tick = self._tick_cache.get(symbol, {})
         multiple = tick.get("volume_multiple", 1)
 
         # 计算多头盈亏
-        pos_long = pos.get("pos_long_td", 0) + pos.get("pos_long_yd", 0)
-        hold_price_long = pos.get("hold_price_long", 0)
+        pos_long = (pos.pos_long_td or 0) + (pos.pos_long_yd or 0)
+        hold_price_long = pos.hold_price_long or 0
         if pos_long > 0 and hold_price_long > 0:
-            pos["hold_profit_long"] = (last_price - hold_price_long) * pos_long * multiple
+            pos.hold_profit_long = (last_price - hold_price_long) * pos_long * multiple
 
         # 计算空头盈亏
-        pos_short = pos.get("pos_short_td", 0) + pos.get("pos_short_yd", 0)
-        hold_price_short = pos.get("hold_price_short", 0)
+        pos_short = (pos.pos_short_td or 0) + (pos.pos_short_yd or 0)
+        hold_price_short = pos.hold_price_short or 0
         if pos_short > 0 and hold_price_short > 0:
-            pos["hold_profit_short"] = (hold_price_short - last_price) * pos_short * multiple
+            pos.hold_profit_short = (hold_price_short - last_price) * pos_short * multiple
 
         return pos
-
-    def _calc_account_from_cache(self) -> Optional[AccountData]:
-        """从内存缓存获取账户，并用最新持仓计算总盈亏"""
-        try:
-            if not self._account_cache:
-                return None
-
-            account_data = self._account_cache.model_copy()
-            positions = self._calc_positions_from_cache()
-            total_profit = sum(
-                p.get("hold_profit_long", 0) + p.get("hold_profit_short", 0) for p in positions
-            )
-            account_data.hold_profit = total_profit
-
-            return account_data
-        except Exception as e:
-            logger.exception(f"计算账户盈亏失败: {e}")
-            return None
 
     # ==================== 数据同步接口 ====================
 
@@ -925,12 +884,6 @@ class TraderProxy:
         """
         if self._account_cache:
             account_data = self._account_cache.model_copy()
-            positions = self._calc_positions_from_cache()
-            total_profit = sum(
-                (p.get("hold_profit_long") or 0) + (p.get("hold_profit_short") or 0)
-                for p in positions
-            )
-            account_data.hold_profit = total_profit
             account_data.status = (
                 TraderState.CONNECTED if self._is_state(TraderState.CONNECTED) else self._state
             )
@@ -942,34 +895,27 @@ class TraderProxy:
 
     async def get_order(self, order_id: str) -> Optional[OrderData]:
         """获取订单数据 - 从内存缓存返回"""
-        data = self._order_cache.get(order_id)
-        return OrderData(**data) if data else None
+        return self._order_cache.get(order_id)
 
     async def get_orders(self) -> List[OrderData]:
         """获取所有订单数据 - 从内存缓存返回"""
-        return [OrderData(**item) for item in self._order_cache.values()]
+        return list(self._order_cache.values())
 
     async def get_active_orders(self) -> List[OrderData]:
         """获取活动订单 - 从内存缓存返回"""
-        return [
-            OrderData(**item)
-            for item in self._order_cache.values()
-            if item.get("status") == "ACTIVE"
-        ]
+        return [item for item in self._order_cache.values() if item.is_active()]
 
     async def get_trade(self, trade_id: str) -> Optional[TradeData]:
         """获取成交数据 - 从内存缓存返回"""
-        data = self._trade_cache.get(trade_id)
-        return TradeData(**data) if data else None
+        return self._trade_cache.get(trade_id)
 
     async def get_trades(self) -> List[TradeData]:
         """获取所有成交数据 - 从内存缓存返回"""
-        return [TradeData(**item) for item in self._trade_cache.values()]
+        return list(self._trade_cache.values())
 
     async def get_positions(self) -> List[PositionData]:
-        """获取持仓列表 - 从内存缓存+实时Tick计算盈亏"""
-        positions = self._calc_positions_from_cache()
-        return [PositionData(**pos) for pos in positions]
+        """获取持仓列表"""
+        return list(self._position_cache.values())
 
     async def get_quotes(self) -> List[TickData]:
         """获取所有行情数据 - 从内存缓存返回"""
