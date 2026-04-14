@@ -355,6 +355,15 @@ class TradingManager:
             return await trader.get_account()
         return None
 
+    def get_all_accounts_cached(self) -> List[AccountData]:
+        """获取所有缓存的账户数据（不走RPC，用于列表展示）"""
+        accounts = []
+        for trader in self.traders.values():
+            account = trader.get_account_cached()
+            if account:
+                accounts.append(account)
+        return accounts
+
     async def get_all_accounts(self) -> List[AccountData]:
         """获取所有账户数据（包括禁用账户）"""
         accounts = []

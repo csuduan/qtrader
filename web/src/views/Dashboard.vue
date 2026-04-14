@@ -453,7 +453,7 @@ async function handleSelectAccount(accountId: string) {
   // 刷新当前选中账户的持仓、订单、成交数据
   await Promise.all([
     store.loadPositions(accountId),
-    store.loadOrders(undefined, accountId),
+    store.loadOrders('ALIVE', accountId),
     store.loadTrades(undefined, accountId)
   ])
 

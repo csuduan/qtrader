@@ -153,13 +153,11 @@ export interface RotationInstruction {
 export type WSMessageType =
   | 'connected'
   | 'account_update'
-  | 'accounts_update'
   | 'position_update'
   | 'trade_update'
   | 'order_update'
   | 'tick_update'
   | 'quote_update'
-  | 'system_status'
   | 'alarm_update'
 
 /** WebSocket 消息 */
@@ -452,9 +450,6 @@ export interface StrategyRes {
 
 /** 兼容旧名称 */
 export type StrategyStatus = StrategyRes
-
-/** 策略事件类型 */
-export type StrategyEventType = 'strategy_status' | 'strategy_signal'
 
 /** 策略信号 */
 export interface StrategySignal {

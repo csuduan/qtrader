@@ -81,6 +81,81 @@ class RotationInstructionUpdate(BaseModel):
     volume: Optional[int] = None
 
 
+def _query_rotation_from_db(
+    account_id: str,
+    limit: int,
+    offset: int,
+    status: Optional[str],
+    enabled: Optional[bool],
+    trading_date: Optional[str],
+):
+    """从数据库查询换仓指令列表"""
+    db = get_database()
+    if not db:
+        return error_response(code=500, message="数据库未初始化")
+
+    with db.get_session() as session:
+        query = session.query(RotationInstructionPo).filter(
+            RotationInstructionPo.account_id == account_id,
+            RotationInstructionPo.is_deleted.is_(False)
+        )
+
+        if status:
+            query = query.filter(RotationInstructionPo.status == status)
+
+        if enabled is not None:
+            query = query.filter(RotationInstructionPo.enabled.is_(enabled))
+
+        if trading_date is None:
+            trading_date = datetime.now().strftime("%Y%m%d")
+        query = query.filter(RotationInstructionPo.trading_date == trading_date)
+
+        total = query.count()
+
+        instructions = query.order_by(
+            RotationInstructionPo.created_at.desc()
+        ).offset(offset).limit(limit).all()
+
+        data = [
+            RotationInstructionResponse(
+                id=inst.id,
+                account_id=inst.account_id,
+                strategy_id=inst.strategy_id,
+                symbol=inst.symbol,
+                exchange_id=inst.symbol.split(".")[-1] if inst.symbol and "." in inst.symbol else None,
+                offset=inst.offset,
+                direction=inst.direction,
+                volume=inst.volume,
+                filled_volume=inst.filled_volume,
+                price=float(inst.price) if inst.price else 0,
+                order_time=inst.order_time,
+                trading_date=inst.trading_date,
+                enabled=inst.enabled,
+                status=inst.status,
+                attempt_count=inst.attempt_count,
+                remaining_attempts=inst.remaining_attempts,
+                remaining_volume=inst.remaining_volume,
+                current_order_id=inst.current_order_id,
+                order_placed_time=inst.order_placed_time,
+                last_attempt_time=inst.last_attempt_time,
+                error_message=inst.error_message,
+                source=inst.source,
+                is_deleted=inst.is_deleted,
+                created_at=inst.created_at,
+                updated_at=inst.updated_at,
+            )
+            for inst in instructions
+        ]
+
+        return {
+            "instructions": [item.model_dump() for item in data],
+            "rotation_status": {"working": False, "is_manual": False},
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+
+
 @router.get("")
 async def get_rotation_instructions(
     account_id: str = Query(..., description="账户ID"),
@@ -94,6 +169,8 @@ async def get_rotation_instructions(
     """
     获取换仓指令列表
 
+    优先从Trader进程查询，未连接时回退到数据库查询。
+
     - **account_id**: 账户ID
     - **limit**: 返回记录数量
     - **offset**: 偏移量
@@ -102,80 +179,53 @@ async def get_rotation_instructions(
     - **trading_date**: 交易日筛选(格式yyyyMMdd)
     """
     try:
-        db = get_database()
-        if not db:
-            return error_response(code=500, message="数据库未初始化")
+        today_str = datetime.now().strftime("%Y%m%d")
+        target_date = trading_date or today_str
 
-        with db.get_session() as session:
-            # 构建查询
-            query = session.query(RotationInstructionPo).filter(
-                RotationInstructionPo.account_id == account_id,
-                RotationInstructionPo.is_deleted.is_(False)
-            )
-
-            # 应用状态筛选
-            if status:
-                query = query.filter(RotationInstructionPo.status == status)
-
-            # 应用启用状态筛选
-            if enabled is not None:
-                query = query.filter(RotationInstructionPo.enabled.is_(enabled))
-
-            # 应用交易日筛选，默认今日
-            if trading_date is None:
-                trading_date = datetime.now().strftime("%Y%m%d")
-            query = query.filter(RotationInstructionPo.trading_date == trading_date)
-
-            # 获取总数
-            total = query.count()
-
-            # 排序并分页
-            instructions = query.order_by(
-                RotationInstructionPo.created_at.desc()
-            ).offset(offset).limit(limit).all()
-
-            # 转换为响应格式
-            data = [
-                RotationInstructionResponse(
-                    id=inst.id,
-                    account_id=inst.account_id,
-                    strategy_id=inst.strategy_id,
-                    symbol=inst.symbol,
-                    exchange_id=inst.symbol.split(".")[-1] if inst.symbol and "." in inst.symbol else None,
-                    offset=inst.offset,
-                    direction=inst.direction,
-                    volume=inst.volume,
-                    filled_volume=inst.filled_volume,
-                    price=float(inst.price) if inst.price else 0,
-                    order_time=inst.order_time,
-                    trading_date=inst.trading_date,
-                    enabled=inst.enabled,
-                    status=inst.status,
-                    attempt_count=inst.attempt_count,
-                    remaining_attempts=inst.remaining_attempts,
-                    remaining_volume=inst.remaining_volume,
-                    current_order_id=inst.current_order_id,
-                    order_placed_time=inst.order_placed_time,
-                    last_attempt_time=inst.last_attempt_time,
-                    error_message=inst.error_message,
-                    source=inst.source,
-                    is_deleted=inst.is_deleted,
-                    created_at=inst.created_at,
-                    updated_at=inst.updated_at,
+        # 优先从Trader查询（Trader只返回今日数据）
+        trader_result = None
+        if target_date == today_str:
+            try:
+                trader_result = await trading_manager.get_rotation_instructions(
+                    account_id, limit, offset, status, enabled
                 )
-                for inst in instructions
-            ]
+            except Exception as e:
+                logger.warning(f"从Trader查询换仓指令失败，将回退到数据库: {e}")
 
-            # 构造响应
+        if trader_result is not None:
+            instructions = trader_result.get("instructions", [])
+
+            # 应用前端筛选条件（Trader内部可能未完全处理）
+            if status:
+                instructions = [i for i in instructions if i.get("status") == status]
+            if enabled is not None:
+                instructions = [i for i in instructions if i.get("enabled") == enabled]
+
+            total = len(instructions)
+            paginated = instructions[offset:offset + limit]
+
+            # 补充缺失字段以兼容前端
+            for item in paginated:
+                symbol = item.get("symbol", "")
+                item["exchange_id"] = symbol.split(".")[-1] if "." in symbol else None
+                item["is_deleted"] = False
+
             result = {
-                "instructions": [item.model_dump() for item in data],
-                "rotation_status": {"working": False, "is_manual": False},
+                "instructions": paginated,
+                "rotation_status": trader_result.get(
+                    "rotation_status", {"working": False, "is_manual": False}
+                ),
                 "total": total,
                 "limit": limit,
                 "offset": offset,
             }
-
             return success_response(data=result, message="获取成功")
+
+        # Trader未连接或查询非今日数据，回退到数据库
+        result = _query_rotation_from_db(account_id, limit, offset, status, enabled, trading_date)
+        if isinstance(result, dict):
+            return success_response(data=result, message="获取成功")
+        return result
     except Exception as e:
         logger.error(f"获取换仓指令列表失败: {e}")
         return error_response(message=f"获取换仓指令列表失败: {str(e)}")

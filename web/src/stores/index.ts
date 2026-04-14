@@ -240,7 +240,7 @@ export const useStore = defineStore('main', () => {
   /**
    * 加载委托单
    */
-  async function loadOrders(status?: string, accountId?: string) {
+  async function loadOrders(status: string, accountId?: string) {
     try {
       // 如果没有指定 accountId，使用当前选中的账户
       const targetAccountId = accountId || selectedAccountId.value || undefined
@@ -275,7 +275,7 @@ export const useStore = defineStore('main', () => {
       await Promise.all([
         loadPositions(),
         loadTrades(),
-        loadOrders()
+        loadOrders('ALIVE')
       ])
     }
   }
@@ -288,23 +288,6 @@ export const useStore = defineStore('main', () => {
     const index = accounts.value.findIndex(acc => acc.account_id === data.account_id)
     if (index > -1) {
       accounts.value[index] = { ...accounts.value[index], ...data }
-    }
-  }
-
-  /**
-   * 更新所有账户信息（多账号模式）
-   */
-  function updateAccounts(data: Account[]) {
-    accounts.value = data
-    // 如果当前选中的账户不在新列表中，选择第一个
-    if (selectedAccountId.value) {
-      const exists = data.some(acc => acc.account_id === selectedAccountId.value)
-      if (!exists && data.length > 0) {
-        const firstAccount = data[0]
-        if (firstAccount) {
-          selectedAccountId.value = firstAccount.account_id
-        }
-      }
     }
   }
 
@@ -346,13 +329,6 @@ export const useStore = defineStore('main', () => {
   }
 
   /**
-   * 更新系统状态
-   */
-  function updateSystemStatus(data: SystemStatus) {
-    systemStatus.value = data
-  }
-
-  /**
    * 更新行情数据
    */
   function updateQuote(data: any) {
@@ -372,11 +348,9 @@ export const useStore = defineStore('main', () => {
    */
   function initWebSocket() {
     wsManager.onAccountUpdate(updateAccount)
-    wsManager.onAccountsUpdate(updateAccounts)
     wsManager.onPositionUpdate(updatePosition)
     wsManager.onTradeUpdate(addTrade)
     wsManager.onOrderUpdate(updateOrder)
-    wsManager.onSystemStatus(updateSystemStatus)
     wsManager.onTickUpdate(updateQuote)
 
     wsManager.connect()
@@ -420,7 +394,6 @@ export const useStore = defineStore('main', () => {
     updatePosition,
     addTrade,
     updateOrder,
-    updateSystemStatus,
     updateQuote,
     getQuote
   }

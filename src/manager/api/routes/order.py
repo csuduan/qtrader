@@ -10,7 +10,6 @@ from src.manager.api.dependencies import get_trading_manager
 from src.manager.api.responses import error_response, success_response
 from src.manager.api.schemas import ManualOrderReq, OrderRes
 from src.manager.manager import TradingManager
-from src.models.object import OrderStatus
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -83,7 +82,7 @@ def _query_orders_from_db(
 
 @router.get("")
 async def get_orders(
-    status: Optional[str] = Query(None, description="委托单状态: ALIVE/FINISHED/REJECTED"),
+    status: str = Query(..., description="委托单状态: ALIVE/FINISHED/REJECTED"),
     account_id: Optional[str] = Query(None, description="账户ID（多账号模式）"),
     limit: int = Query(100, ge=1, le=1000, description="返回记录数量"),
     offset: int = Query(0, ge=0, description="偏移量"),
@@ -99,18 +98,15 @@ async def get_orders(
     from datetime import datetime
 
     try:
-        if status and status != "ALIVE":
-            # 已成交/废单：从PG查询历史数据
-            return _query_orders_from_db(status, account_id, limit, offset)
-
-        # 挂单(ALIVE)或全部：从内存缓存查询
-        orders_list = await trading_manager.get_orders(account_id)
-
-        # 按状态筛选（只保留挂单）
         if status == "ALIVE":
-            orders_list = [
-                order for order in orders_list if order.status == OrderStatus.PENDING
-            ]
+            # 查挂单始终走 RPC 查询 Trader 实时数据
+            orders_list = await trading_manager.get_active_orders(account_id)
+        elif status in ("FINISHED", "REJECTED"):
+            # 查询已完成和废单只查询数据库
+            return _query_orders_from_db(status, account_id, limit, offset)
+        else:
+            # status 为空：优先走 RPC 查询 Trader 所有订单
+            orders_list = await trading_manager.get_orders(account_id)
 
         total_count = len(orders_list)
         end_index = offset + limit

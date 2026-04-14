@@ -123,7 +123,6 @@ WebSocket 消息在 `src/ws.ts` 中处理，支持以下消息类型：
 - `trade_update` - 新成交记录
 - `order_update` - 委托单状态更新
 - `kline_update` - K线数据更新
-- `system_status` - 系统状态变化
 
 ## 路由
 

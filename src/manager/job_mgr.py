@@ -475,3 +475,45 @@ class ManagerJobManager:
             asyncio.run_coroutine_threadsafe(_do_export(), loop)
         except Exception as e:
             logger.exception(f"导出所有账户持仓失败: {e}")
+
+    def execute_all_rotations(self) -> None:
+        """
+        执行所有账户的换仓操作
+
+        通过 TradingManager 逐个调用各账户的换仓接口，
+        由 Trader 端自行执行换仓逻辑。
+        """
+        logger.info("开始执行所有账户换仓任务")
+
+        async def _do_rotation():
+            results = {}
+            for account_id, trader in self.trading_manager.traders.items():
+                # 检查账户是否启用
+                account_config = self.trading_manager.account_configs_map.get(account_id)
+                if not account_config or not account_config.enabled:
+                    continue
+
+                try:
+                    logger.info(f"正在执行账户 [{account_id}] 换仓...")
+                    success = await self.trading_manager.execute_rotation(account_id)
+                    results[account_id] = {"success": success}
+                    if success:
+                        logger.info(f"账户 [{account_id}] 换仓执行成功")
+                    else:
+                        logger.error(f"账户 [{account_id}] 换仓执行失败")
+                except Exception as e:
+                    logger.exception(f"执行账户 [{account_id}] 换仓时发生异常: {e}")
+                    results[account_id] = {"success": False, "message": str(e)}
+
+            success_count = sum(1 for r in results.values() if r.get("success"))
+            total = len(results)
+            logger.info(f"批量换仓执行完成: 成功 {success_count}/{total}")
+            for account_id, result in results.items():
+                if not result.get("success"):
+                    logger.warning(f"账户 [{account_id}] 换仓失败: {result.get('message', '未知错误')}")
+
+        try:
+            loop = asyncio.get_event_loop()
+            asyncio.run_coroutine_threadsafe(_do_rotation(), loop)
+        except Exception as e:
+            logger.exception(f"执行所有账户换仓任务失败: {e}")

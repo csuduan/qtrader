@@ -728,7 +728,6 @@ class Trader:
     async def _on_tick_update(self, data):
         """行情更新事件处理器"""
         if self.socket_server:
-            # 行情数据不实时推送，按需订阅
             await self.socket_server.send_push("tick", data.model_dump())
             pass
 

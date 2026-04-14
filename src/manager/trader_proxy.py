@@ -903,17 +903,41 @@ class TraderProxy:
             status=TraderState.CONNECTED if self._is_state(TraderState.CONNECTED) else self._state,
         )
 
+    def get_account_cached(self) -> Optional[AccountData]:
+        """获取缓存的账户数据（不走RPC）"""
+        if self._account_cache:
+            account_data = self._account_cache.model_copy()
+            account_data.status = (
+                TraderState.CONNECTED if self._is_state(TraderState.CONNECTED) else self._state
+            )
+            return account_data
+        return AccountData.model_construct(
+            account_id=self.account_id,
+            status=TraderState.CONNECTED if self._is_state(TraderState.CONNECTED) else self._state,
+        )
+
     async def get_order(self, order_id: str) -> Optional[OrderData]:
-        """获取订单数据 - 从内存缓存返回"""
+        """获取订单数据 - 优先从Trader实时查询，未连接时使用缓存"""
         return self._order_cache.get(order_id)
 
     async def get_orders(self) -> List[OrderData]:
-        """获取所有订单数据 - 从内存缓存返回"""
+        """获取所有订单数据 - 优先从Trader实时查询，未连接时使用缓存"""
+        if self.socket_client and self.socket_client.is_connected():
+            try:
+                data = await self.socket_client.request("get_orders", {}, timeout=5.0)
+                if isinstance(data, list):
+                    self._order_cache.clear()
+                    for order in data:
+                        if isinstance(order, dict) and order.get("order_id"):
+                            self._order_cache[order["order_id"]] = OrderData.model_validate(order)
+            except Exception as e:
+                logger.warning(f"TraderProxy [{self.account_id}] 从Trader查询订单数据失败: {e}")
         return list(self._order_cache.values())
 
     async def get_active_orders(self) -> List[OrderData]:
-        """获取活动订单 - 从内存缓存返回"""
-        return [item for item in self._order_cache.values() if item.is_active()]
+        """获取活动订单 - 优先从Trader实时查询，未连接时使用缓存"""
+        orders = await self.get_orders()
+        return [item for item in orders if item.is_active()]
 
     async def get_trade(self, trade_id: str) -> Optional[TradeData]:
         """获取成交数据 - 从内存缓存返回"""
@@ -924,7 +948,17 @@ class TraderProxy:
         return list(self._trade_cache.values())
 
     async def get_positions(self) -> List[PositionData]:
-        """获取持仓列表"""
+        """获取持仓列表 - 优先从Trader实时查询，未连接时使用缓存"""
+        if self.socket_client and self.socket_client.is_connected():
+            try:
+                data = await self.socket_client.request("get_positions", {}, timeout=5.0)
+                if isinstance(data, list):
+                    self._position_cache.clear()
+                    for pos in data:
+                        if isinstance(pos, dict) and pos.get("symbol"):
+                            self._position_cache[pos["symbol"]] = PositionData.model_validate(pos)
+            except Exception as e:
+                logger.warning(f"TraderProxy [{self.account_id}] 从Trader查询持仓数据失败: {e}")
         return list(self._position_cache.values())
 
     async def get_quotes(self) -> List[TickData]:

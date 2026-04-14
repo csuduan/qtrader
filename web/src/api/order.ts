@@ -8,9 +8,8 @@ export const orderApi = {
   /**
    * 获取委托单列表
    */
-  getOrders: async (status?: string, accountId?: string): Promise<Order[]> => {
-    const params: any = {}
-    if (status) params.status = status
+  getOrders: async (status: string, accountId?: string): Promise<Order[]> => {
+    const params: any = { status }
     if (accountId) params.account_id = accountId
     return api.get<Order[]>('/order', { params })
   },

@@ -389,7 +389,7 @@ async function handleClosePositionConfirm() {
 async function loadOrderData() {
   loading.value = true
   try {
-    const backendStatus = statusMap[orderTab.value]
+    const backendStatus = statusMap[orderTab.value] || 'ALIVE'
     await store.loadOrders(backendStatus, store.selectedAccountId || undefined)
   } finally {
     loading.value = false
@@ -675,13 +675,14 @@ function formatNumber(num: number | null | undefined): string {
 }
 
 // ========== 监听 ==========
-watch(activeTab, (newTab) => {
+watch(activeTab, (newTab, oldTab) => {
   if (newTab === 'detail') {
     loadAccountData()
     loadPositionData()
   } else if (newTab === 'trading') {
     loadQuotes()
     loadOrderData()
+    wsManager.subscribeQuotes()
   } else if (newTab === 'trade') {
     loadTradeData()
   } else if (newTab === 'order-cmd') {
@@ -690,6 +691,10 @@ watch(activeTab, (newTab) => {
     loadContracts()
   } else if (newTab === 'setting') {
     loadTasks()
+  }
+
+  if (oldTab === 'trading') {
+    wsManager.unsubscribeQuotes()
   }
 })
 
@@ -721,6 +726,7 @@ onMounted(async () => {
   } else if (activeTab.value === 'trading') {
     await loadQuotes()
     await loadOrderData()
+    wsManager.subscribeQuotes()
   } else if (activeTab.value === 'trade') {
     await loadTradeData()
   } else if (activeTab.value === 'order-cmd') {
@@ -736,6 +742,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   wsManager.onTickUpdate(handleTickUpdate)()
+  wsManager.unsubscribeQuotes()
 })
 </script>
 

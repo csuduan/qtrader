@@ -1,5 +1,5 @@
 import { ref, type Ref } from 'vue'
-import type { WSMessage, Account, Position, Trade, Order, SystemStatus } from '@/types'
+import type { WSMessage, Account, Position, Trade, Order } from '@/types'
 
 /**
  * 获取 WebSocket URL
@@ -27,12 +27,10 @@ class WebSocketManager {
    private onConnectedCallbacks: Array<() => void> = []
    private onDisconnectedCallbacks: Array<() => void> = []
    private onAccountUpdateCallbacks: Array<(data: Account) => void> = []
-   private onAccountsUpdateCallbacks: Array<(data: Account[]) => void> = []
    private onPositionUpdateCallbacks: Array<(data: Position) => void> = []
    private onTradeUpdateCallbacks: Array<(data: Trade) => void> = []
    private onOrderUpdateCallbacks: Array<(data: Order) => void> = []
-    private onSystemStatusCallbacks: Array<(data: SystemStatus) => void> = []
-    private onTickUpdateCallbacks: Array<(data: any) => void> = []
+   private onTickUpdateCallbacks: Array<(data: any) => void> = []
 
   // 连接状态
   public connected: Ref<boolean> = ref(false)
@@ -108,6 +106,29 @@ class WebSocketManager {
     this.reconnectAttempts = 0
   }
 
+  /**
+   * 发送消息到服务端
+   */
+  private send(type: string, data?: any): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type, data }))
+    }
+  }
+
+  /**
+   * 订阅行情推送
+   */
+  subscribeQuotes(): void {
+    this.send('subscribe_quotes')
+  }
+
+  /**
+   * 取消订阅行情推送
+   */
+  unsubscribeQuotes(): void {
+    this.send('unsubscribe_quotes')
+  }
+
    /**
     * 处理消息
     */
@@ -119,9 +140,6 @@ class WebSocketManager {
          case 'account_update':
            this.onAccountUpdateCallbacks.forEach(cb => cb(message.data))
            break
-         case 'accounts_update':
-           this.onAccountsUpdateCallbacks.forEach(cb => cb(message.data))
-           break
          case 'position_update':
            this.onPositionUpdateCallbacks.forEach(cb => cb(message.data))
            break
@@ -131,15 +149,12 @@ class WebSocketManager {
          case 'order_update':
            this.onOrderUpdateCallbacks.forEach(cb => cb(message.data))
            break
-         case 'system_status':
-           this.onSystemStatusCallbacks.forEach(cb => cb(message.data))
+         case 'tick_update':
+         case 'quote_update':
+           this.onTickUpdateCallbacks.forEach(cb => cb(message.data))
            break
-           case 'tick_update':
-           case 'quote_update':
-             this.onTickUpdateCallbacks.forEach(cb => cb(message.data))
-             break
-           default:
-             console.warn('未知消息类型:', message.type)
+         default:
+           console.warn('未知消息类型:', message.type)
         }
       }
 
@@ -183,19 +198,6 @@ class WebSocketManager {
   }
 
   /**
-   * 订阅所有账户更新事件（多账号模式）
-   */
-  onAccountsUpdate(callback: (data: Account[]) => void): () => void {
-    this.onAccountsUpdateCallbacks.push(callback)
-    return () => {
-      const index = this.onAccountsUpdateCallbacks.indexOf(callback)
-      if (index > -1) {
-        this.onAccountsUpdateCallbacks.splice(index, 1)
-      }
-    }
-  }
-
-  /**
    * 订阅持仓更新事件
    */
   onPositionUpdate(callback: (data: Position) => void): () => void {
@@ -234,32 +236,19 @@ class WebSocketManager {
     }
   }
 
-   /**
-    * 订阅系统状态更新事件
-    */
-   onSystemStatus(callback: (data: SystemStatus) => void): () => void {
-     this.onSystemStatusCallbacks.push(callback)
-     return () => {
-       const index = this.onSystemStatusCallbacks.indexOf(callback)
-       if (index > -1) {
-         this.onSystemStatusCallbacks.splice(index, 1)
-       }
-     }
-   }
-
-     /**
-      * 订阅行情更新事件
-      */
-     onTickUpdate(callback: (data: any) => void): () => void {
-       this.onTickUpdateCallbacks.push(callback)
-       return () => {
-         const index = this.onTickUpdateCallbacks.indexOf(callback)
-         if (index > -1) {
-           this.onTickUpdateCallbacks.splice(index, 1)
-         }
-       }
-     }
-   }
+  /**
+   * 订阅行情更新事件
+   */
+  onTickUpdate(callback: (data: any) => void): () => void {
+    this.onTickUpdateCallbacks.push(callback)
+    return () => {
+      const index = this.onTickUpdateCallbacks.indexOf(callback)
+      if (index > -1) {
+        this.onTickUpdateCallbacks.splice(index, 1)
+      }
+    }
+  }
+}
 
 // 导出单例
 export const wsManager = new WebSocketManager()

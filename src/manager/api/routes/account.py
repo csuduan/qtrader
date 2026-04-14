@@ -95,10 +95,10 @@ async def get_all_accounts(
     from src.utils.config_loader import get_config_loader
 
     try:
-        # 从 TradingManager 获取所有账户数据
+        # 从 TradingManager 获取所有缓存的账户数据（不走RPC，提升性能）
         ctx = get_app_context()
         trading_manager: TradingManager = ctx.get_trading_manager()
-        accounts = await trading_manager.get_all_accounts()
+        accounts = trading_manager.get_all_accounts_cached()
         accounts_list = []
         for account_info in accounts:
             # 添加 None 检查，避免访问 None 对象的属性

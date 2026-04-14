@@ -259,6 +259,13 @@ def create_app() -> FastAPI:
                 try:
                     msg_data = json.loads(data)
                     logger.debug(f"收到WebSocket消息: {data}")
+
+                    msg_type = msg_data.get("type")
+                    if msg_type == "subscribe_quotes":
+                        websocket_manager.set_quote_subscription(websocket, True)
+                    elif msg_type == "unsubscribe_quotes":
+                        websocket_manager.set_quote_subscription(websocket, False)
+
                 except json.JSONDecodeError:
                     logger.warning(f"WebSocket消息解析失败: {data}")
 
