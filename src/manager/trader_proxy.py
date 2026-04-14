@@ -796,13 +796,6 @@ class TraderProxy:
                 pos.hold_profit_short = (hold_price_short - last_price) * pos_short * multiple
 
             pos.updated_at = datetime.now()
-            # 刷新账户盈亏
-            total_profit = sum(
-                (p.hold_profit_long or 0) + (p.hold_profit_short or 0)
-                for p in self._position_cache.values()
-            )
-            self._account_cache.hold_profit = total_profit
-            self._account_cache.update_time = datetime.now()
         except Exception as e:
             logger.exception(f"更新持仓盈亏失败: {tick.symbol} {e}")
         try:
@@ -811,10 +804,8 @@ class TraderProxy:
             last_time = self._last_position_push_time.get(symbol)
             if last_time is not None and (now - last_time) < self._ws_push_interval:
                 return
-
             self._last_position_push_time[symbol] = now
             self._emit_data("position", pos.model_dump())
-            self._emit_data("account", self._account_cache.model_dump())
         except Exception as e:
             logger.exception(f"Tick驱动持仓/账户推送失败 [{tick.symbol}]: {e}")
 
@@ -875,13 +866,32 @@ class TraderProxy:
     # ==================== 数据查询接口 ====================
 
     async def get_account(self) -> Optional[AccountData]:
-        """获取账户数据 - 直接从内存缓存返回
+        """获取账户数据 - 优先从Trader实时查询，未连接时使用缓存
 
         内存缓存由以下途径维护：
         1. 初始化时从DB加载
         2. 连接Trader成功后IPC同步
         3. Trader推送的account消息更新
         """
+        # 优先从Trader实时查询
+        if self.socket_client and self.socket_client.is_connected():
+            try:
+                data = await self.socket_client.request("get_account", {}, timeout=5.0)
+                if data and isinstance(data, dict):
+                    if self._account_cache:
+                        merged = self._account_cache.model_dump()
+                        merged.update(data)
+                        account_data = AccountData.model_validate(merged)
+                    else:
+                        account_data = AccountData.model_validate(data)
+                    # 更新缓存
+                    self._account_cache = account_data
+                    account_data.status = TraderState.CONNECTED
+                    return account_data
+            except Exception as e:
+                logger.warning(f"TraderProxy [{self.account_id}] 从Trader查询账户数据失败: {e}")
+
+        # Trader未连接或查询失败，使用缓存
         if self._account_cache:
             account_data = self._account_cache.model_copy()
             account_data.status = (
@@ -1659,6 +1669,26 @@ class TraderProxy:
         except Exception as e:
             logger.error(f"TraderProxy [{self.account_id}] 心跳请求失败: {e}")
             return False
+
+    async def export_positions(self) -> dict:
+        """
+        请求 Trader 导出持仓到 CSV
+
+        Returns:
+            {"success": bool, "message": str}
+        """
+        if not self.socket_client or not self.socket_client.is_connected():
+            logger.error(f"TraderProxy [{self.account_id}] 未连接到Trader，无法导出持仓")
+            return {"success": False, "message": "未连接到Trader"}
+
+        try:
+            response = await self.socket_client.request("export_positions", {}, timeout=10.0)
+            if isinstance(response, dict):
+                return response
+            return {"success": bool(response), "message": "导出完成"}
+        except Exception as e:
+            logger.error(f"TraderProxy [{self.account_id}] 导出持仓请求失败: {e}")
+            return {"success": False, "message": f"请求失败: {str(e)}"}
 
     async def refresh_contracts(self) -> dict:
         """

@@ -2114,6 +2114,24 @@ class Trader:
             "dnd_end": self.account_config.alert.dnd_end,
         }
 
+    @request("export_positions")
+    async def _req_export_positions(self, data: dict) -> dict:
+        """
+        处理导出持仓请求
+
+        调用 JobManager 的 post_market_export 导出本账户持仓到 CSV。
+        """
+        if self.job_manager is None:
+            logger.error(f"Trader [{self.account_id}] 作业管理器未初始化")
+            return {"success": False, "message": "作业管理器未初始化"}
+
+        try:
+            await self.job_manager.post_market_export()
+            return {"success": True, "message": "持仓导出成功"}
+        except Exception as e:
+            logger.exception(f"Trader [{self.account_id}] 导出持仓失败: {e}")
+            return {"success": False, "message": f"导出失败: {str(e)}"}
+
     @request("refresh_contracts")
     async def _req_refresh_contracts(self, data: dict) -> dict:
         """

@@ -3,7 +3,7 @@ Manager 进程任务执行管理器模块
 管理所有 Manager 进程的定时任务执行方法
 """
 
-import os
+import asyncio
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -443,3 +443,35 @@ class ManagerJobManager:
                 await alarm_service.check_exception_thresholds()
         except Exception as e:
             logger.exception(f"检查异常阈值失败: {e}")
+
+    def export_all_positions(self) -> None:
+        """
+        导出所有账户持仓到 CSV
+
+        通过 TraderProxy 调用各 Trader 进程的 export_positions 接口，
+        由 Trader 端自行导出本账户持仓。
+        """
+        logger.info("开始执行导出所有账户持仓任务")
+
+        async def _do_export():
+            results = {}
+            for account_id, trader in self.trading_manager.traders.items():
+                try:
+                    result = await trader.export_positions()
+                    results[account_id] = result
+                except Exception as e:
+                    logger.exception(f"导出账户 [{account_id}] 持仓失败: {e}")
+                    results[account_id] = {"success": False, "message": str(e)}
+
+            success_count = sum(1 for r in results.values() if r.get("success"))
+            total = len(results)
+            logger.info(f"导出所有账户持仓完成: 成功 {success_count}/{total}")
+            for account_id, result in results.items():
+                if not result.get("success"):
+                    logger.warning(f"账户 [{account_id}] 导出失败: {result.get('message')}")
+
+        try:
+            loop = asyncio.get_event_loop()
+            asyncio.run_coroutine_threadsafe(_do_export(), loop)
+        except Exception as e:
+            logger.exception(f"导出所有账户持仓失败: {e}")
