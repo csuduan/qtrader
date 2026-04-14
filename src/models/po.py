@@ -323,6 +323,7 @@ class ContractPo(Base):
     volume_multiple = Column(Integer, nullable=False, default=1)
     price_tick = Column(Numeric(20, 6), nullable=False, default=0.01)
     min_volume = Column(Integer, nullable=False, default=1)
+    min_open_volume = Column(Integer, nullable=False, default=1)
     option_strike = Column(Numeric(20, 4), nullable=True)
     option_underlying = Column(String(80), nullable=True)
     option_type = Column(String(20), nullable=True)

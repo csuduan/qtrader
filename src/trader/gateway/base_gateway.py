@@ -186,6 +186,7 @@ class BaseGateway(ABC):
                 multiple=po.volume_multiple,  # type: ignore[arg-type]
                 pricetick=float(po.price_tick),
                 min_volume=po.min_volume,  # type: ignore[arg-type]
+                min_open_volume=po.min_open_volume,  # type: ignore[arg-type]
                 option_strike=float(po.option_strike) if po.option_strike else None,
                 option_underlying=po.option_underlying,  # type: ignore[arg-type]
                 option_type=po.option_type,  # type: ignore[arg-type]

@@ -163,6 +163,7 @@ class PublicDataService:
                     )
                     existing.price_tick = contract_dict.get("price_tick", existing.price_tick)
                     existing.min_volume = contract_dict.get("min_volume", existing.min_volume)
+                    existing.min_open_volume = contract_dict.get("min_open_volume", existing.min_open_volume)
                     existing.option_strike = contract_dict.get("option_strike")
                     existing.option_underlying = contract_dict.get("option_underlying")
                     existing.option_type = contract_dict.get("option_type")
@@ -179,6 +180,7 @@ class PublicDataService:
                         volume_multiple=contract_dict.get("volume_multiple", 1),
                         price_tick=contract_dict.get("price_tick", 0.01),
                         min_volume=contract_dict.get("min_volume", 1),
+                        min_open_volume=contract_dict.get("min_open_volume", 1),
                         option_strike=contract_dict.get("option_strike"),
                         option_underlying=contract_dict.get("option_underlying"),
                         option_type=contract_dict.get("option_type"),

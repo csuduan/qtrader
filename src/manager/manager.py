@@ -889,7 +889,7 @@ class TradingManager:
             min_order_map_upper = {k.upper(): v for k, v in min_order_map.items()}
             for contract in contracts:
                 raw_symbol = contract["symbol"]  # Tq格式: "rb2505" (无交易所前缀)
-                contract["min_volume"] = min_order_map_upper.get(raw_symbol.upper(), 1)
+                contract["min_open_volume"] = min_order_map_upper.get(raw_symbol.upper(), 1)
 
             # 4. 写入共享库
             count = self.public_data_service.upsert_contracts(contracts, data_source="tq")
