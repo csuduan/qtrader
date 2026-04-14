@@ -353,7 +353,7 @@ class SwitchPosManager:
         logger.info(f"开始换仓, 手动: {is_manual}")
 
         todo_instructions = [
-            x for x in self.get_today_instructions() if x.status not in ("COMPLETED") and x.enabled
+            x for x in self.get_today_instructions() if x.status not in ("COMPLETED") and x.enabled and x.is_deleted == False and x.account_id == self.config.account_id
         ]
         if not todo_instructions:
             logger.info("今日无换仓指令")
