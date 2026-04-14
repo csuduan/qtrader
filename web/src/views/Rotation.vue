@@ -88,7 +88,7 @@
             <template #default="{ row }">
               <el-button
                 type="primary"
-                :size="isMobile ? 'small' : 'default'"
+                :size="isMobile ? 'small' : 'small'"
                 @click="openEditDialog(row)"
                 :disabled="rotationStatus.working"
               >

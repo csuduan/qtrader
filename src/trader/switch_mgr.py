@@ -145,6 +145,7 @@ class SwitchPosManager:
                     .filter(
                         RotationInstructionPo.trading_date == today,
                         RotationInstructionPo.is_deleted == False,
+                        RotationInstructionPo.account_id == self.config.account_id,
                     )
                     .all()
                 )
