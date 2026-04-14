@@ -185,7 +185,7 @@ class TaskScheduler:
         try:
             cron_parts = cron_expression.split()
             if len(cron_parts) == 6:
-                # 6字段格式：秒 分 时 日 月 周
+                # 6字段格式：秒 分 时 日 月 周 
                 return CronTrigger(
                     second=cron_parts[0],
                     minute=cron_parts[1],
