@@ -12,7 +12,7 @@ import time
 from datetime import datetime
 from gc import enable
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 from sqlalchemy import True_
 from sqlalchemy.orm import Session as SQLASession
@@ -30,7 +30,7 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 # Type alias for Session that can be None
-OptionalSession = Optional[SQLASession]
+OptionalSession = SQLASession | None
 
 
 class OrderInstruction:
@@ -44,7 +44,7 @@ class OrderInstruction:
         direction: str,
         volume: int,
         price: float,
-        order_time: Optional[str],
+        order_time: str | None,
     ):
         self.symbol = symbol  # 合约代码，如 "SHFE.rb2505"
         self.exchange_id = exchange_id  # 交易所代码，如 "SHFE"
@@ -78,7 +78,7 @@ class SwitchPosManager:
         app_config = get_config_loader()._load_app_config()
         self.switchPos_files_dir = app_config.paths.switch_pos
         self.working = False
-        self.running_instructions: Optional[List[RotationInstructionPo]] = None
+        self.running_instructions: list[RotationInstructionPo] | None = None
         self.is_manual = False
         self.all_instructions = []
 
@@ -88,7 +88,7 @@ class SwitchPosManager:
         self.load_rotation_instructions()
         pass
 
-    def get_today_instructions(self) -> List[RotationInstructionPo]:
+    def get_today_instructions(self) -> list[RotationInstructionPo]:
         """获取今日换仓指令"""
         today = datetime.now().strftime("%Y%m%d")
         return [x for x in self.all_instructions if x.trading_date == today]
@@ -125,7 +125,7 @@ class SwitchPosManager:
 
         return instruction
 
-    def delete_instruction(self, ids: List[str]):
+    def delete_instruction(self, ids: list[str]):
         """删除换仓指令"""
         self.all_instructions = [x for x in self.all_instructions if x.id not in ids]
         # 更新数据库
@@ -301,16 +301,20 @@ class SwitchPosManager:
             ]
             if not csv_files:
                 return
-            
-            csv_files = sorted(csv_files,key=lambda f: f.stat().st_mtime if f.is_file() else 0,reverse=True)
+
+            csv_files = sorted(
+                csv_files, key=lambda f: f.stat().st_mtime if f.is_file() else 0, reverse=True
+            )
 
             # logger.info(f"扫描到 {len(csv_files)} 个换仓文件")
             with session_scope() as session:
                 for csv_file in csv_files:
                     # 检查该文件是否已导入
-                    existing = session.query(OrderFile).filter_by(
-                        account_id=self.config.account_id, file_name=csv_file.name
-                    ).first()
+                    existing = (
+                        session.query(OrderFile)
+                        .filter_by(account_id=self.config.account_id, file_name=csv_file.name)
+                        .first()
+                    )
                     if existing:
                         continue
 
@@ -353,7 +357,12 @@ class SwitchPosManager:
         logger.info(f"开始换仓, 手动: {is_manual}")
 
         todo_instructions = [
-            x for x in self.get_today_instructions() if x.status not in ("COMPLETED") and x.enabled and x.is_deleted == False and x.account_id == self.config.account_id
+            x
+            for x in self.get_today_instructions()
+            if x.status not in ("COMPLETED")
+            and x.enabled
+            and x.is_deleted == False
+            and x.account_id == self.config.account_id
         ]
         if not todo_instructions:
             logger.info("今日无换仓指令")
@@ -424,7 +433,7 @@ class SwitchPosManager:
 
     async def _monitor_order_commands(
         self,
-        instructions: List[RotationInstructionPo],
+        instructions: list[RotationInstructionPo],
     ) -> None:
         """
         监控OrderCmd执行状态
@@ -493,7 +502,7 @@ class SwitchPosManager:
         # 清理已完成的OrderCmd
         # self.trading_engine.cleanup_finished_order_cmds()
 
-    def _update_instructions(self, instructions: List[RotationInstructionPo]) -> None:
+    def _update_instructions(self, instructions: list[RotationInstructionPo]) -> None:
         """
         更新指令状态
 

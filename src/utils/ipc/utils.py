@@ -12,7 +12,7 @@ import hashlib
 import time
 import uuid
 from functools import wraps
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable
 
 from src.utils.logger import get_logger
 
@@ -122,7 +122,7 @@ class RequestHandlerRegistry:
     """
 
     def __init__(self):
-        self._handlers: Dict[str, Callable] = {}
+        self._handlers: dict[str, Callable] = {}
 
     def register(self, request_type: str) -> Callable:
         """
@@ -148,7 +148,7 @@ class RequestHandlerRegistry:
 
         return decorator
 
-    def get_handler(self, request_type: str) -> Optional[Callable]:
+    def get_handler(self, request_type: str) -> Callable | None:
         """获取处理器"""
         return self._handlers.get(request_type)
 

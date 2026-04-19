@@ -8,7 +8,7 @@ import math
 import time
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 import pandas as pd
 from sqlalchemy import or_
@@ -63,7 +63,7 @@ class TradingEngine:
 
         from src.trader.gateway.base_gateway import BaseGateway
 
-        self.gateway: Optional[BaseGateway] = None
+        self.gateway: BaseGateway | None = None
         self.paused = config.trading.paused if config.trading else False
 
         # 风控模块（使用配置文件中的默认值，启动后会从数据库加载）
@@ -76,13 +76,13 @@ class TradingEngine:
             self.risk_control = RiskControl(RiskControlConfig())
 
         # 异步事件引擎
-        self.event_engine: Optional[AsyncEventEngine] = None
+        self.event_engine: AsyncEventEngine | None = None
 
         # 报单指令管理
-        self._order_cmds: Dict[str, OrderCmd] = {}
+        self._order_cmds: dict[str, OrderCmd] = {}
 
         # 报单指令执行器
-        self._order_cmd_executor: Optional[OrderCmdExecutor] = None
+        self._order_cmd_executor: OrderCmdExecutor | None = None
 
         logger.info(f"交易引擎初始化完成")  # type: ignore[attr-defined]
 
@@ -282,7 +282,20 @@ class TradingEngine:
             if self.gateway is None:
                 return False
             await self.gateway.connect()
-            return True
+
+            # 等待连接就绪，最多15秒
+            timeout = 15
+            start = time.time()
+            while time.time() - start < timeout:
+                if self.connected:
+                    logger.info(f"交易系统连接成功 [{self.account_id}]")
+                    return True
+                await asyncio.sleep(0.5)
+
+            # 超时未连接成功，断开
+            logger.warning(f"交易系统连接超时 ({timeout}s)，断开连接")
+            await self.disconnect()
+            return False
 
         except Exception as e:
             logger.exception(f"连接失败: {e}")
@@ -308,12 +321,12 @@ class TradingEngine:
     def insert_order(
         self,
         symbol: str,
-        direction: Union[str, Direction],
-        offset: Union[str, Offset],
+        direction: str | Direction,
+        offset: str | Offset,
         volume: int,
         price: float = 0,
         slip: int = 0,
-    ) -> Optional[OrderData]:
+    ) -> OrderData | None:
         """
         下单
 
@@ -326,7 +339,7 @@ class TradingEngine:
             slip: 滑点，默认0
 
         Returns:
-            Optional[OrderData]: 委托单数据，失败返回None
+            OrderData | None: 委托单数据，失败返回None
         """
         if self.gateway is None or not self.gateway.connected:
             logger.error("交易引擎未连接，无法下单")
@@ -414,17 +427,6 @@ class TradingEngine:
             update_data = account_data.model_dump()
             update_data["trade_paused"] = True
             self._emit_event(EventTypes.ACCOUNT_UPDATE, update_data)
-        else:
-            # 如果没有账户数据，发送最小化的状态更新
-            self._emit_event(
-                EventTypes.ACCOUNT_STATUS,
-                {
-                    "account_id": self.account_id,  # type: ignore[attr-defined]
-                    "status": "paused",
-                    "trade_paused": True,
-                    "timestamp": datetime.now().isoformat(),
-                },
-            )
 
     def resume(self) -> None:
         """恢复交易"""
@@ -437,19 +439,9 @@ class TradingEngine:
             update_data = account_data.model_dump()
             update_data["trade_paused"] = False
             self._emit_event(EventTypes.ACCOUNT_UPDATE, update_data)
-        else:
-            # 如果没有账户数据，发送最小化的状态更新
-            self._emit_event(
-                EventTypes.ACCOUNT_STATUS,
-                {
-                    "account_id": self.account_id,  # type: ignore[attr-defined]
-                    "status": "running",
-                    "trade_paused": False,
-                    "timestamp": datetime.now().isoformat(),
-                },
-            )
+    
 
-    def get_position(self, symbol: str) -> Optional[PositionData]:
+    def get_position(self, symbol: str) -> PositionData | None:
         """
         获取合约持仓数据（通过Gateway）
 
@@ -457,13 +449,13 @@ class TradingEngine:
             symbol: 合约代码
 
         Returns:
-            Optional[PositionData]: 持仓数据，失败返回None
+            PositionData | None: 持仓数据，失败返回None
         """
         if self.gateway:
             return self.gateway.get_positions().get(symbol, None)
         return None
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """
         获取引擎状态
 
@@ -478,7 +470,7 @@ class TradingEngine:
             "daily_cancels": self.risk_control.daily_cancel_count,
         }
 
-    def get_kline(self, symbol: str, interval: str) -> Optional[pd.DataFrame]:
+    def get_kline(self, symbol: str, interval: str) -> pd.DataFrame | None:
         """
         获取合约K线数据（通过Gateway）
 
@@ -487,13 +479,13 @@ class TradingEngine:
             interval: K线周期
 
         Returns:
-            Optional[pd.DataFrame]: K线数据框（如果成功），否则None
+            pd.DataFrame | None: K线数据框（如果成功），否则None
         """
         if self.gateway:
             return self.gateway.get_kline(symbol, interval)
         return None
 
-    def subscribe_symbol(self, symbol: Union[str, List[str]]) -> bool:
+    def subscribe_symbol(self, symbol: str | list[str]) -> bool:
         """
         订阅合约行情（通过Gateway）
 
@@ -544,7 +536,7 @@ class TradingEngine:
         except Exception as e:
             logger.error(f"发送报单指令更新事件失败: {e}")
 
-    def insert_order_cmd(self, cmd: OrderCmd) -> Optional[str]:
+    def insert_order_cmd(self, cmd: OrderCmd) -> str | None:
         """
         创建报单指令
 
@@ -590,7 +582,7 @@ class TradingEngine:
             return self._order_cmd_executor.close(cmd_id)
         return False
 
-    def get_order_cmd(self, cmd_id: str) -> Optional[dict]:
+    def get_order_cmd(self, cmd_id: str) -> dict | None:
         """
         获取报单指令状态
 
@@ -606,7 +598,7 @@ class TradingEngine:
 
         return cmd.to_dict()
 
-    def get_all_order_cmds(self) -> List[dict]:
+    def get_all_order_cmds(self) -> list[dict]:
         """
         获取所有报单指令状态
 

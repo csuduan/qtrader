@@ -8,7 +8,6 @@
 
 import sys
 from pathlib import Path
-from typing import Optional
 
 from loguru import logger
 
@@ -91,7 +90,7 @@ def enable_alarm_handler():
     logger.info("告警日志处理器已启用")
 
 
-def get_logger(name: Optional[str] = None):
+def get_logger(name: str | None = None):
     """
     获取logger实例
 

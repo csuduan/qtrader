@@ -3,7 +3,7 @@
 import math
 import traceback
 from datetime import datetime
-from typing import Any, Generic, Optional, TypeVar
+from typing import Any, Generic, TypeVar
 
 from fastapi import Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -52,7 +52,7 @@ class ApiResponse(BaseModel, Generic[T]):
 
     code: int = 0
     message: str = "success"
-    data: Optional[T] = None
+    data: T | None = None
 
     class Config:
         json_schema_extra = {"example": {"code": 0, "message": "success", "data": {}}}

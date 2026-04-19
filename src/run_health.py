@@ -18,7 +18,6 @@ import signal
 import sys
 import time
 from pathlib import Path
-from typing import Optional
 
 import requests
 
@@ -37,7 +36,7 @@ PID_FILE_NAME = "qtrader_manager.pid"  # Manager PID 文件名
 
 consecutive_failures = 0  # 连续失败次数
 consecutive_alerts = 0  # 连续告警次数（用于告警压制）
-last_known_pid: Optional[int] = None  # 上次检测到的 PID，用于检测重启
+last_known_pid: int | None = None  # 上次检测到的 PID，用于检测重启
 running = True
 logger = get_logger(__name__)
 
@@ -45,7 +44,7 @@ logger = get_logger(__name__)
 # ==================== 函数 ====================
 
 
-def get_manager_pid(socket_dir: str) -> Optional[int]:
+def get_manager_pid(socket_dir: str) -> int | None:
     """
     从 PID 文件读取 Manager 进程 ID
 
@@ -99,7 +98,7 @@ def check_health_endpoint(host: str, port: int) -> bool:
         return False
 
 
-def health_check_iteration(host: str, port: int, socket_dir: str) -> tuple[bool, Optional[int]]:
+def health_check_iteration(host: str, port: int, socket_dir: str) -> tuple[bool, int | None]:
     """
     执行一次健康检查
 
@@ -135,7 +134,7 @@ def health_check_iteration(host: str, port: int, socket_dir: str) -> tuple[bool,
     return True, pid
 
 
-def send_alert_with_throttle(message: str, current_pid: Optional[int]) -> bool:
+def send_alert_with_throttle(message: str, current_pid: int | None) -> bool:
     """
     发送告警通知（带告警压制）
 
@@ -216,8 +215,7 @@ def main():
 
             if consecutive_failures >= MAX_FAILURES:
                 send_alert_with_throttle(
-                    f"Manager 进程异常，连续 {MAX_FAILURES} 次健康检查失败！",
-                    current_pid
+                    f"Manager 进程异常，连续 {MAX_FAILURES} 次健康检查失败！", current_pid
                 )
                 # 重置失败计数，继续监控
                 consecutive_failures = 0

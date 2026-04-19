@@ -5,7 +5,7 @@
 import asyncio
 import logging
 from collections import defaultdict
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable
 
 from src.utils.logger import get_logger
 
@@ -36,6 +36,7 @@ class AsyncEventEngine:
     2. 异步支持：处理器可以是async或sync函数
     3. 并发处理：同一事件类型的处理器并发执行
     4. 通用处理器：支持注册处理所有事件的通用处理器
+    5. 线程安全：支持其他线程通过put/put_async安全投递事件
     """
 
     def __init__(self, name: str = "AsyncEventEngine") -> None:
@@ -50,7 +51,8 @@ class AsyncEventEngine:
         self._queue: asyncio.Queue = asyncio.Queue()
         self._handlers: defaultdict = defaultdict(list)
         self._general_handlers: list = []
-        self._process_task: Optional[asyncio.Task] = None
+        self._process_task: asyncio.Task | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     async def _process(self, event: Event) -> None:
         """
@@ -132,6 +134,7 @@ class AsyncEventEngine:
                 logger.warning(f"[{self._name}] 没有运行的事件循环，无法启动")
                 return
 
+            self._loop = loop
             self._process_task = asyncio.create_task(self._run())
             logger.info(f"[{self._name}] 异步事件引擎已启动")
 
@@ -154,40 +157,62 @@ class AsyncEventEngine:
             except asyncio.CancelledError:
                 pass
 
+        self._loop = None
         logger.info(f"[{self._name}] 异步事件引擎已停止")
 
     def put(self, event_type: str, data: Any) -> None:
         """
-        发送事件到队列
+        发送事件到队列，支持跨线程安全调用
 
         Args:
             event_type: 事件类型
             data: 事件数据
         """
-        if not self._running:
+        if not self._running or self._loop is None:
             logger.warning(f"[{self._name}] 事件引擎未运行，丢弃事件: {event_type}")
             return
 
+        event = Event(event_type, data)
+
         try:
-            self._queue.put_nowait(Event(event_type, data))
-        except asyncio.QueueFull:
-            logger.error(f"[{self._name}] 事件队列已满，丢弃事件: {event_type}")
-        except Exception as e:
-            logger.error(f"[{self._name}] 发送事件失败: {e}")
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+
+        if current_loop is self._loop:
+            # 同一线程：直接操作
+            try:
+                self._queue.put_nowait(event)
+            except asyncio.QueueFull:
+                logger.error(f"[{self._name}] 事件队列已满，丢弃事件: {event_type}")
+        else:
+            # 其他线程：通过 call_soon_threadsafe 安全投递
+            self._loop.call_soon_threadsafe(self._queue.put_nowait, event)
 
     async def put_async(self, event_type: str, data: Any) -> None:
         """
-        异步发送事件到队列
+        异步发送事件到队列，支持跨线程安全调用
 
         Args:
             event_type: 事件类型
             data: 事件数据
         """
-        if not self._running:
+        if not self._running or self._loop is None:
             logger.warning(f"[{self._name}] 事件引擎未运行，丢弃事件: {event_type}")
             return
 
-        await self._queue.put(Event(event_type, data))
+        event = Event(event_type, data)
+
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+
+        if current_loop is self._loop:
+            await self._queue.put(event)
+        else:
+            # 跨线程：通过 call_soon_threadsafe 投递
+            self._loop.call_soon_threadsafe(self._queue.put_nowait, event)
 
     def register(self, event_type: str, handler: HandlerType) -> None:
         """

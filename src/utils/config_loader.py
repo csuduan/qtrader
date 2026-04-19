@@ -9,7 +9,7 @@
 
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -84,7 +84,7 @@ class JobConfig(BaseModel):
     job_id: str
     job_name: str
     job_group: str = "default"
-    job_description: Optional[str] = None
+    job_description: str | None = None
     cron_expression: str
     job_method: str
     enabled: bool = True
@@ -93,7 +93,7 @@ class JobConfig(BaseModel):
 class SchedulerConfig(BaseModel):
     """定时任务调度器配置"""
 
-    jobs: List[JobConfig] = Field(default_factory=list)
+    jobs: list[JobConfig] = Field(default_factory=list)
 
 
 class TradingConfig(BaseModel):
@@ -101,9 +101,9 @@ class TradingConfig(BaseModel):
 
     auto_trade: bool = True
     paused: bool = False
-    risk_control: Optional[RiskControlConfig] = None
+    risk_control: RiskControlConfig | None = None
     # 开仓限制
-    open_limit: Optional[Dict[str, int]] = None
+    open_limit: (dict[str, int]) | None = None
 
 
 # ==================== 策略配置类 ====================
@@ -118,9 +118,9 @@ class StrategyConfig(BaseModel):
     exchange: str = ""
     volume: int = 1
     bar: str = "M1"
-    params_file: Optional[str] = None
+    params_file: str | None = None
     # 其他参数（动态扩展）
-    params: Dict[str, Any] = Field(default_factory=dict)
+    params: dict[str, Any] = Field(default_factory=dict)
 
     class Config:
         extra = "allow"  # 允许额外字段
@@ -132,12 +132,12 @@ class StrategyConfig(BaseModel):
 class GatewayConfig(BaseModel):
     """网关配置"""
 
-    account_id: Optional[str] = None
+    account_id: str | None = None
     type: str = "TQSDK"
-    tianqin: Optional[TianqinConfig] = None
-    broker: Optional[BrokerConfig] = None
-    subscribe_symbols: List[str] = []
-    subscribe_bars: List[str] = []
+    tianqin: TianqinConfig | None = None
+    broker: BrokerConfig | None = None
+    subscribe_symbols: list[str] = []
+    subscribe_bars: list[str] = []
 
 
 class IndicatorConfig(BaseModel):
@@ -163,7 +163,7 @@ class ExceptionAlertConfig(BaseModel):
     enabled: bool = Field(default=True, description="是否启用异常告警")
     dnd_start: int = Field(default=23, description="免打扰开始时间（小时）")
     dnd_end: int = Field(default=8, description="免打扰结束时间（小时）")
-    indicators: List[IndicatorConfig] = Field(
+    indicators: list[IndicatorConfig] = Field(
         default_factory=lambda: [
             IndicatorConfig(
                 name="1min", window=60, threshold=1, description="最近1分钟异常次数超过1"
@@ -193,17 +193,17 @@ class AlertConfig(BaseModel):
 class AccountConfig(BaseModel):
     """完整账户配置（来自account-{ID}.yaml）"""
 
-    account_id: Optional[str] = None
-    name: Optional[str] = None
+    account_id: str | None = None
+    name: str | None = None
     account_type: str | None = "kq"
     enabled: bool | None = True
     # 告警配置
     alert: AlertConfig = Field(default_factory=AlertConfig)
 
-    gateway: Optional[GatewayConfig] = None
+    gateway: GatewayConfig | None = None
     paths: PathsConfig | None = None
     trading: TradingConfig | None = None
-    strategies: Optional[Dict[str, StrategyConfig]] = None
+    strategies: (dict[str, StrategyConfig]) | None = None
 
     class Config:
         extra = "allow"  # 允许额外字段
@@ -222,7 +222,7 @@ class ApiConfig(BaseModel):
 
     host: str = "0.0.0.0"
     port: int = 8000
-    cors_origins: List[str] = Field(
+    cors_origins: list[str] = Field(
         default_factory=lambda: ["http://localhost:5173", "http://localhost:8080"]
     )
 
@@ -267,8 +267,8 @@ class TraderInitConfig(BaseModel):
 class SubsConfig(BaseModel):
     """订阅配置（全局）"""
 
-    subscribe_symbols: List[str] = Field(default_factory=list, description="订阅的合约列表")
-    subscribe_bars: List[str] = Field(
+    subscribe_symbols: list[str] = Field(default_factory=list, description="订阅的合约列表")
+    subscribe_bars: list[str] = Field(
         default_factory=list, description="订阅的K线列表，格式: symbol-interval"
     )
 
@@ -283,18 +283,18 @@ class AdminConfig(BaseModel):
 class AppConfig(BaseModel):
     """全局配置（来自config.yaml）"""
 
-    account_ids: List[str] = Field(default_factory=list, description="账户ID列表")
-    accounts: List[AccountConfig] = Field(default_factory=list, description="账户配置列表")
+    account_ids: list[str] = Field(default_factory=list, description="账户ID列表")
+    accounts: list[AccountConfig] = Field(default_factory=list, description="账户配置列表")
     paths: PathsConfig = Field(default_factory=PathsConfig)
     socket: SocketConfig = Field(default_factory=SocketConfig)
     api: ApiConfig = Field(default_factory=ApiConfig)
-    scheduler: Optional[SchedulerConfig] = None  # Manager 定时任务
-    account_scheduler: Optional[SchedulerConfig] = None  # 账户定时任务
+    scheduler: SchedulerConfig | None = None  # Manager 定时任务
+    account_scheduler: SchedulerConfig | None = None  # 账户定时任务
     trading: TradingConfig | None = Field(default_factory=TradingConfig)
     # 数据库连接配置
     data_base: DataBaseConfig | None = Field(default_factory=DataBaseConfig)
     # 数据服务配置
-    data_service: Dict[str, Dict[str, str]] = Field(default_factory=dict)
+    data_service: dict[str, dict[str, str]] = Field(default_factory=dict)
     # 全局订阅配置
     subs: SubsConfig = Field(default_factory=SubsConfig)
 
@@ -306,10 +306,10 @@ class AppConfig(BaseModel):
     class Config:
         extra = "allow"  # 允许额外字段
 
-    def get_active_accounts(self) -> List[AccountConfig]:
+    def get_active_accounts(self) -> list[AccountConfig]:
         return [acc for acc in self.accounts if acc.enabled]
 
-    def get_account_config(self, account_id: str) -> Optional[AccountConfig]:
+    def get_account_config(self, account_id: str) -> AccountConfig | None:
         for acc in self.accounts:
             if acc.account_id == account_id:
                 return acc
@@ -337,7 +337,7 @@ class ConfigLoader:
             config_dir: 配置文件目录
         """
         self.config_dir = Path(config_dir)
-        self.app_config: Optional[AppConfig] = None
+        self.app_config: AppConfig | None = None
 
     def load_config(self) -> AppConfig:
         """加载所有配置（包括动态扫描账户配置）"""
@@ -435,7 +435,7 @@ class ConfigLoader:
 
 
 # 全局配置加载器实例
-_config_loader: Optional[ConfigLoader] = None
+_config_loader: ConfigLoader | None = None
 
 
 def get_config_loader() -> ConfigLoader:

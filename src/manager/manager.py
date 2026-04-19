@@ -7,17 +7,23 @@ import asyncio
 from collections import deque
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from src.app_context import AppContext, get_app_context
 from src.manager.public_data_service import PublicDataService
 from src.manager.service.alarm_service import AlarmService
 from src.manager.trader_proxy import TraderProxy
 from src.models.object import AccountData, Direction, Offset, OrderData, OrderRequest
-from src.utils.config_loader import AccountConfig, AppConfig, DatabaseConfig, SocketConfig, get_config_loader
+from src.utils.config_loader import (
+    AccountConfig,
+    AppConfig,
+    DatabaseConfig,
+    SocketConfig,
+    get_config_loader,
+)
+from src.utils.db_url import build_db_url
 from src.utils.logger import get_logger
 from src.utils.scheduler import TaskScheduler
-from src.utils.db_url import build_db_url
 from src.utils.shared_database import SharedDatabase, init_shared_database
 
 ctx: AppContext = get_app_context()
@@ -37,7 +43,7 @@ class TradingManager:
 
     """
 
-    def __init__(self, account_configs: List[AccountConfig], app_config: Optional[AppConfig] = None):
+    def __init__(self, account_configs: list[AccountConfig], app_config: AppConfig | None = None):
         """
         初始化交易管理器
 
@@ -46,7 +52,7 @@ class TradingManager:
             app_config: 全局配置（包含告警配置等）
         """
         self.account_configs = account_configs
-        self.account_configs_map: Dict[str, AccountConfig] = {
+        self.account_configs_map: dict[str, AccountConfig] = {
             acc.account_id: acc for acc in account_configs if acc.account_id is not None
         }
         self.app_config = app_config
@@ -55,34 +61,33 @@ class TradingManager:
         self.socket_config = SocketConfig()
         self.database_config = DatabaseConfig()
 
-
         # Socket目录（独立模式的Trader进程会创建socket文件）
         socket_dir = self.socket_config.socket_dir
         Path(socket_dir).mkdir(parents=True, exist_ok=True)
 
         # Trader Proxy 实例
-        self.traders: Dict[str, TraderProxy] = {}
+        self.traders: dict[str, TraderProxy] = {}
 
         # 运行状态
         self._running = False
         self._health_check_running = False
-        self._health_check_task: Optional[asyncio.Task] = None
+        self._health_check_task: asyncio.Task | None = None
 
         # Scheduler（将在 start() 中初始化）
-        self._scheduler: Optional[TaskScheduler] = None
+        self._scheduler: TaskScheduler | None = None
 
         # 共享数据库（公共数据）
-        self._shared_db: Optional[SharedDatabase] = None
+        self._shared_db: SharedDatabase | None = None
 
         # 公共数据服务
-        self.public_data_service: Optional[PublicDataService] = None
+        self.public_data_service: PublicDataService | None = None
 
         # 告警服务
-        self.alarm_service: Optional[AlarmService] = None
+        self.alarm_service: AlarmService | None = None
 
         # 服务器资源监控历史缓存（5秒采样一次，默认保存2880条约4小时）
         self._resource_history: deque = deque(maxlen=2880)
-        self._resource_sample_task: Optional[asyncio.Task] = None
+        self._resource_sample_task: asyncio.Task | None = None
 
         logger.info("交易管理器初始化完成")
 
@@ -99,7 +104,9 @@ class TradingManager:
         # 如果已存在，先停止旧实例
         if account_id in self.traders:
             old_trader = self.traders[account_id]
-            logger.warning(f"Trader [{account_id}] 已存在，_connect_task={old_trader._connect_task}，先停止旧实例")
+            logger.warning(
+                f"Trader [{account_id}] 已存在，_connect_task={old_trader._connect_task}，先停止旧实例"
+            )
             await old_trader.stop_monitoring()
             del self.traders[account_id]
 
@@ -183,7 +190,7 @@ class TradingManager:
             return trader.is_running()
         return False
 
-    def get_trader_status(self, account_id: str) -> Optional[Dict]:
+    def get_trader_status(self, account_id: str) -> dict | None:
         """
         获取Trader状态
 
@@ -198,7 +205,7 @@ class TradingManager:
             return trader.get_status()
         return None
 
-    def get_all_trader_status(self) -> List[Dict]:
+    def get_all_trader_status(self) -> list[dict]:
         """
         获取所有Trader状态
 
@@ -220,7 +227,7 @@ class TradingManager:
         offset: Offset,
         volume: int,
         price: float = 0,
-    ) -> Optional[str]:
+    ) -> str | None:
         """
         发送下单请求到指定Trader
 
@@ -262,7 +269,7 @@ class TradingManager:
 
     # ==================== TaskScheduler ====================
 
-    def get_task_scheduler(self, account_id: str) -> Optional[TaskScheduler]:
+    def get_task_scheduler(self, account_id: str) -> TaskScheduler | None:
         """
         获取指定Trader的任务调度器
 
@@ -274,7 +281,7 @@ class TradingManager:
         """
         return None
 
-    def get_manager_scheduler_jobs(self) -> List[dict]:
+    def get_manager_scheduler_jobs(self) -> list[dict]:
         """
         获取Manager级别的定时任务列表
 
@@ -325,7 +332,7 @@ class TradingManager:
             return False
         return self._scheduler.update_job_status(job_id, enabled)
 
-    def get_trader_mode(self, account_id: str) -> Optional[str]:
+    def get_trader_mode(self, account_id: str) -> str | None:
         """
         获取Trader运行模式
 
@@ -341,21 +348,21 @@ class TradingManager:
 
     # ==================== 数据查询接口（查询Trader） ====================
 
-    async def sync_account(self, account_id: str) -> Optional[dict]:
+    async def sync_account(self, account_id: str) -> dict | None:
         """手动触发全量同步：账户+持仓+报单+成交"""
         trader = self.traders.get(account_id)
         if trader:
             return await trader.sync_all()
         return None
 
-    async def get_account(self, account_id: str) -> Optional[AccountData]:
+    async def get_account(self, account_id: str) -> AccountData | None:
         """获取账户数据"""
         trader = self.traders.get(account_id)
         if trader:
             return await trader.get_account()
         return None
 
-    def get_all_accounts_cached(self) -> List[AccountData]:
+    def get_all_accounts_cached(self) -> list[AccountData]:
         """获取所有缓存的账户数据（不走RPC，用于列表展示）"""
         accounts = []
         for trader in self.traders.values():
@@ -364,7 +371,7 @@ class TradingManager:
                 accounts.append(account)
         return accounts
 
-    async def get_all_accounts(self) -> List[AccountData]:
+    async def get_all_accounts(self) -> list[AccountData]:
         """获取所有账户数据（包括禁用账户）"""
         accounts = []
         # 获取已启动trader的账户数据
@@ -374,7 +381,7 @@ class TradingManager:
                 accounts.append(account)
         return accounts
 
-    def get_trader(self, account_id: str) -> Optional[TraderProxy]:
+    def get_trader(self, account_id: str) -> TraderProxy | None:
         """获取Trader实例"""
         return self.traders.get(account_id)
 
@@ -395,7 +402,7 @@ class TradingManager:
             logger.exception(f"同步账户 [{account_id}] 数据失败: {e}")
             return {"success": False, "message": f"同步失败: {str(e)}"}
 
-    async def refresh_contracts(self, account_id: Optional[str] = None) -> dict:
+    async def refresh_contracts(self, account_id: str | None = None) -> dict:
         """
         强制刷新合约信息
 
@@ -427,10 +434,10 @@ class TradingManager:
 
     async def get_contracts(
         self,
-        account_id: Optional[str] = None,
-        exchange_id: Optional[str] = None,
-        product_type: Optional[str] = None,
-        symbol_keyword: Optional[str] = None,
+        account_id: str | None = None,
+        exchange_id: str | None = None,
+        product_type: str | None = None,
+        symbol_keyword: str | None = None,
     ) -> list:
         """
         获取合约列表
@@ -485,14 +492,14 @@ class TradingManager:
         # 按合约代码排序
         return sorted(all_contracts.values(), key=lambda x: x.get("symbol", ""))
 
-    async def get_order(self, account_id: str, order_id: str) -> Optional[Any]:
+    async def get_order(self, account_id: str, order_id: str) -> Any | None:
         """获取订单数据"""
         trader = self.traders.get(account_id)
         if trader:
             return await trader.get_order(order_id)
         return None
 
-    async def get_orders(self, account_id: Optional[str] = None) -> List[OrderData]:
+    async def get_orders(self, account_id: str | None = None) -> list[OrderData]:
         """获取订单列表"""
         if account_id:
             trader = self.traders.get(account_id)
@@ -505,7 +512,7 @@ class TradingManager:
             all_orders.extend(await trader.get_orders())
         return all_orders
 
-    async def get_active_orders(self, account_id: Optional[str] = None) -> List[Any]:
+    async def get_active_orders(self, account_id: str | None = None) -> list[Any]:
         """获取活动订单"""
         if account_id:
             trader = self.traders.get(account_id)
@@ -518,7 +525,7 @@ class TradingManager:
             all_orders.extend(await trader.get_active_orders())
         return all_orders
 
-    async def get_trades(self, account_id: Optional[str] = None) -> List[Any]:
+    async def get_trades(self, account_id: str | None = None) -> list[Any]:
         """获取成交列表"""
         if account_id:
             trader = self.traders.get(account_id)
@@ -531,7 +538,7 @@ class TradingManager:
             all_trades.extend(await trader.get_trades())
         return []
 
-    async def get_positions(self, account_id: Optional[str] = None) -> Dict[str, List[Any]]:
+    async def get_positions(self, account_id: str | None = None) -> dict[str, list[Any]]:
         """获取持仓列表"""
         if account_id:
             trader = self.traders.get(account_id)
@@ -546,7 +553,7 @@ class TradingManager:
 
     # ==================== 策略管理接口 ====================
 
-    async def list_strategies(self, account_id: str) -> List:
+    async def list_strategies(self, account_id: str) -> list:
         """获取策略列表"""
         trader = self.traders.get(account_id)
         if trader:
@@ -554,7 +561,7 @@ class TradingManager:
             return strategies if isinstance(strategies, list) else []
         return []
 
-    async def get_strategy(self, account_id: str, strategy_id: str) -> Optional[dict]:
+    async def get_strategy(self, account_id: str, strategy_id: str) -> dict | None:
         """获取指定策略状态"""
         trader = self.traders.get(account_id)
         if trader:
@@ -603,7 +610,7 @@ class TradingManager:
         offset: int = 0,
         status: str = None,
         enabled: bool = None,
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """获取换仓指令列表"""
         trader = self.traders.get(account_id)
         if trader:
@@ -614,9 +621,7 @@ class TradingManager:
             return result if isinstance(result, dict) else None
         return None
 
-    async def get_rotation_instruction(
-        self, account_id: str, instruction_id: int
-    ) -> Optional[dict]:
+    async def get_rotation_instruction(self, account_id: str, instruction_id: int) -> dict | None:
         """获取指定换仓指令"""
         trader = self.traders.get(account_id)
         if trader:
@@ -628,7 +633,7 @@ class TradingManager:
 
     async def create_rotation_instruction(
         self, account_id: str, instruction_data: dict
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """创建换仓指令"""
         trader = self.traders.get(account_id)
         if trader:
@@ -638,7 +643,7 @@ class TradingManager:
 
     async def update_rotation_instruction(
         self, account_id: str, instruction_id: int, update_data: dict
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """更新换仓指令"""
         trader = self.traders.get(account_id)
         if trader:
@@ -668,7 +673,7 @@ class TradingManager:
 
     async def import_rotation_instructions(
         self, account_id: str, csv_text: str, filename: str, mode: str = "append"
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """批量导入换仓指令"""
         trader = self.traders.get(account_id)
         if trader:
@@ -697,7 +702,7 @@ class TradingManager:
 
     # ==================== 报单指令管理接口 ====================
 
-    async def get_order_cmds_status(self, account_id: str, status: str = None) -> Optional[list]:
+    async def get_order_cmds_status(self, account_id: str, status: str = None) -> list | None:
         """获取报单指令状态"""
         trader = self.traders.get(account_id)
         if trader:
@@ -705,7 +710,7 @@ class TradingManager:
             return result if isinstance(result, list) else None
         return None
 
-    async def cancel_order_cmd(self, account_id: str, cmd_id: str) -> Optional[dict]:
+    async def cancel_order_cmd(self, account_id: str, cmd_id: str) -> dict | None:
         """取消报单指令"""
         trader = self.traders.get(account_id)
         if trader:
@@ -713,7 +718,7 @@ class TradingManager:
             return result if isinstance(result, dict) else None
         return None
 
-    async def batch_execute_instructions(self, account_id: str, ids: List[int]) -> Optional[dict]:
+    async def batch_execute_instructions(self, account_id: str, ids: list[int]) -> dict | None:
         """批量执行换仓指令"""
         trader = self.traders.get(account_id)
         if trader:
@@ -721,7 +726,7 @@ class TradingManager:
             return result if isinstance(result, dict) else None
         return None
 
-    async def batch_delete_instructions(self, account_id: str, ids: List[int]) -> Optional[dict]:
+    async def batch_delete_instructions(self, account_id: str, ids: list[int]) -> dict | None:
         """批量删除换仓指令"""
         trader = self.traders.get(account_id)
         if trader:
@@ -731,7 +736,7 @@ class TradingManager:
 
     # ==================== 系统参数接口 ====================
 
-    async def list_system_params(self, account_id: str, group: Optional[str] = None) -> List:
+    async def list_system_params(self, account_id: str, group: str | None = None) -> list:
         """获取系统参数列表"""
         trader = self.traders.get(account_id)
         if trader:
@@ -739,7 +744,7 @@ class TradingManager:
             return result if isinstance(result, list) else []
         return []
 
-    async def get_system_param(self, account_id: str, param_key: str) -> Optional[dict]:
+    async def get_system_param(self, account_id: str, param_key: str) -> dict | None:
         """获取单个系统参数"""
         trader = self.traders.get(account_id)
         if trader:
@@ -749,7 +754,7 @@ class TradingManager:
 
     async def update_system_param(
         self, account_id: str, param_key: str, param_value: str
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """更新系统参数"""
         trader = self.traders.get(account_id)
         if trader:
@@ -759,7 +764,7 @@ class TradingManager:
             return result if isinstance(result, dict) else None
         return None
 
-    async def get_system_params_by_group(self, account_id: str, group: str) -> Optional[dict]:
+    async def get_system_params_by_group(self, account_id: str, group: str) -> dict | None:
         """根据分组获取系统参数"""
         trader = self.traders.get(account_id)
         if trader:
@@ -872,7 +877,7 @@ class TradingManager:
                 return
 
             # 2. 米筐补充最小开仓手数（失败不阻塞）
-            min_order_map: Dict[str, int] = {}
+            min_order_map: dict[str, int] = {}
             rq_config = self._get_data_service_config("rice_data")
             if rq_config:
                 try:
@@ -897,7 +902,7 @@ class TradingManager:
         except Exception as e:
             logger.exception(f"刷新合约信息失败: {e}")
 
-    def _get_data_service_config(self, key: str) -> Optional[dict]:
+    def _get_data_service_config(self, key: str) -> dict | None:
         """
         获取数据服务配置
 
@@ -945,9 +950,7 @@ class TradingManager:
             contracts = self.public_data_service.get_contracts_for_push()
             result = await trader.push_public_data(contracts)
             if result:
-                logger.info(
-                    f"成功推送 {len(contracts)} 个合约数据给 Trader [{account_id}]"
-                )
+                logger.info(f"成功推送 {len(contracts)} 个合约数据给 Trader [{account_id}]")
             else:
                 logger.warning(f"推送公共数据给 Trader [{account_id}] 失败")
             return result
@@ -1025,13 +1028,13 @@ class TradingManager:
             cpu_percent = psutil.cpu_percent(interval=None)
 
             mem = psutil.virtual_memory()
-            memory_used_gb = round(mem.used / (1024 ** 3), 2)
-            memory_total_gb = round(mem.total / (1024 ** 3), 2)
+            memory_used_gb = round(mem.used / (1024**3), 2)
+            memory_total_gb = round(mem.total / (1024**3), 2)
             memory_percent = round(mem.percent, 2)
 
             disk = psutil.disk_usage("/")
-            disk_used_gb = round(disk.used / (1024 ** 3), 2)
-            disk_total_gb = round(disk.total / (1024 ** 3), 2)
+            disk_used_gb = round(disk.used / (1024**3), 2)
+            disk_total_gb = round(disk.total / (1024**3), 2)
             disk_percent = round(disk.percent, 2)
 
             point = {
@@ -1048,6 +1051,6 @@ class TradingManager:
         except Exception as e:
             logger.exception(f"资源采样失败: {e}")
 
-    def get_resource_history(self, points: int = 60) -> List[dict]:
+    def get_resource_history(self, points: int = 60) -> list[dict]:
         """获取最近 N 个资源采样点"""
         return list(self._resource_history)[-points:]

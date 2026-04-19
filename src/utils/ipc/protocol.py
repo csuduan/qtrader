@@ -10,7 +10,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Dict, Optional, Union
+from typing import Any, Callable
 
 import simplejson as json
 
@@ -37,9 +37,9 @@ class MessageBody:
     request_id: str  # 请求ID
     data: Any  # 请求数据
     timestamp: str = field(default_factory=lambda: datetime.now().isoformat())  # 时间戳
-    error: Optional[str] = None  # 错误信息
+    error: str | None = None  # 错误信息
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """转换为字典"""
         return {
             "msg_type": self.msg_type.value,
@@ -50,7 +50,7 @@ class MessageBody:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict) -> "MessageBody":
+    def from_dict(cls, data: dict) -> "MessageBody":
         """从字典创建"""
         return cls(
             msg_type=MessageType(data["msg_type"]),
@@ -106,7 +106,7 @@ class MessageProtocol:
         length = len(message_bytes)
         return struct.pack("!I", length) + message_bytes
 
-    def decode(self, data: bytes) -> Optional[MessageBody]:
+    def decode(self, data: bytes) -> MessageBody | None:
         """
         解码消息
 
@@ -135,7 +135,7 @@ class MessageProtocol:
             logger.error(f"Failed to decode message: {e}")
             return None
 
-    async def read_message(self, reader: asyncio.StreamReader) -> Optional[MessageBody]:
+    async def read_message(self, reader: asyncio.StreamReader) -> MessageBody | None:
         """
         从StreamReader读取完整消息
 
@@ -175,7 +175,7 @@ def create_request(data: Any, request_id: str) -> MessageBody:
     return MessageBody(msg_type=MessageType.REQUEST, request_id=request_id, data=data)
 
 
-def create_response(data: Any, request_id: str, error: Optional[str] = None) -> MessageBody:
+def create_response(data: Any, request_id: str, error: str | None = None) -> MessageBody:
     """创建响应消息"""
     return MessageBody(msg_type=MessageType.RESPONSE, request_id=request_id, data=data, error=error)
 
@@ -203,8 +203,8 @@ def create_data_notification(
     data_type: str,
     account_id: str,
     record_id: str,
-    timestamp: Optional[str] = None,
-    extra_data: Optional[Dict[str, Any]] = None,
+    timestamp: str | None = None,
+    extra_data: (dict[str, Any]) | None = None,
 ) -> MessageBody:
     """
     创建数据变更轻量级通知

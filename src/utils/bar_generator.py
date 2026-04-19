@@ -5,7 +5,7 @@ K线生成器
 
 from collections import defaultdict
 from datetime import datetime, timedelta
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable
 
 from src.models.object import BarData, Exchange, Interval, TickData
 from src.utils.logger import get_logger
@@ -23,7 +23,7 @@ INTERVAL_MAP = {
 }
 
 
-def parse_interval(interval_str: str) -> Optional[tuple]:
+def parse_interval(interval_str: str) -> tuple | None:
     """
     解析周期字符串
 
@@ -50,21 +50,21 @@ class BarGenerator:
         self.std_symbol = f"{symbol}"
 
         # 当前正在生成的bar (key: interval_value)
-        self._current_bars: Dict[str, Dict[str, Any]] = {}
+        self._current_bars: dict[str, dict[str, Any]] = {}
 
         # 已完成的bar缓存 (key: interval_value -> list of BarData)
-        self._completed_bars: Dict[str, List[BarData]] = defaultdict(list)
+        self._completed_bars: dict[str, list[BarData]] = defaultdict(list)
 
         # 订阅的周期 (interval_value -> minutes)
-        self._subscribed_intervals: Dict[str, int] = {}
+        self._subscribed_intervals: dict[str, int] = {}
 
         # 回调函数列表 (interval_value -> list of callbacks)
-        self._callbacks: Dict[str, List[Callable[[BarData], None]]] = defaultdict(list)
+        self._callbacks: dict[str, list[Callable[[BarData], None]]] = defaultdict(list)
 
         logger.debug(f"BarGenerator创建: {self.std_symbol}")
 
     def subscribe(
-        self, interval_str: str, callback: Optional[Callable[[BarData], None]] = None
+        self, interval_str: str, callback: (Callable[[BarData], None]) | None = None
     ) -> bool:
         """
         订阅指定周期的bar
@@ -92,7 +92,7 @@ class BarGenerator:
         logger.debug(f"订阅bar: {self.std_symbol} {interval_str}")
         return True
 
-    def update_tick(self, tick: TickData) -> List[BarData]:
+    def update_tick(self, tick: TickData) -> list[BarData]:
         """
         更新tick数据，生成bar
 
@@ -102,7 +102,7 @@ class BarGenerator:
         Returns:
             本次更新中完成的BarData列表
         """
-        completed_bars: List[BarData] = []
+        completed_bars: list[BarData] = []
 
         # 更新所有订阅的周期
         for interval_value, minutes in list(self._subscribed_intervals.items()):
@@ -112,7 +112,7 @@ class BarGenerator:
 
         return completed_bars
 
-    def _update_bar(self, tick: TickData, interval_value: str, minutes: int) -> Optional[BarData]:
+    def _update_bar(self, tick: TickData, interval_value: str, minutes: int) -> BarData | None:
         """
         更新指定周期的bar
 
@@ -242,7 +242,7 @@ class BarGenerator:
         else:
             return Interval.DAILY
 
-    def get_bar(self, interval_str: str, n: int = 1) -> Optional[BarData]:
+    def get_bar(self, interval_str: str, n: int = 1) -> BarData | None:
         """
         获取最新的N根bar
 
@@ -265,7 +265,7 @@ class BarGenerator:
             return sorted(bars, key=lambda b: b.datetime)[-n]
         return None
 
-    def get_bars(self, interval_str: str, count: int = 100) -> List[BarData]:
+    def get_bars(self, interval_str: str, count: int = 100) -> list[BarData]:
         """
         获取最新N根bar列表
 
@@ -292,7 +292,7 @@ class MultiSymbolBarGenerator:
 
     def __init__(self):
         # 每个合约一个BarGenerator: {std_symbol -> BarGenerator}
-        self._generators: Dict[str, BarGenerator] = {}
+        self._generators: dict[str, BarGenerator] = {}
 
     def get_or_create(self, symbol: str) -> BarGenerator:
         """
@@ -312,7 +312,7 @@ class MultiSymbolBarGenerator:
 
         return self._generators[std_symbol]
 
-    def get(self, symbol: str) -> Optional[BarGenerator]:
+    def get(self, symbol: str) -> BarGenerator | None:
         """
         获取BarGenerator
 
@@ -325,7 +325,7 @@ class MultiSymbolBarGenerator:
         std_symbol = f"{symbol}"
         return self._generators.get(std_symbol)
 
-    def update_tick(self, tick: TickData) -> Dict[str, List[BarData]]:
+    def update_tick(self, tick: TickData) -> dict[str, list[BarData]]:
         """
         更新tick数据到所有相关的BarGenerator
 

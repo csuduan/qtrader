@@ -5,7 +5,6 @@
 
 import logging
 from datetime import datetime
-from typing import Dict
 
 import pandas as pd
 
@@ -26,7 +25,7 @@ class RqContractFetcher:
         self.username = username
         self.password = password
 
-    def fetch_min_order_quantities(self) -> Dict[str, int]:
+    def fetch_min_order_quantities(self) -> dict[str, int]:
         """
         查询活跃期货合约的最小开仓手数
 
@@ -48,15 +47,13 @@ class RqContractFetcher:
         logger.info(f"米筐查询到 {len(order_book_ids)} 个活跃合约")
 
         # 查询交易参数
-        params = rqdatac.futures.get_trading_parameters(
-            order_book_ids=order_book_ids, market="cn"
-        )
+        params = rqdatac.futures.get_trading_parameters(order_book_ids=order_book_ids, market="cn")
         df_min_order = params["min_order_quantity"]
 
         # 构建 order_book_id -> exchange 映射，用于判断郑商所合约
         ob_id_exchange = dict(zip(active["order_book_id"], active["exchange"]))
 
-        result: Dict[str, int] = {}
+        result: dict[str, int] = {}
         for ob_id in order_book_ids:
             if ob_id in df_min_order.index:
                 series = df_min_order.loc[ob_id]
@@ -96,7 +93,7 @@ class RqContractFetcher:
         """
         import re
 
-        match = re.match(r'^([A-Za-z]+)(\d{4})$', symbol)
+        match = re.match(r"^([A-Za-z]+)(\d{4})$", symbol)
         if not match:
             return symbol
 

@@ -4,9 +4,7 @@
 使用 PositionData 和 PositionPo
 """
 
-from typing import List, Optional
-
-from src.models.object import PositionData,Exchange
+from src.models.object import Exchange, PositionData
 from src.models.po import PositionPo
 from src.utils.database import session_scope
 from src.utils.logger import get_logger
@@ -85,9 +83,7 @@ class StrategyPositionService:
             logger.exception(f"保存策略持仓失败: {e}")
             return False
 
-    def load_positions(
-        self, account_id: str, strategy_id: str
-    ) -> List[PositionData]:
+    def load_positions(self, account_id: str, strategy_id: str) -> list[PositionData]:
         """
         从数据库加载策略的所有持仓
 
@@ -96,7 +92,7 @@ class StrategyPositionService:
             strategy_id: 策略ID
 
         Returns:
-            List[PositionData]: 持仓列表
+            list[PositionData]: 持仓列表
         """
         positions = []
         try:
@@ -135,18 +131,14 @@ class StrategyPositionService:
                         )
                         positions.append(position)
 
-                logger.debug(
-                    f"加载策略持仓: {account_id}/{strategy_id}, 共 {len(positions)} 条"
-                )
+                logger.debug(f"加载策略持仓: {account_id}/{strategy_id}, 共 {len(positions)} 条")
 
         except Exception as e:
             logger.exception(f"加载策略持仓失败: {e}")
 
         return positions
 
-    def load_position(
-        self, account_id: str, strategy_id: str, symbol: str
-    ) -> Optional[PositionData]:
+    def load_position(self, account_id: str, strategy_id: str, symbol: str) -> PositionData | None:
         """
         从数据库加载指定合约的持仓
 
@@ -170,12 +162,16 @@ class StrategyPositionService:
                     .first()
                 )
 
-                if record and (
-                    record.pos_long_td
-                    + record.pos_long_yd
-                    + record.pos_short_td
-                    + record.pos_short_yd
-                ) > 0:
+                if (
+                    record
+                    and (
+                        record.pos_long_td
+                        + record.pos_long_yd
+                        + record.pos_short_td
+                        + record.pos_short_yd
+                    )
+                    > 0
+                ):
                     return PositionData(
                         symbol=record.symbol,
                         exchange=Exchange.from_str(record.exchange),
@@ -196,9 +192,7 @@ class StrategyPositionService:
 
         return None
 
-    def clear_position(
-        self, account_id: str, strategy_id: str, symbol: Optional[str] = None
-    ) -> bool:
+    def clear_position(self, account_id: str, strategy_id: str, symbol: str | None = None) -> bool:
         """
         清空策略持仓
 
@@ -223,9 +217,7 @@ class StrategyPositionService:
                 query.delete(synchronize_session=False)
 
                 if symbol:
-                    logger.info(
-                        f"清空策略持仓: {account_id}/{strategy_id}/{symbol}"
-                    )
+                    logger.info(f"清空策略持仓: {account_id}/{strategy_id}/{symbol}")
                 else:
                     logger.info(f"清空策略所有持仓: {account_id}/{strategy_id}")
 

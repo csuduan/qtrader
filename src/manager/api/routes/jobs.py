@@ -3,7 +3,6 @@
 """
 
 from datetime import datetime
-from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel
@@ -50,7 +49,7 @@ async def get_jobs(
     if not trader:
         return error_response(code=404, message=f"账户 [{account_id}] 不存在")
     jobs = await trader.get_jobs()
-    # jobs 是 List[Job]
+    # jobs 是 list[Job]
     return success_response(data={"tasks": jobs, "count": len(jobs)}, message="获取成功")
 
 

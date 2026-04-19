@@ -13,7 +13,6 @@ import time
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 import uvicorn
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
@@ -50,7 +49,7 @@ _app_config = get_config_loader().load_config()
 ctx.set(AppContext.KEY_CONFIG, _app_config)
 
 # Manager PID 文件路径
-_manager_pid_file: Optional[Path] = None
+_manager_pid_file: Path | None = None
 
 
 @asynccontextmanager
@@ -101,6 +100,7 @@ async def lifespan(app: FastAPI):
     # 初始化默认用户
     try:
         from src.manager.api.routes.auth import init_default_users
+
         init_default_users()
     except Exception as e:
         logger.error(f"初始化默认用户失败: {e}")

@@ -20,8 +20,7 @@ _async_db: Optional["AsyncDatabase"] = None
 class AsyncDatabase:
     """PostgreSQL 异步数据库管理类"""
 
-    def __init__(self, db_url: str, echo: bool = False,
-                 pool_size: int = 5, max_overflow: int = 10):
+    def __init__(self, db_url: str, echo: bool = False, pool_size: int = 5, max_overflow: int = 10):
         """
         初始化异步数据库连接
 
@@ -88,8 +87,11 @@ class AsyncDatabase:
 
 
 async def init_async_database(
-    db_url: str, account_id: str = "default", echo: bool = False,
-    pool_size: int = 5, max_overflow: int = 10
+    db_url: str,
+    account_id: str = "default",
+    echo: bool = False,
+    pool_size: int = 5,
+    max_overflow: int = 10,
 ) -> AsyncDatabase:
     """
     初始化异步数据库
@@ -113,7 +115,7 @@ async def init_async_database(
     return _async_db
 
 
-def get_async_database() -> Optional[AsyncDatabase]:
+def get_async_database() -> AsyncDatabase | None:
     """
     获取全局异步数据库实例
 

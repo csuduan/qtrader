@@ -37,7 +37,7 @@ class ManagerJobManager:
         """
         logger.info("开始执行 Trader 健康检查任务")
 
-        alarm_service:AlarmService = self.trading_manager.alarm_service
+        alarm_service: AlarmService = self.trading_manager.alarm_service
         if not alarm_service:
             logger.warning("AlarmService 未初始化，无法执行健康检查告警")
             return
@@ -181,12 +181,14 @@ class ManagerJobManager:
             # ========== 检查项 1: 网关连接状态 ==========
             disconnected_gateways = self._check_gateway_connection()
             for account_id in disconnected_gateways:
-                all_issues.append({
-                    "account_id": account_id,
-                    "source": "PRE_MARKET_CHECK",
-                    "title": f"账户 {account_id} 网关未连接",
-                    "detail": "开盘前检查：网关未连接，请检查Trader进程和网关状态",
-                })
+                all_issues.append(
+                    {
+                        "account_id": account_id,
+                        "source": "PRE_MARKET_CHECK",
+                        "title": f"账户 {account_id} 网关未连接",
+                        "detail": "开盘前检查：网关未连接，请检查Trader进程和网关状态",
+                    }
+                )
 
             # ========== 检查项 2: [预留] ==========
             # TODO: 添加其他开盘前检查项
@@ -263,7 +265,9 @@ class ManagerJobManager:
 
         from src.models.object import AlarmType
 
-        alarm_type_enum = AlarmType.NOTIFICATION if alarm_type == "notification" else AlarmType.EXCEPTION
+        alarm_type_enum = (
+            AlarmType.NOTIFICATION if alarm_type == "notification" else AlarmType.EXCEPTION
+        )
         alarm_service.create_alarm(
             account_id=account_id,
             source=source,
@@ -343,8 +347,8 @@ class ManagerJobManager:
         logger.info("开始检查阈值告警")
 
         try:
-            from src.utils.database import get_session
             from src.models.po import AlarmPo
+            from src.utils.database import get_session
 
             session = get_session()
             if not session:
@@ -378,11 +382,9 @@ class ManagerJobManager:
                         .filter(
                             AlarmPo.account_id == account_id,
                             AlarmPo.created_at >= window_start,
-                            AlarmPo.source.in_([
-                                "HEALTH_CHECK",
-                                "PRE_MARKET_CHECK",
-                                "THRESHOLD_ALERT"
-                            ])
+                            AlarmPo.source.in_(
+                                ["HEALTH_CHECK", "PRE_MARKET_CHECK", "THRESHOLD_ALERT"]
+                            ),
                         )
                         .count()
                     )
@@ -393,7 +395,9 @@ class ManagerJobManager:
                             from src.utils.wecomm import is_dnd_now, send_wechat
 
                             if is_dnd_now(app_config.alert.dnd_start, app_config.alert.dnd_end):
-                                logger.debug(f"当前为免打扰时段，跳过阈值告警通知: 账户[{account_id}]")
+                                logger.debug(
+                                    f"当前为免打扰时段，跳过阈值告警通知: 账户[{account_id}]"
+                                )
                             else:
                                 send_wechat(
                                     f"【阈值告警】账户 [{account_id}] 在 {threshold_window // 60} 分钟内 "
@@ -413,7 +417,7 @@ class ManagerJobManager:
                                 source="THRESHOLD_ALERT",
                                 title=f"阈值告警：{error_count} 次异常",
                                 detail=f"在 {threshold_window // 60} 分钟内发生 {error_count} 次异常，"
-                                       f"阈值: {threshold_count}",
+                                f"阈值: {threshold_count}",
                                 status="UNCONFIRMED",
                                 created_at=now,
                             )
@@ -451,7 +455,7 @@ class ManagerJobManager:
         通过 TraderProxy 调用各 Trader 进程的 export_positions 接口，
         由 Trader 端自行导出本账户持仓。
         """
-        logger.info("开始执行导出所有账户持仓任务")            
+        logger.info("开始执行导出所有账户持仓任务")
 
         try:
             results = {}
@@ -506,6 +510,8 @@ class ManagerJobManager:
             logger.info(f"批量换仓执行完成: 成功 {success_count}/{total}")
             for account_id, result in results.items():
                 if not result.get("success"):
-                    logger.warning(f"账户 [{account_id}] 换仓失败: {result.get('message', '未知错误')}")
+                    logger.warning(
+                        f"账户 [{account_id}] 换仓失败: {result.get('message', '未知错误')}"
+                    )
         except Exception as e:
             logger.exception(f"执行所有账户换仓任务失败: {e}")

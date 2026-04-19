@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Callable, Deque, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Deque
 
 from pydantic import BaseModel
 
@@ -53,7 +53,7 @@ class SplitOrder:
 
     volume: int
     delay_seconds: float = 0.0
-    offset: Optional[Offset] = None  # 开平类型（平仓策略使用）
+    offset: Offset | None = None  # 开平类型（平仓策略使用）
 
 
 @dataclass
@@ -72,14 +72,14 @@ class BaseSplitStrategy(ABC):
     def __init__(self, cmd: "OrderCmd"):
         self.cmd = cmd
         self._left_retry_times = 0
-        self._order_queue: List[SplitOrder] = []
+        self._order_queue: list[SplitOrder] = []
 
     @abstractmethod
     def split(self, pos: PositionData) -> int:
         """拆单"""
         pass
 
-    def get_next(self) -> Optional[SplitOrder]:
+    def get_next(self) -> SplitOrder | None:
         """获取下一个订单"""
         if not self._order_queue:
             return None
@@ -93,9 +93,9 @@ class SimpleSplitStrategy(BaseSplitStrategy):
         cmd = self.cmd
         total_volume = cmd.volume
         min_volume = cmd.min_volume  # 最小开仓手数
-      
+
         if cmd.offset != Offset.OPEN:
-            #平仓
+            # 平仓
             total_td_volume = 0
             if pos and cmd.offset == Offset.CLOSE:
                 # 检查持仓是否足够
@@ -104,7 +104,9 @@ class SimpleSplitStrategy(BaseSplitStrategy):
                     raise ValueError(f"持仓不足，实际持仓：{pos_volume}手")
                 if pos.exchange in [Exchange.SHFE, Exchange.GFEX, Exchange.INE]:
                     # 上期所(SHFE)、广期所(GFEX)、上能源(INE)不支持平昨
-                    td_volume = pos.pos_long_td if cmd.direction == Direction.SELL else pos.pos_short_td
+                    td_volume = (
+                        pos.pos_long_td if cmd.direction == Direction.SELL else pos.pos_short_td
+                    )
                     if td_volume is not None:
                         total_td_volume = min(cmd.volume, td_volume)
                         total_volume = total_volume - total_td_volume
@@ -120,17 +122,17 @@ class SimpleSplitStrategy(BaseSplitStrategy):
             while total_volume > 0:
                 # 平昨拆单
                 volume = min(total_volume, cmd.volume_per_order)
-                self._order_queue.append(SplitOrder(volume=volume, offset=cmd.offset, delay_seconds=0))
+                self._order_queue.append(
+                    SplitOrder(volume=volume, offset=cmd.offset, delay_seconds=0)
+                )
                 total_volume -= volume
         else:
-            #开仓
-            max_volume = max(cmd.volume_per_order, min_volume) #确保最大单次手数不小于最小开仓手数
+            # 开仓
+            max_volume = max(cmd.volume_per_order, min_volume)  # 确保最大单次手数不小于最小开仓手数
             # 检查总手数是否满足最小开仓手数要求（仅开仓时检查）
             if total_volume < min_volume:
-                raise ValueError(
-                    f"开仓手数{total_volume}小于最小开仓手数{min_volume}，无法下单"
-                )
-            
+                raise ValueError(f"开仓手数{total_volume}小于最小开仓手数{min_volume}，无法下单")
+
             # 计算开仓/平昨的拆单
             remaining_volume = total_volume
             while remaining_volume > 0:
@@ -141,12 +143,14 @@ class SimpleSplitStrategy(BaseSplitStrategy):
                 else:
                     # 剩余手数大于最大单次手数，需要拆单
                     after_this = remaining_volume - max_volume
-                    if after_this < min_volume :
+                    if after_this < min_volume:
                         # 如果拆单后剩余的手数小于最小开仓手数，则本次拆单手数为剩余手数
                         volume = remaining_volume
                     else:
                         volume = max_volume
-                self._order_queue.append(SplitOrder(volume=volume, offset=cmd.offset, delay_seconds=0))
+                self._order_queue.append(
+                    SplitOrder(volume=volume, offset=cmd.offset, delay_seconds=0)
+                )
                 remaining_volume -= volume
 
         logger.info(
@@ -177,7 +181,7 @@ class OrderCmd:
         direction: Direction,
         offset: Offset,
         volume: int,
-        price: Optional[float] = None,
+        price: float | None = None,
         # 拆单手数(默认5手)
         max_volume_per_order: int = 5,
         # 报单间隔(默认1秒)
@@ -190,7 +194,7 @@ class OrderCmd:
         source: str = "",
         # 滑点
         slip: int = 0,
-        on_change: Optional[Callable[[Any], None]] = None,
+        on_change: (Callable[[Any], None]) | None = None,
     ):
         self.cmd_id = uuid.uuid4().hex
         self.symbol = symbol
@@ -209,37 +213,37 @@ class OrderCmd:
 
         # 状态
         self.status = OrderCmdStatus.PENDING
-        self.finish_reason: Optional[str] = None
+        self.finish_reason: str | None = None
         self.filled_volume = 0  # 已成交
         self.filled_price = 0.0  # 已成交均价
 
         # 时间记录
         self.created_at = datetime.now()
-        self.started_at: Optional[datetime] = None
-        self.finished_at: Optional[datetime] = None
+        self.started_at: datetime | None = None
+        self.finished_at: datetime | None = None
 
         # 所有订单id
-        self.all_order_ids: List[str] = []
+        self.all_order_ids: list[str] = []
         # 单一活动订单（替代原来的 _pending_orders 字典）
-        self._pending_order: Optional[OrderData] = None
-        self._active_order_info: Optional[ActiveOrderInfo] = None
+        self._pending_order: OrderData | None = None
+        self._active_order_info: ActiveOrderInfo | None = None
         self._pending_retry_volume: int = 0  # 待重试的手数
         self._left_retry_times = 0  # 剩余重试次数
         # 拆单策略
-        self._strategy: Optional[BaseSplitStrategy] = None
+        self._strategy: BaseSplitStrategy | None = None
 
         # 用于控制报单间隔
-        self._last_order_time: Optional[datetime] = None
+        self._last_order_time: datetime | None = None
         # 当前拆单
-        self._cur_split_order: Optional[SplitOrder] = None
+        self._cur_split_order: SplitOrder | None = None
 
     def split(self, pos: PositionData | None) -> None:
         """拆单"""
         self._strategy = SimpleSplitStrategy(self)
         count = self._strategy.split(pos)
-        self._left_retry_times = max(2 * count + 1,5)
+        self._left_retry_times = max(2 * count + 1, 5)
 
-    def _load_next_split_order(self) -> Optional[SplitOrder]:
+    def _load_next_split_order(self) -> SplitOrder | None:
         """加载下一个拆单"""
         if self._strategy is None:
             return None
@@ -251,7 +255,7 @@ class OrderCmd:
         self._cur_split_order = self._strategy.get_next()
         return self._cur_split_order
 
-    def trig(self) -> Optional[OrderRequest | OrderData]:
+    def trig(self) -> (OrderRequest | OrderData) | None:
         """
         触发
 
@@ -332,7 +336,7 @@ class OrderCmd:
             return
         self._cancel(reason)
 
-    def get_pending_order(self) -> Optional[OrderData]:
+    def get_pending_order(self) -> OrderData | None:
         """获取当前挂单"""
         return (
             self._pending_order if self._pending_order and self._pending_order.is_active() else None
@@ -347,7 +351,7 @@ class OrderCmd:
         self.all_order_ids.append(order.order_id)
         self._pending_order = order
 
-    def _create_order_request(self, split_order: SplitOrder) -> Optional[OrderRequest]:
+    def _create_order_request(self, split_order: SplitOrder) -> OrderRequest | None:
         """创建拆单订单请求"""
         volume = split_order.volume
         # 使用 SplitOrder 中的 offset（如果有），否则使用命令的 offset

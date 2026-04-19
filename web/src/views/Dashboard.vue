@@ -18,18 +18,18 @@
                   <!-- 状态标签放在圆点后面 -->
                   <div class="account-status-tags-inline">
                     <!-- 未连接状态：只显示主标签 -->
-                    <el-tag v-if="!isAccountConnected(acc)" :type="getStatusTagType(acc)" size="small">
+                    <el-tag v-if="!isAccountConnected(acc)" :type="getStatusTagType(acc)" size="small" disable-transitions>
                       {{ getStatusText(acc) }}
                     </el-tag>
                     <!-- 已连接状态：显示行情/交易连接状态 -->
                     <template v-if="isAccountConnected(acc)">
-                      <el-tag :type="acc.md_connected ? 'success' : 'warning'" size="small">
+                      <el-tag :type="acc.md_connected ? 'success' : 'warning'" size="small" disable-transitions>
                         行情
                       </el-tag>
-                      <el-tag :type="acc.td_connected ? 'success' : 'warning'" size="small">
+                      <el-tag :type="acc.td_connected ? 'success' : 'warning'" size="small" disable-transitions>
                         交易
                       </el-tag>
-                      <el-tag v-if="acc.trade_paused" type="warning" size="small">暂停交易</el-tag>
+                      <el-tag v-if="acc.trade_paused" type="warning" size="small" disable-transitions>暂停交易</el-tag>
                     </template>
                   </div>
                 </div>

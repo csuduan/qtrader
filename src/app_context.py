@@ -3,7 +3,7 @@
 提供全局状态访问的统一入口
 """
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 # 预定义的上下文键
 
@@ -23,7 +23,7 @@ class AppContext:
     """应用上下文"""
 
     def __init__(self):
-        self.container: Dict[str, Any] = {}
+        self.container: dict[str, Any] = {}
 
     def set(self, key: str, value: Any) -> None:
         """设置上下文值（允许覆盖）"""
@@ -63,46 +63,46 @@ class AppContext:
         return list(self.container.keys())
 
     # 便捷获取方法
-    def get_event_engine(self) -> Optional[Any]:
+    def get_event_engine(self) -> Any | None:
         """
         获取事件引擎
         优先返回 AsyncEventEngine，如果不存在则返回同步 EventEngine
         """
         return self.get(self.KEY_EVENT_ENGINE)
 
-    def get_event_loop(self) -> Optional[Any]:
+    def get_event_loop(self) -> Any | None:
         """获取主事件循环"""
         return self.get(self.KEY_EVENT_LOOP)
 
-    def get_config(self) -> Optional[Any]:
+    def get_config(self) -> Any | None:
         """获取配置"""
         return self.get(self.KEY_CONFIG)
 
-    def get_trading_engine(self) -> Optional[Any]:
+    def get_trading_engine(self) -> Any | None:
         """获取交易引擎"""
         return self.get(self.KEY_TRADING_ENGINE)
 
-    def get_strategy_manager(self) -> Optional[Any]:
+    def get_strategy_manager(self) -> Any | None:
         """获取策略管理器"""
         return self.get(self.KEY_STRATEGY_MANAGER)
 
-    def get_task_scheduler(self) -> Optional[Any]:
+    def get_task_scheduler(self) -> Any | None:
         """获取任务调度器"""
         return self.get(self.KEY_TASK_SCHEDULER)
 
-    def get_switch_pos_manager(self) -> Optional[Any]:
+    def get_switch_pos_manager(self) -> Any | None:
         """获取换仓管理器"""
         return self.get(self.KEY_SWITCH_POS_MANAGER)
 
-    def get_trading_manager(self) -> Optional[Any]:
+    def get_trading_manager(self) -> Any | None:
         """获取交易管理器"""
         return self.get(self.KEY_TRADING_MANAGER)
 
-    def get_alarm_service(self) -> Optional[Any]:
+    def get_alarm_service(self) -> Any | None:
         """获取告警服务"""
         return self.get(self.KEY_ALARM_SERVICE)
 
-    def get_ws_manager(self) -> Optional[Any]:
+    def get_ws_manager(self) -> Any | None:
         """获取WebSocket管理器"""
         return self.get(self.KEY_WS_MANAGER)
 

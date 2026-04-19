@@ -4,17 +4,16 @@
 """
 
 from datetime import datetime
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
+from src.manager.api.responses import error_response, success_response
+from src.manager.api.routes.auth import hash_password, require_admin
 from src.models.po import UserPo
 from src.utils.database import get_database
 from src.utils.logger import get_logger
-from src.manager.api.responses import success_response, error_response
-from src.manager.api.routes.auth import require_admin, hash_password
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/admin/users", tags=["用户管理"])
@@ -22,8 +21,10 @@ router = APIRouter(prefix="/api/admin/users", tags=["用户管理"])
 
 # ============ 请求/响应模型 ============
 
+
 class UserCreateRequest(BaseModel):
     """创建用户请求"""
+
     username: str = Field(..., min_length=3, max_length=20, description="用户名")
     password: str = Field(..., min_length=6, max_length=20, description="密码")
     role: str = Field(..., description="角色: admin/trader/guest")
@@ -31,25 +32,28 @@ class UserCreateRequest(BaseModel):
 
 class UserUpdateRequest(BaseModel):
     """更新用户请求"""
-    username: Optional[str] = Field(None, min_length=3, max_length=20, description="用户名")
-    password: Optional[str] = Field(None, min_length=6, max_length=20, description="密码")
-    role: Optional[str] = Field(None, description="角色: admin/trader/guest")
+
+    username: str | None = Field(None, min_length=3, max_length=20, description="用户名")
+    password: str | None = Field(None, min_length=6, max_length=20, description="密码")
+    role: str | None = Field(None, description="角色: admin/trader/guest")
 
 
 class UserResponse(BaseModel):
     """用户响应"""
+
     user_id: str
     username: str
     role: str
     is_active: bool
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
+    created_at: str | None = None
+    updated_at: str | None = None
 
     class Config:
         from_attributes = True
 
 
 # ============ API 路由 ============
+
 
 @router.get("")
 async def get_users(current_user: dict = Depends(require_admin)):
@@ -68,24 +72,23 @@ async def get_users(current_user: dict = Depends(require_admin)):
 
         user_list = []
         for user in users:
-            user_list.append({
-                "user_id": user.user_id,
-                "username": user.user_id,  # 使用 user_id 作为 username
-                "role": user.role,
-                "is_active": user.is_active,
-                "created_at": user.created_at.isoformat() if user.created_at else None,
-                "updated_at": user.updated_at.isoformat() if user.updated_at else None
-            })
+            user_list.append(
+                {
+                    "user_id": user.user_id,
+                    "username": user.user_id,  # 使用 user_id 作为 username
+                    "role": user.role,
+                    "is_active": user.is_active,
+                    "created_at": user.created_at.isoformat() if user.created_at else None,
+                    "updated_at": user.updated_at.isoformat() if user.updated_at else None,
+                }
+            )
 
         logger.info(f"管理员 {current_user['user_id']} 获取用户列表，共 {len(user_list)} 个用户")
         return success_response(data=user_list)
 
 
 @router.post("")
-async def create_user(
-    request: UserCreateRequest,
-    current_user: dict = Depends(require_admin)
-):
+async def create_user(request: UserCreateRequest, current_user: dict = Depends(require_admin)):
     """
     创建新用户
 
@@ -113,12 +116,14 @@ async def create_user(
             user_id=request.username,
             password=hash_password(request.password),
             role=request.role,
-            is_active=True
+            is_active=True,
         )
         session.add(new_user)
         session.commit()
 
-        logger.info(f"管理员 {current_user['user_id']} 创建用户: {request.username}, 角色: {request.role}")
+        logger.info(
+            f"管理员 {current_user['user_id']} 创建用户: {request.username}, 角色: {request.role}"
+        )
 
         return success_response(
             data={
@@ -127,17 +132,15 @@ async def create_user(
                 "role": new_user.role,
                 "is_active": new_user.is_active,
                 "created_at": new_user.created_at.isoformat() if new_user.created_at else None,
-                "updated_at": new_user.updated_at.isoformat() if new_user.updated_at else None
+                "updated_at": new_user.updated_at.isoformat() if new_user.updated_at else None,
             },
-            message="用户已创建"
+            message="用户已创建",
         )
 
 
 @router.put("/{user_id}")
 async def update_user(
-    user_id: str,
-    request: UserUpdateRequest,
-    current_user: dict = Depends(require_admin)
+    user_id: str, request: UserUpdateRequest, current_user: dict = Depends(require_admin)
 ):
     """
     更新用户信息
@@ -194,17 +197,14 @@ async def update_user(
                 "role": user.role,
                 "is_active": user.is_active,
                 "created_at": user.created_at.isoformat() if user.created_at else None,
-                "updated_at": user.updated_at.isoformat() if user.updated_at else None
+                "updated_at": user.updated_at.isoformat() if user.updated_at else None,
             },
-            message="用户已更新"
+            message="用户已更新",
         )
 
 
 @router.delete("/{user_id}")
-async def delete_user(
-    user_id: str,
-    current_user: dict = Depends(require_admin)
-):
+async def delete_user(user_id: str, current_user: dict = Depends(require_admin)):
     """
     删除用户
 

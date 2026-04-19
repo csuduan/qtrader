@@ -3,7 +3,6 @@
 """
 
 from datetime import datetime, timedelta
-from typing import List, Optional
 
 from fastapi import APIRouter, Body, Depends, Query, Request
 from pydantic import BaseModel
@@ -23,7 +22,7 @@ router = APIRouter(prefix="/api/alarm", tags=["告警"])
 class AlarmConfirmReq(BaseModel):
     """告警确认请求"""
 
-    account_id: Optional[str] = None
+    account_id: str | None = None
 
 
 def get_db(request: Request):
@@ -37,8 +36,8 @@ def get_db(request: Request):
 @router.get("/list")
 async def get_today_alarms(
     request: Request,
-    account_id: Optional[str] = Query(None, description="账户ID，不传则返回所有账户"),
-    status_filter: Optional[str] = Query(
+    account_id: str | None = Query(None, description="账户ID，不传则返回所有账户"),
+    status_filter: str | None = Query(
         None, description="状态筛选: UNCONFIRMED未处理/CONFIRMED已处理，不传则返回全部"
     ),
 ):
@@ -74,7 +73,7 @@ async def get_today_alarms(
 @router.get("/stats")
 async def get_alarm_stats(
     request: Request,
-    account_id: Optional[str] = Query(None, description="账户ID，不传则统计所有账户"),
+    account_id: str | None = Query(None, description="账户ID，不传则统计所有账户"),
 ):
     """
     获取告警统计信息
@@ -98,12 +97,7 @@ async def get_alarm_stats(
             return query
 
         # 今日总告警数
-        today_total = (
-            build_base_query()
-            .filter(AlarmPo.alarm_date == today)
-            .scalar()
-            or 0
-        )
+        today_total = build_base_query().filter(AlarmPo.alarm_date == today).scalar() or 0
 
         # 未处理告警数
         unconfirmed = (
@@ -114,19 +108,11 @@ async def get_alarm_stats(
         )
 
         # 最近1小时告警数
-        last_hour = (
-            build_base_query()
-            .filter(AlarmPo.created_at >= one_hour_ago)
-            .scalar()
-            or 0
-        )
+        last_hour = build_base_query().filter(AlarmPo.created_at >= one_hour_ago).scalar() or 0
 
         # 最近5分钟告警数
         last_five_minutes = (
-            build_base_query()
-            .filter(AlarmPo.created_at >= five_minutes_ago)
-            .scalar()
-            or 0
+            build_base_query().filter(AlarmPo.created_at >= five_minutes_ago).scalar() or 0
         )
 
         data = AlarmStatsRes(
@@ -147,7 +133,7 @@ async def get_alarm_stats(
 @router.post("/confirm/{alarm_id}")
 async def confirm_alarm(
     alarm_id: int,
-    req: Optional[AlarmConfirmReq] = None,
+    req: AlarmConfirmReq | None = None,
     request: Request = None,
 ):
     """
@@ -177,7 +163,7 @@ async def confirm_alarm(
 
 @router.post("/confirm_all")
 async def confirm_all_alarms(
-    req: Optional[AlarmConfirmReq] = None,
+    req: AlarmConfirmReq | None = None,
     request: Request = None,
 ):
     """
@@ -223,7 +209,7 @@ async def confirm_all_alarms(
 @router.get("/suppression")
 async def get_suppression_status(
     request: Request,
-    account_id: Optional[str] = Query(None, description="账户ID，不传则返回所有账户"),
+    account_id: str | None = Query(None, description="账户ID，不传则返回所有账户"),
 ):
     """
     获取异常告警压制状态
@@ -249,7 +235,9 @@ async def get_suppression_status(
 @router.post("/suppression/clear/{account_id}")
 async def clear_suppression(
     account_id: str,
-    indicator: Optional[str] = Query(None, description="指标类型(1min/5min/1hour)，不传则清除该账户所有压制"),
+    indicator: str | None = Query(
+        None, description="指标类型(1min/5min/1hour)，不传则清除该账户所有压制"
+    ),
 ):
     """
     清除指定账户的异常告警压制状态

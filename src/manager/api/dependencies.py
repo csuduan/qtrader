@@ -3,15 +3,13 @@
 支持多账号架构
 """
 
-from typing import Optional
-
 from fastapi import Depends, HTTPException, status
 
 from src.app_context import get_app_context
-from src.manager.manager import TradingManager
 
 # 从auth模块导入认证依赖，统一暴露
 from src.manager.api.routes.auth import get_current_user, require_admin
+from src.manager.manager import TradingManager
 
 
 def get_trading_manager() -> TradingManager:

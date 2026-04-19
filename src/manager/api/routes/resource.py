@@ -26,14 +26,14 @@ async def get_resource_snapshot() -> ResourceSnapshot:
 
     # Memory
     mem = psutil.virtual_memory()
-    memory_used_gb = round(mem.used / (1024 ** 3), 2)
-    memory_total_gb = round(mem.total / (1024 ** 3), 2)
+    memory_used_gb = round(mem.used / (1024**3), 2)
+    memory_total_gb = round(mem.total / (1024**3), 2)
     memory_percent = round(mem.percent, 2)
 
     # Disk（取根目录）
     disk = psutil.disk_usage("/")
-    disk_used_gb = round(disk.used / (1024 ** 3), 2)
-    disk_total_gb = round(disk.total / (1024 ** 3), 2)
+    disk_used_gb = round(disk.used / (1024**3), 2)
+    disk_total_gb = round(disk.total / (1024**3), 2)
     disk_percent = round(disk.percent, 2)
 
     # Process count

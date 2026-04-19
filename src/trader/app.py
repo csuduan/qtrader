@@ -10,7 +10,6 @@ import os
 import signal
 import sys
 from pathlib import Path
-from typing import Optional
 
 # 添加项目根目录到Python路径
 project_root = Path(__file__).parent.parent.parent
@@ -32,8 +31,8 @@ logger = get_logger(__name__)
 ctx = get_app_context()
 
 # 全局变量
-trader: Optional[Trader] = None
-stop_event: Optional[asyncio.Event] = None
+trader: Trader | None = None
+stop_event: asyncio.Event | None = None
 
 
 def signal_handler(signum, frame):

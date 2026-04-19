@@ -2,15 +2,13 @@
 CTP Gateway 适配器（异步版本）
 
 实现 BaseGateway 接口，支持 CTP 实盘交易。
-需要安装 CTP SDK（如 openctp_ctp 或类似库）才能运行。
 
 参考：
 - CTP API 文档：https://www.simnow.com.cn
 """
 
-import asyncio
 import queue
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 import pandas as pd
 
@@ -35,9 +33,8 @@ from src.trader.gateway.base_gateway import BaseGateway
 
 # 从 ctp_api 导入 CTP API 封装类
 from src.trader.gateway.ctp_api import CtpMdApi, CtpTdApi
-from src.utils.async_event_engine import AsyncEventEngine
 from src.utils.bar_generator import MultiSymbolBarGenerator, parse_interval
-from src.utils.config_loader import GatewayConfig,TraderConfig
+from src.utils.config_loader import GatewayConfig, TraderConfig
 from src.utils.event import EventTypes
 from src.utils.logger import get_logger
 
@@ -60,45 +57,36 @@ class CtpGateway(BaseGateway):
         super().__init__()
         self.config = acct_config.gateway
         self.account_id = acct_config.account_id
-        self.trading_day: Optional[str] = None
+        self.trading_day: str | None = None
         self._running = False
 
         # 行情缓存（最新的 tick 数据）
-        self._quotes: Dict[str, TickData] = {}
+        self._quotes: dict[str, TickData] = {}
 
         # 成交缓存
-        self._trades: Dict[str, TradeData] = {}
+        self._trades: dict[str, TradeData] = {}
 
         # 账户数据缓存
-        self._account: Optional[AccountData] = None
+        self._account: AccountData | None = None
 
         # 持仓数据缓存
-        self._positions: Dict[str, PositionData] = {}
+        self._positions: dict[str, PositionData] = {}
 
         # 缓存报单数据
-        self._orders: Dict[str, OrderData] = {}
+        self._orders: dict[str, OrderData] = {}
 
         # K线订阅列表: [(symbol, interval), ...]
-        self._bar_subs: List[Tuple[str, str]] = []
+        self._bar_subs: list[tuple[str, str]] = []
 
         # K线生成器（使用 utils.bar_generator）
         self._bar_generator = MultiSymbolBarGenerator()
 
-        # 线程同步队列（线程安全）
-        self._sync_queue: queue.Queue = queue.Queue(maxsize=5000)
+    
 
         # 行情和交易接口
-        self.md_api: Optional[CtpMdApi] = None
-        self.td_api: Optional[CtpTdApi] = None
+        self.md_api: CtpMdApi | None = None
+        self.td_api: CtpTdApi | None = None
 
-        # 事件分发协程
-        self._dispatcher_task: Optional[asyncio.Task] = None
-
-        # AsyncEventEngine引用（直接发送事件）
-        self._event_engine: Optional[AsyncEventEngine] = ctx.get_event_engine()
-
-        # 加载最小开仓手数配置
-        self._open_limit = acct_config.trading.open_limit or {}
 
         # 订阅配置（来自全局config.yaml）
         self.subs_config = acct_config.subs
@@ -113,14 +101,17 @@ class CtpGateway(BaseGateway):
         if self.connected:
             logger.warning("CTP Gateway 已连接")
             return True
+        
+        if self._running:
+            logger.warning("CTP Gateway 运行中，先断开连接")
+            await self.disconnect()
 
+        self._running = True
         try:
             # 清空历史数据
             self._positions.clear()
             self._trades.clear()
             self._orders.clear()
-            # 先停止轮询
-            self._running = False
 
             # 创建 API 实例
             self.md_api = CtpMdApi(self)
@@ -129,13 +120,8 @@ class CtpGateway(BaseGateway):
             # 连接行情和交易服务器
             self.md_api.connect()
             self.td_api.connect()
-
             logger.info("CTP Gateway 连接中...")
-
-            self._running = True
-
-            # 启动事件分发协程
-            self._dispatcher_task = asyncio.create_task(self._event_dispatcher())
+            
             return True
 
         except Exception as e:
@@ -155,12 +141,13 @@ class CtpGateway(BaseGateway):
         self.md_connected = False
         self.td_connected = False
         self._running = False
+        self.emit_event(EventTypes.ACCOUNT_UPDATE, self._account)
         logger.info("CTP Gateway 已断开")
         return True
 
-    def send_order(self, req: OrderRequest) -> Optional[OrderData]:
+    def send_order(self, req: OrderRequest) -> OrderData | None:
         """下单"""
-        if not self.td_api or not self.td_api.connected:
+        if not self.td_connected:
             logger.error("CTP 交易接口未连接")
             return None
 
@@ -193,16 +180,24 @@ class CtpGateway(BaseGateway):
 
         return self.td_api.cancel_order(req)
 
-    def get_trading_day(self) -> Optional[str]:
+    def get_trading_day(self) -> str | None:
         """获取交易日"""
         return self.trading_day
 
-    def get_account(self) -> Optional[AccountData]:
+    def get_account(self) -> AccountData | None:
         """获取账户数据"""
         if self._account:
-            self._account.hold_profit = sum(position.hold_profit for position in self._positions.values())
-            self._account.close_profit = sum(position.close_profit for position in self._positions.values())
-            self._account.balance = self._account.static_balance + self._account.hold_profit + self._account.close_profit
+            self._account.hold_profit = sum(
+                position.hold_profit for position in self._positions.values()
+            )
+            self._account.close_profit = sum(
+                position.close_profit for position in self._positions.values()
+            )
+            self._account.balance = (
+                self._account.static_balance
+                + self._account.hold_profit
+                + self._account.close_profit
+            )
             return self._account
 
         default_account = AccountData(
@@ -219,19 +214,19 @@ class CtpGateway(BaseGateway):
         )
         return default_account
 
-    def get_positions(self) -> Dict[str, PositionData]:
+    def get_positions(self) -> dict[str, PositionData]:
         """获取持仓数据"""
         return self._positions.copy()
 
-    def get_orders(self) -> Dict[str, OrderData]:
+    def get_orders(self) -> dict[str, OrderData]:
         """获取订单数据"""
         return self._orders.copy()
 
-    def get_trades(self) -> Dict[str, TradeData]:
+    def get_trades(self) -> dict[str, TradeData]:
         """获取成交数据"""
         return self._trades.copy()
 
-    def get_contracts(self) -> Dict[str, ContractData]:
+    def get_contracts(self) -> dict[str, ContractData]:
         """获取所有合约信息"""
         return self.contracts.copy()
 
@@ -259,11 +254,11 @@ class CtpGateway(BaseGateway):
             logger.exception(f"强制刷新CTP合约信息失败: {e}")
             return False
 
-    def get_quotes(self) -> Dict[str, TickData]:
+    def get_quotes(self) -> dict[str, TickData]:
         """获取行情数据"""
         return self._quotes.copy()
 
-    def get_kline(self, symbol: str, interval: str) -> Optional[pd.DataFrame]:
+    def get_kline(self, symbol: str, interval: str) -> pd.DataFrame | None:
         """
         获取K线数据
 
@@ -272,7 +267,7 @@ class CtpGateway(BaseGateway):
             interval: 周期（如"M1", "M5", "M15", "H1"等）
 
         Returns:
-            Optional[pd.DataFrame]: K线数据框，失败返回None
+            pd.DataFrame | None: K线数据框，失败返回None
         """
         std_symbol = self.std_symbol(symbol) or symbol
 
@@ -304,7 +299,7 @@ class CtpGateway(BaseGateway):
         df = pd.DataFrame(data)
         return df
 
-    def subscribe(self, symbol: Union[str, List[str]]) -> bool:
+    def subscribe(self, symbol: str | list[str]) -> bool:
         """订阅行情"""
         if isinstance(symbol, str):
             symbol = [symbol]
@@ -354,40 +349,9 @@ class CtpGateway(BaseGateway):
         logger.info(f"订阅K线数据: {std_symbol} {interval}")
         return True
 
-    def get_contract(self, symbol: str) -> Optional[ContractData]:
+    def get_contract(self, symbol: str) -> ContractData | None:
         """获取合约信息"""
         return self.contracts.get(symbol)
-
-    async def _event_dispatcher(self):
-        """
-        事件分发协程（在主线程事件循环中运行）
-
-        职责：
-        1. 从同步队列获取数据
-        2. 直接推送到AsyncEventEngine
-        """
-        try:
-            logger.info("事件分发协程已启动")
-            while self._running:
-                try:
-                    # 从同步队列获取数据（超时1秒）
-                    event_type, data = await asyncio.to_thread(self._sync_queue.get, timeout=1.0)
-                    if self._event_engine:
-                        self._event_engine.put(event_type, data)
-
-                except queue.Empty:
-                    # 队列为空或超时，继续循环
-                    await asyncio.sleep(0.01)
-                    continue
-                except Exception as e:
-                    logger.exception(f"事件分发异常: {e}")
-
-            logger.info("事件分发协程已退出")
-
-        except asyncio.CancelledError:
-            logger.info("事件分发协程已取消")
-        except Exception as e:
-            logger.exception(f"事件分发协程致命错误: {e}")
 
     def add_trade(self, trade: TradeData) -> None:
         """添加成交"""
@@ -410,7 +374,7 @@ class CtpGateway(BaseGateway):
         """处理 tick 回调"""
         # 缓存行情数据
         self._quotes[tick.symbol] = tick
-        self._push_to_queue(EventTypes.TICK_UPDATE, tick)
+        self.emit_event(EventTypes.TICK_UPDATE, tick)
 
         # 推送 tick 给 BarGenerator 合成 K 线
         self._bar_generator.update_tick(tick)
@@ -424,7 +388,7 @@ class CtpGateway(BaseGateway):
         """处理订单回调"""
         # 缓存订单数据
         self.add_order(order)
-        self._push_to_queue(EventTypes.ORDER_UPDATE, order)
+        self.emit_event(EventTypes.ORDER_UPDATE, order)
         logger.info(f"报单回报: {order}")
 
     def on_trade(self, trade: TradeData) -> None:
@@ -436,7 +400,7 @@ class CtpGateway(BaseGateway):
 
         # 缓存成交数据
         self.add_trade(trade)
-        self._push_to_queue(EventTypes.TRADE_UPDATE, trade)
+        self.emit_event(EventTypes.TRADE_UPDATE, trade)
         logger.info(f"成交回报: {trade}")
 
         # 更新持仓
@@ -452,7 +416,7 @@ class CtpGateway(BaseGateway):
         # 推送更新后的持仓（标记为交易来源）
         position_data = position.model_dump()
         position_data["_source"] = "trade"  # 标记来源为交易
-        self._push_to_queue(EventTypes.POSITION_UPDATE, position_data)
+        self.emit_event(EventTypes.POSITION_UPDATE, position_data)
 
     def on_account(self, account: AccountData) -> None:
         """处理账户回调"""
@@ -466,26 +430,24 @@ class CtpGateway(BaseGateway):
             position.close_profit_long + position.close_profit_short
             for position in self._positions.values()
         )
-        self._push_to_queue(EventTypes.ACCOUNT_UPDATE, account)
+        self.emit_event(EventTypes.ACCOUNT_UPDATE, account)
 
-    def on_status(self, ready: bool=False) -> None:
+    def on_status(self, ready: bool = False) -> None:
         """处理状态回调"""
         if self.td_api is None or self.md_api is None:
             return
         self.md_connected = self.md_api.connected
         self.td_connected = self.td_api.connected
 
-         
-
         # 推送最新账户信息，确保前端连接状态实时更新
         account = self.get_account()
         if account:
             account.md_connected = self.md_connected
             account.td_connected = self.td_connected
-            self._push_to_queue(EventTypes.ACCOUNT_UPDATE, account)
+            self.emit_event(EventTypes.ACCOUNT_UPDATE, account)
 
             if ready:
-                self._push_to_queue(EventTypes.ACCOUNT_READY, None)
+                self.emit_event(EventTypes.ACCOUNT_READY, None)
 
         if self.connected:
             # 订阅行情
@@ -498,13 +460,6 @@ class CtpGateway(BaseGateway):
                 symbol, interval = sub_bar.split("-")
                 self.subscribe_bars(symbol, interval)
 
-
-    def _push_to_queue(self, event_type: str, data: Any):
-        """推送数据到同步队列（非阻塞）"""
-        try:
-            self._sync_queue.put_nowait((event_type, data))
-        except queue.Full:
-            logger.warning(f"事件队列已满，丢弃事件: {event_type}")
 
     def _update_close_profit(self, trade: TradeData, position: PositionData, volume: int) -> None:
         """
@@ -540,7 +495,6 @@ class CtpGateway(BaseGateway):
             self._account.close_profit = 0.0
         self._account.close_profit += profit
 
-
     def _push_bar(self, bar_data: BarData) -> None:
         """
         推送K线数据到事件队列
@@ -548,5 +502,5 @@ class CtpGateway(BaseGateway):
         Args:
             bar_data: K线数据
         """
-        self._push_to_queue(EventTypes.KLINE_UPDATE, bar_data)
+        self.emit_event(EventTypes.KLINE_UPDATE, bar_data)
         logger.info(f"推送K线: {bar_data}")

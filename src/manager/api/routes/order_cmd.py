@@ -2,8 +2,6 @@
 报单指令相关API路由
 """
 
-from typing import Optional
-
 from fastapi import APIRouter, Depends, Query
 
 from src.manager.api.dependencies import get_trading_manager
@@ -19,8 +17,8 @@ router = APIRouter(prefix="/api/order-cmd", tags=["报单指令"])
 
 @router.get("")
 async def get_order_cmds_status(
-    account_id: Optional[str] = Query(None, description="账户ID（多账号模式）"),
-    status: Optional[str] = Query(None, description="状态过滤 (active/finished)"),
+    account_id: str | None = Query(None, description="账户ID（多账号模式）"),
+    status: str | None = Query(None, description="状态过滤 (active/finished)"),
     trading_manager: TradingManager = Depends(get_trading_manager),
 ):
     """
@@ -68,7 +66,7 @@ async def get_order_cmds_status(
 @router.post("/{cmd_id}/cancel")
 async def cancel_order_cmd(
     cmd_id: str,
-    account_id: Optional[str] = Query(None, description="账户ID"),
+    account_id: str | None = Query(None, description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
 ):
     """

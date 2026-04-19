@@ -4,7 +4,7 @@
 """
 
 from datetime import datetime, time
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import pandas as pd
 from pydantic import BaseModel, Field
@@ -47,7 +47,7 @@ class BaseParam(BaseModel):
     force_exit_time: time = Field(default=time(14, 45, 0), title="强平时间")
     lock_position: bool = Field(default=False, title="锁仓模式")
 
-    def get_param_definitions(self) -> List[Dict[str, Any]]:
+    def get_param_definitions(self) -> list[dict[str, Any]]:
         """获取参数定义列表"""
         definitions = []
         for field_name, field_info in self.model_fields.items():
@@ -81,10 +81,10 @@ class Signal(BaseModel):
 
     side: int = 0  # 信号方向: 1多头, -1空头, 0无信号
     entry_price: float = 0.0  # 开仓价格
-    entry_time: Optional[time] = None  # 开仓时间
+    entry_time: time | None = None  # 开仓时间
     entry_volume: int = 0  # 开仓目标手数
     exit_price: float = 0.0  # 平仓价格
-    exit_time: Optional[time] = None  # 平仓时间
+    exit_time: time | None = None  # 平仓时间
     exit_reason: str = ""  # 平仓原因
 
     def __str__(self) -> str:
@@ -113,28 +113,28 @@ class BaseStrategy:
 
         self.inited: bool = False
         self.enabled: bool = True
-        self.bar_subscriptions: List[str] = []
-        self.trading_day: Optional[datetime] = None
+        self.bar_subscriptions: list[str] = []
+        self.trading_day: datetime | None = None
         # 策略管理器引用
         self.strategy_manager: Optional["StrategyManager"] = None
         # 交易引擎引用
         self.trading_engine: Optional["TradingEngine"] = None
         # 参数模型（子类覆盖）
-        self.param: Optional[BaseParam] = None
+        self.param: BaseParam | None = None
 
         # 策略持仓管理: {symbol -> PositionData}
-        self._positions: Dict[str, PositionData] = {}
+        self._positions: dict[str, PositionData] = {}
 
         # 信号
-        self.signal: Optional[Signal] = None
+        self.signal: Signal | None = None
 
         # 暂停状态
         self.opening_paused: bool = False
         self.closing_paused: bool = False
 
         # 运行中信息
-        self._pending_cmds: List[OrderCmd] = []
-        self._hist_cmds: Dict[str, OrderCmd] = {}
+        self._pending_cmds: list[OrderCmd] = []
+        self._hist_cmds: dict[str, OrderCmd] = {}
 
     def init(self, trading_day: datetime) -> bool:
         """策略初始化"""
@@ -157,7 +157,7 @@ class BaseStrategy:
 
         return True
 
-    def init_positions(self, positions: List[PositionData]) -> None:
+    def init_positions(self, positions: list[PositionData]) -> None:
         """
         初始化策略持仓（从数据库加载）
 
@@ -173,7 +173,7 @@ class BaseStrategy:
                 f"空仓={pos.pos_short}({pos.pos_short_td or 0}/{pos.pos_short_yd or 0})"
             )
 
-    def get_params(self) -> List[Dict[str, Any]]:
+    def get_params(self) -> list[dict[str, Any]]:
         """获取策略参数（包含元数据）"""
         # 获取基础参数定义
         if not self.param:
@@ -181,18 +181,18 @@ class BaseStrategy:
         definitions = self.param.get_param_definitions()
         return definitions
 
-    def load_hist_bars(self, symbol: str, start: datetime, end: datetime) -> List[BarData]:
+    def load_hist_bars(self, symbol: str, start: datetime, end: datetime) -> list[BarData]:
         """加载历史K线数据"""
         if self.strategy_manager is None:
             logger.error(f"策略 [{self.strategy_id}] 的 strategy_manager 未初始化")
             return []
         return self.strategy_manager.load_hist_bars(symbol, self.bar_type, start, end)
 
-    def get_signal(self) -> Optional[Dict[str, Any]]:
+    def get_signal(self) -> (dict[str, Any]) | None:
         """获取当前信号"""
         return self.signal.model_dump() if self.signal else None
 
-    def update_params(self, params: Dict[str, Any]) -> None:
+    def update_params(self, params: dict[str, Any]) -> None:
         """
         更新策略参数（只更新内存，不写入文件）
 
@@ -207,7 +207,7 @@ class BaseStrategy:
 
         logger.info(f"策略 [{self.strategy_id}] 参数已更新: {params}")
 
-    def update_signal(self, data: Dict[str, Any]) -> None:
+    def update_signal(self, data: dict[str, Any]) -> None:
         """
         更新策略信号（只更新内存，不写入文件）
 
@@ -252,6 +252,7 @@ class BaseStrategy:
         """
         if symbol not in self._positions:
             from src.models.object import Exchange
+
             contract = self.trading_engine.get_contract(symbol)
             if not contract:
                 logger.error(f"策略 [{self.strategy_id}] 未找到合约信息: {symbol}")
@@ -264,7 +265,7 @@ class BaseStrategy:
             )
         return self._positions[symbol]
 
-    def get_position(self, symbol: Optional[str] = None) -> Optional[PositionData]:
+    def get_position(self, symbol: str | None = None) -> PositionData | None:
         """
         获取指定合约的持仓信息
 
@@ -277,17 +278,14 @@ class BaseStrategy:
         symbol = symbol or self.symbol
         return self._positions.get(symbol)
 
-    def get_all_positions(self) -> Dict[str, PositionData]:
+    def get_all_positions(self) -> dict[str, PositionData]:
         """
         获取所有合约的持仓
 
         Returns:
-            Dict[str, PositionData]: {symbol -> position}
+            dict[str, PositionData]: {symbol -> position}
         """
         return self._positions.copy()
-
-
-
 
     def save_positions(self) -> None:
         """保存持仓到数据库"""
@@ -296,7 +294,6 @@ class BaseStrategy:
         for position in self._positions.values():
             if position.total_pos > 0:  # 只保存有持仓的记录
                 self.strategy_manager.save_strategy_position(position)
-
 
     async def execute_signal(self) -> None:
         """执行信号（支持锁仓模式）"""
@@ -391,17 +388,19 @@ class BaseStrategy:
             return
 
         position = self._get_or_create_position(self.symbol)
-        cmds: List[OrderCmd] = []    
+        cmds: list[OrderCmd] = []
 
         if signal.side == 1:
             pos_net = position.pos
             if pos_net > self.volume:
-                #净多超过目标手数了，优先平多(昨)，剩余开空
+                # 净多超过目标手数了，优先平多(昨)，剩余开空
                 target_volume = pos_net - self.volume
-                close_volume  = min(target_volume, position.pos_long_yd)
+                close_volume = min(target_volume, position.pos_long_yd)
                 open_volume = target_volume - close_volume
-                logger.info(f"开多，净多头[{pos_net}]超过目标手数[{self.volume}]，优先平多(昨)[{close_volume}]手，剩余开空[{open_volume}]手")
-                if close_volume >0:
+                logger.info(
+                    f"开多，净多头[{pos_net}]超过目标手数[{self.volume}]，优先平多(昨)[{close_volume}]手，剩余开空[{open_volume}]手"
+                )
+                if close_volume > 0:
                     cmds.append(
                         OrderCmd(
                             symbol=self.symbol,
@@ -422,14 +421,15 @@ class BaseStrategy:
                         )
                     )
 
-
             elif position.pos < self.volume:
-                #净多不足目标手数了，优先平空(昨)，剩余开多
+                # 净多不足目标手数了，优先平空(昨)，剩余开多
                 target_volume = self.volume - position.pos
-                close_volume  = min(target_volume, position.pos_short_yd)
+                close_volume = min(target_volume, position.pos_short_yd)
                 open_volume = target_volume - close_volume
-                logger.info(f"开多，净多头[{position.pos}]不足目标手数[{self.volume}]，优先平空(昨)[{close_volume}]手，剩余开多[{open_volume}]手")
-                if close_volume >0:
+                logger.info(
+                    f"开多，净多头[{position.pos}]不足目标手数[{self.volume}]，优先平空(昨)[{close_volume}]手，剩余开多[{open_volume}]手"
+                )
+                if close_volume > 0:
                     cmds.append(
                         OrderCmd(
                             symbol=self.symbol,
@@ -452,12 +452,14 @@ class BaseStrategy:
         if signal.side == -1:
             pos_net = -position.pos
             if pos_net > self.volume:
-                #净空超过目标手数了，优先平空(昨)，剩余开多
+                # 净空超过目标手数了，优先平空(昨)，剩余开多
                 target_volume = pos_net - self.volume
-                close_volume  = min(target_volume, position.pos_short_yd)
+                close_volume = min(target_volume, position.pos_short_yd)
                 open_volume = target_volume - close_volume
-                logger.info(f"开空，净空头[{pos_net}]超过目标手数[{self.volume}]，优先平空(昨)[{close_volume}]手，剩余开多[{open_volume}]手")
-                if close_volume >0:
+                logger.info(
+                    f"开空，净空头[{pos_net}]超过目标手数[{self.volume}]，优先平空(昨)[{close_volume}]手，剩余开多[{open_volume}]手"
+                )
+                if close_volume > 0:
                     cmds.append(
                         OrderCmd(
                             symbol=self.symbol,
@@ -478,12 +480,14 @@ class BaseStrategy:
                         )
                     )
             elif position.pos > -self.volume:
-                #净空不足目标手数了，优先平多(昨)，剩余开空
+                # 净空不足目标手数了，优先平多(昨)，剩余开空
                 target_volume = self.volume - (-position.pos)
-                close_volume  = min(target_volume, position.pos_long_yd)
+                close_volume = min(target_volume, position.pos_long_yd)
                 open_volume = target_volume - close_volume
-                logger.info(f"开空，净空头[{pos_net}]不足目标手数[{self.volume}]，优先平多(昨)[{close_volume}]手，剩余开空[{open_volume}]手")
-                if close_volume >0:
+                logger.info(
+                    f"开空，净空头[{pos_net}]不足目标手数[{self.volume}]，优先平多(昨)[{close_volume}]手，剩余开空[{open_volume}]手"
+                )
+                if close_volume > 0:
                     cmds.append(
                         OrderCmd(
                             symbol=self.symbol,
@@ -620,7 +624,7 @@ class BaseStrategy:
         pass
 
     # ==================== 交易接口 ====================
-    async def send_order_cmds(self, cmds: List[OrderCmd]):
+    async def send_order_cmds(self, cmds: list[OrderCmd]):
         """发送报单指令（支持多指令）"""
         if self.param is None:
             logger.error(f"策略 [{self.strategy_id}] 的参数未初始化")
@@ -664,15 +668,11 @@ class BaseStrategy:
 
     def _has_pending_open_cmd(self) -> bool:
         """是否有进行中的开仓指令"""
-        return any(
-            not cmd.is_finished and cmd.offset == Offset.OPEN for cmd in self._pending_cmds
-        )
+        return any(not cmd.is_finished and cmd.offset == Offset.OPEN for cmd in self._pending_cmds)
 
     def _has_pending_close_cmd(self) -> bool:
         """是否有进行中的平仓指令"""
-        return any(
-            not cmd.is_finished and cmd.offset == Offset.CLOSE for cmd in self._pending_cmds
-        )
+        return any(not cmd.is_finished and cmd.offset == Offset.CLOSE for cmd in self._pending_cmds)
 
     async def cancel_order_cmd(self, order_cmd: OrderCmd):
         """取消报单指令"""

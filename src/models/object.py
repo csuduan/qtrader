@@ -5,7 +5,7 @@
 
 from datetime import datetime as DateTime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 from sqlalchemy.util import b
@@ -127,52 +127,52 @@ class TickData(BaseModel):
     symbol: str = Field(..., description="合约代码")
     exchange: Exchange = Field(..., description="交易所")
     datetime: DateTime = Field(..., description="行情时间")
-    last_price: Optional[float] = Field(..., description="最新价")
+    last_price: float | None = Field(..., description="最新价")
 
     # 可选字段（建议提供，但不强制）
-    volume: Optional[float] = Field(None, description="成交量")
-    turnover: Optional[float] = Field(None, description="成交额")
-    open_interest: Optional[float] = Field(None, description="持仓量")
+    volume: float | None = Field(None, description="成交量")
+    turnover: float | None = Field(None, description="成交额")
+    open_interest: float | None = Field(None, description="持仓量")
 
     # 盘口数据（建议提供）
-    bid_price1: Optional[float] = Field(None, description="买一价")
-    bid_volume1: Optional[float] = Field(None, description="买一量")
-    ask_price1: Optional[float] = Field(None, description="卖一价")
-    ask_volume1: Optional[float] = Field(None, description="卖一量")
+    bid_price1: float | None = Field(None, description="买一价")
+    bid_volume1: float | None = Field(None, description="买一量")
+    ask_price1: float | None = Field(None, description="卖一价")
+    ask_volume1: float | None = Field(None, description="卖一量")
 
     # 五档行情扩展
-    bid_price2: Optional[float] = Field(None, description="买二价")
-    bid_volume2: Optional[float] = Field(None, description="买二量")
-    ask_price2: Optional[float] = Field(None, description="卖二价")
-    ask_volume2: Optional[float] = Field(None, description="卖二量")
+    bid_price2: float | None = Field(None, description="买二价")
+    bid_volume2: float | None = Field(None, description="买二量")
+    ask_price2: float | None = Field(None, description="卖二价")
+    ask_volume2: float | None = Field(None, description="卖二量")
 
-    bid_price3: Optional[float] = Field(None, description="买三价")
-    bid_volume3: Optional[float] = Field(None, description="买三量")
-    ask_price3: Optional[float] = Field(None, description="卖三价")
-    ask_volume3: Optional[float] = Field(None, description="卖三量")
+    bid_price3: float | None = Field(None, description="买三价")
+    bid_volume3: float | None = Field(None, description="买三量")
+    ask_price3: float | None = Field(None, description="卖三价")
+    ask_volume3: float | None = Field(None, description="卖三量")
 
-    bid_price4: Optional[float] = Field(None, description="买四价")
-    bid_volume4: Optional[float] = Field(None, description="买四量")
-    ask_price4: Optional[float] = Field(None, description="卖四价")
-    ask_volume4: Optional[float] = Field(None, description="卖四量")
+    bid_price4: float | None = Field(None, description="买四价")
+    bid_volume4: float | None = Field(None, description="买四量")
+    ask_price4: float | None = Field(None, description="卖四价")
+    ask_volume4: float | None = Field(None, description="卖四量")
 
-    bid_price5: Optional[float] = Field(None, description="买五价")
-    bid_volume5: Optional[float] = Field(None, description="买五量")
-    ask_price5: Optional[float] = Field(None, description="卖五价")
-    ask_volume5: Optional[float] = Field(None, description="卖五量")
+    bid_price5: float | None = Field(None, description="买五价")
+    bid_volume5: float | None = Field(None, description="买五量")
+    ask_price5: float | None = Field(None, description="卖五价")
+    ask_volume5: float | None = Field(None, description="卖五量")
 
     # 日内数据
-    open_price: Optional[float] = Field(None, description="开盘价")
-    high_price: Optional[float] = Field(None, description="最高价")
-    low_price: Optional[float] = Field(None, description="最低价")
-    pre_close: Optional[float] = Field(None, description="昨收价")
+    open_price: float | None = Field(None, description="开盘价")
+    high_price: float | None = Field(None, description="最高价")
+    low_price: float | None = Field(None, description="最低价")
+    pre_close: float | None = Field(None, description="昨收价")
 
     # 涨跌停
-    limit_up: Optional[float] = Field(None, description="涨停价")
-    limit_down: Optional[float] = Field(None, description="跌停价")
+    limit_up: float | None = Field(None, description="涨停价")
+    limit_down: float | None = Field(None, description="跌停价")
 
     # 扩展字段（存放Gateway特定数据）
-    extras: Dict[str, Any] = Field(default_factory=dict, description="扩展数据")
+    extras: dict[str, Any] = Field(default_factory=dict, description="扩展数据")
 
     @property
     def std_symbol(self) -> str:
@@ -198,14 +198,14 @@ class BarData(BaseModel):
     close_price: float = Field(..., description="收盘价")
 
     # 可选字段
-    volume: Optional[float] = Field(None, description="成交量")
-    turnover: Optional[float] = Field(None, description="成交额")
-    open_interest: Optional[float] = Field(None, description="持仓量")
+    volume: float | None = Field(None, description="成交量")
+    turnover: float | None = Field(None, description="成交额")
+    open_interest: float | None = Field(None, description="持仓量")
     type: str = Field(default="real", description="K线类型")
-    update_time: Optional[DateTime] = Field(None, description="最后更新时间")
+    update_time: DateTime | None = Field(None, description="最后更新时间")
 
     # 扩展字段
-    extras: Dict[str, Any] = Field(default_factory=dict)
+    extras: dict[str, Any] = Field(default_factory=dict)
 
     @property
     def std_symbol(self) -> str:
@@ -230,16 +230,16 @@ class OrderData(BaseModel):
     order_id: str = Field(..., description="订单ID（系统内部唯一标识,order_ref")
     symbol: str = Field(..., description="合约代码")
     exchange: Exchange = Field(default=Exchange.NONE, description="交易所")
-    order_sys_id: Optional[str] = Field(None, description="交易所订单ID")
+    order_sys_id: str | None = Field(None, description="交易所订单ID")
 
     direction: Direction = Field(..., description="买卖方向")
     offset: Offset = Field(default=Offset.OPEN, description="开平类型")
 
     volume: int = Field(..., description="委托数量")
     traded: int = Field(default=0, description="已成交数量")
-    traded_price: Optional[float] = Field(None, description="已成交价格")
+    traded_price: float | None = Field(None, description="已成交价格")
 
-    price: Optional[float] = Field(None, description="委托价格（None=市价单）")
+    price: float | None = Field(None, description="委托价格（None=市价单）")
     price_type: OrderType = Field(default=OrderType.LIMIT, description="订单类型")
 
     status: OrderStatus = Field(default=OrderStatus.PENDING, description="订单状态")
@@ -249,15 +249,15 @@ class OrderData(BaseModel):
     account_id: str = Field(..., description="账户ID")
 
     # 可选字段
-    gateway_order_id: Optional[str] = Field(None, description="网关订单ID（如CTP的OrderSysID）")
-    trading_day: Optional[str] = Field(None, description="交易日")
+    gateway_order_id: str | None = Field(None, description="网关订单ID（如CTP的OrderSysID）")
+    trading_day: str | None = Field(None, description="交易日")
 
-    insert_time: Optional[DateTime] = Field(None, description="下单时间")
-    update_time: Optional[DateTime] = Field(None, description="最后更新时间")
+    insert_time: DateTime | None = Field(None, description="下单时间")
+    update_time: DateTime | None = Field(None, description="最后更新时间")
     canceled: bool = Field(default=False, description="是否已取消")
 
     # 扩展字段
-    extras: Dict[str, Any] = Field(default_factory=dict)
+    extras: dict[str, Any] = Field(default_factory=dict)
 
     @property
     def volume_left(self) -> int:
@@ -295,15 +295,15 @@ class TradeData(BaseModel):
     account_id: str = Field(..., description="账户ID")
 
     # 可选字段
-    trading_day: Optional[str] = Field(None, description="交易日")
-    trade_time: Optional[DateTime] = Field(None, description="成交时间")
-    commission: Optional[float] = Field(None, description="手续费")
+    trading_day: str | None = Field(None, description="交易日")
+    trade_time: DateTime | None = Field(None, description="成交时间")
+    commission: float | None = Field(None, description="手续费")
 
     # 报单价格（用于计算滑点）
-    order_price: Optional[float] = Field(None, description="报单价格")
+    order_price: float | None = Field(None, description="报单价格")
 
     # 扩展字段
-    extras: Dict[str, Any] = Field(default_factory=dict)
+    extras: dict[str, Any] = Field(default_factory=dict)
 
 
 class PositionData(BaseModel):
@@ -318,31 +318,31 @@ class PositionData(BaseModel):
     exchange: Exchange = Field(..., description="交易所")
     multiple: int = Field(0, description="合约乘数")
 
-    pos_long_yd: Optional[int] = Field(0, description="昨仓多头持仓数量")
-    pos_short_yd: Optional[int] = Field(0, description="昨仓空头持仓数量")
-    pos_long_td: Optional[int] = Field(0, description="今仓多头持仓数量")
-    pos_short_td: Optional[int] = Field(0, description="今仓空头持仓数量")
+    pos_long_yd: int | None = Field(0, description="昨仓多头持仓数量")
+    pos_short_yd: int | None = Field(0, description="昨仓空头持仓数量")
+    pos_long_td: int | None = Field(0, description="今仓多头持仓数量")
+    pos_short_td: int | None = Field(0, description="今仓空头持仓数量")
 
     # 成本
-    hold_price_long: Optional[float] = Field(0, description="多头持仓均价")
-    hold_price_short: Optional[float] = Field(0, description="空头持仓均价")
-    hold_cost_long: Optional[float] = Field(0, description="多头持仓成本(用于辅助计算均价)")
-    hold_cost_short: Optional[float] = Field(0, description="空头持仓成本(用于辅助计算均价)")
+    hold_price_long: float | None = Field(0, description="多头持仓均价")
+    hold_price_short: float | None = Field(0, description="空头持仓均价")
+    hold_cost_long: float | None = Field(0, description="多头持仓成本(用于辅助计算均价)")
+    hold_cost_short: float | None = Field(0, description="空头持仓成本(用于辅助计算均价)")
     # 盈亏
-    hold_profit_long: Optional[float] = Field(0, description="多头持仓盈亏(盯日)")
-    hold_profit_short: Optional[float] = Field(0, description="空头持仓盈亏(盯日)")
-    close_profit_long: Optional[float] = Field(0, description="多头平仓盈亏(盯日)")
-    close_profit_short: Optional[float] = Field(0, description="空头平仓盈亏(盯日)")
+    hold_profit_long: float | None = Field(0, description="多头持仓盈亏(盯日)")
+    hold_profit_short: float | None = Field(0, description="空头持仓盈亏(盯日)")
+    close_profit_long: float | None = Field(0, description="多头平仓盈亏(盯日)")
+    close_profit_short: float | None = Field(0, description="空头平仓盈亏(盯日)")
 
-    margin_long: Optional[float] = Field(0, description="多头持仓保证金占用")
-    margin_short: Optional[float] = Field(0, description="空头持仓保证金占用")
+    margin_long: float | None = Field(0, description="多头持仓保证金占用")
+    margin_short: float | None = Field(0, description="空头持仓保证金占用")
 
     # 扩展字段
-    extras: Dict[str, Any] = Field(default_factory=dict)
-    last_price: Optional[float] = Field(None, description="最新价格")
-    strategy_id: Optional[str] = Field(None, description="策略ID")
+    extras: dict[str, Any] = Field(default_factory=dict)
+    last_price: float | None = Field(None, description="最新价格")
+    strategy_id: str | None = Field(None, description="策略ID")
     auto_updated: bool = Field(default=False, description="是否自动更新")
-    updated_at: Optional[DateTime] = Field(None, description="最后更新时间")
+    updated_at: DateTime | None = Field(None, description="最后更新时间")
 
     @property
     def pos_long(self) -> int:
@@ -488,35 +488,35 @@ class AccountData(BaseModel):
     account_id: str = Field(..., description="账户ID")
     balance: float = Field(0, description="账户余额(动态)")
     available: float = Field(0, description="可用资金")
-    pre_balance: Optional[float] = Field(None, description="昨日权益")
-    static_balance: Optional[float] = Field(None, description="静态权益(昨日权益+出入金)")
+    pre_balance: float | None = Field(None, description="昨日权益")
+    static_balance: float | None = Field(None, description="静态权益(昨日权益+出入金)")
 
     # 可选字段
-    frozen: Optional[float] = Field(None, description="冻结资金")
-    margin: Optional[float] = Field(None, description="保证金占用")
+    frozen: float | None = Field(None, description="冻结资金")
+    margin: float | None = Field(None, description="保证金占用")
 
-    hold_profit: Optional[float] = Field(None, description="持仓盈亏(盯日)")
-    close_profit: Optional[float] = Field(None, description="平仓盈亏(盯日)")
-    float_profit: Optional[float] = Field(None, description="浮动盈亏")
+    hold_profit: float | None = Field(None, description="持仓盈亏(盯日)")
+    close_profit: float | None = Field(None, description="平仓盈亏(盯日)")
+    float_profit: float | None = Field(None, description="浮动盈亏")
 
-    risk_ratio: Optional[float] = Field(None, description="风险度")
+    risk_ratio: float | None = Field(None, description="风险度")
 
-    update_time: Optional[DateTime] = Field(None, description="更新时间")
+    update_time: DateTime | None = Field(None, description="更新时间")
 
     # 扩展字段
-    extras: Dict[str, Any] = Field(default_factory=dict)
-    broker_type: Optional[str] = Field(None, description="经纪商类型")
-    broker_name: Optional[str] = Field(None, description="经纪商名称")
-    name: Optional[str] = Field(None, description="账户名称")
-    currency: Optional[str] = Field(None, description="交易货币")
-    user_id: Optional[str] = Field(None, description="用户ID")
+    extras: dict[str, Any] = Field(default_factory=dict)
+    broker_type: str | None = Field(None, description="经纪商类型")
+    broker_name: str | None = Field(None, description="经纪商名称")
+    name: str | None = Field(None, description="账户名称")
+    currency: str | None = Field(None, description="交易货币")
+    user_id: str | None = Field(None, description="用户ID")
     trade_paused: bool = False  # 是否暂停交易
     md_connected: bool = False  # 行情连接状态
     td_connected: bool = False  # 交易连接状态
     risk_status: dict = Field(default_factory=dict, description="风控状态")
 
     # 账户状态
-    status: Optional[TraderState] = Field(TraderState.STOPPED, description="交易状态")
+    status: TraderState | None = Field(TraderState.STOPPED, description="交易状态")
 
 
 class ContractData(BaseModel):
@@ -533,20 +533,20 @@ class ContractData(BaseModel):
     product_type: ProductType = Field(ProductType.FUTURES, description="产品类型")
 
     # 可选字段
-    multiple: Optional[int] = Field(None, description="合约乘数")
-    pricetick: Optional[float] = Field(None, description="最小价格变动")
+    multiple: int | None = Field(None, description="合约乘数")
+    pricetick: float | None = Field(None, description="最小价格变动")
 
-    min_volume: Optional[int] = Field(None, description="最小下单量")
-    expire_date: Optional[str] = Field(None, description="到期日期")
+    min_volume: int | None = Field(None, description="最小下单量")
+    expire_date: str | None = Field(None, description="到期日期")
 
     # 期权相关
-    option_strike: Optional[float] = Field(None, description="期权行权价")
-    option_underlying: Optional[str] = Field(None, description="标的合约")
-    option_type: Optional[str] = Field(None, description="期权类型 CALL/PUT")
+    option_strike: float | None = Field(None, description="期权行权价")
+    option_underlying: str | None = Field(None, description="标的合约")
+    option_type: str | None = Field(None, description="期权类型 CALL/PUT")
 
     # 扩展字段
-    extras: Dict[str, Any] = Field(default_factory=dict)
-    min_open_volume: Optional[int] = Field(1, description="最小开仓手数")
+    extras: dict[str, Any] = Field(default_factory=dict)
+    min_open_volume: int | None = Field(1, description="最小开仓手数")
 
     @property
     def std_symbol(self) -> str:
@@ -559,7 +559,7 @@ class ContractData(BaseModel):
 class SubscribeRequest(BaseModel):
     """订阅请求"""
 
-    symbols: List[str] = Field(..., description="合约代码列表")
+    symbols: list[str] = Field(..., description="合约代码列表")
 
 
 class OrderRequest(BaseModel):
@@ -572,9 +572,9 @@ class OrderRequest(BaseModel):
     offset: Offset = Field(default=Offset.OPEN, description="开平类型")
 
     volume: int = Field(..., ge=1, description="数量")
-    price: Optional[float] = Field(None, description="价格（None=市价）")
+    price: float | None = Field(None, description="价格（None=市价）")
     price_type: OrderType = Field(default=OrderType.LIMIT, description="订单类型")
-    slip: Optional[int] = Field(0, description="滑点")
+    slip: int | None = Field(0, description="滑点")
 
 
 class CancelRequest(BaseModel):
@@ -617,11 +617,11 @@ class AlarmData(BaseModel):
 
     account_id: str = Field(..., description="账户ID")
     alarm_type: str = Field(default="exception", description="告警类型: notification/exception")
-    indicator: Optional[str] = Field(None, description="异常指标: 1min/5min/1hour")
+    indicator: str | None = Field(None, description="异常指标: 1min/5min/1hour")
     alarm_date: str = Field(..., description="告警日期 YYYY-MM-DD")
     alarm_time: str = Field(..., description="告警时间 HH:MM:SS")
     source: str = Field(..., description="告警来源 TRADER/MANAGER/EXCEPTION_MONITOR")
     title: str = Field(..., description="告警标题")
-    detail: Optional[str] = Field(None, description="告警详情")
+    detail: str | None = Field(None, description="告警详情")
     status: str = Field(default="UNCONFIRMED", description="告警状态")
     created_at: DateTime = Field(default_factory=DateTime.now, description="创建时间")

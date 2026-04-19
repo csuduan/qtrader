@@ -13,13 +13,14 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 from xxlimited import Str
+
 from src.app_context import get_app_context
 from src.utils.config_loader import TraderConfig
 
 ctx = get_app_context()
-config:TraderConfig =ctx.get_config()
+config: TraderConfig = ctx.get_config()
 
 ctp_type = config.gateway.broker.type
 if ctp_type == "rohon":
@@ -28,7 +29,6 @@ elif ctp_type == "jees":
     from pyctp.jees import mdapi, tdapi
 else:
     from pyctp.ctp import mdapi, tdapi
-
 
 from src.models.object import (
     AccountData,
@@ -117,20 +117,20 @@ PRODUCT_CTP2VT = {
 MIN_VOLUME = 1
 
 error_msg = [
-            "拒绝",
-            "取消",
-            "不足",
-            "暂停",
-            "禁止",
-            "错误",
-            "闭市",
-            "未连接",
-            "最小单位",
-            "失败",
-            "不",
-            "超过",
-            "超限",
-            "没有",
+    "拒绝",
+    "取消",
+    "不足",
+    "暂停",
+    "禁止",
+    "错误",
+    "闭市",
+    "未连接",
+    "最小单位",
+    "失败",
+    "不",
+    "超过",
+    "超限",
+    "没有",
 ]
 
 
@@ -168,7 +168,7 @@ class CtpMdApi(mdapi.CThostFtdcMdSpi):
         self.hist_subscribed.update(gateway.subs_config.subscribe_symbols)
 
         # API 实例
-        self.api: Optional[mdapi.CThostFtdcMdApi] = None
+        self.api: mdapi.CThostFtdcMdApi | None = None
 
         # 行情地址
         broker = self.config.broker
@@ -403,7 +403,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
         self.sessionid = 0
 
         # API 实例
-        self.api: Optional[tdapi.CThostFtdcTraderApi] = None
+        self.api: tdapi.CThostFtdcTraderApi | None = None
 
         # 交易地址和认证信息
         broker = self.config.broker
@@ -418,8 +418,8 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
         self.auth = broker.auth_code or ""
 
         # 数据缓存
-        self.position_map: Dict[str, PositionData] = {}
-        self.order_map: Dict[str, OrderData] = {}
+        self.position_map: dict[str, PositionData] = {}
+        self.order_map: dict[str, OrderData] = {}
 
         # 信号量（用于同步查询）
         self.semaphore = threading.Semaphore(1)
@@ -506,7 +506,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
         if ret != 0:
             logger.error(f"CTP 交易服务器登录请求失败，错误码: {ret}")
 
-    def insert_order(self, req: OrderRequest) -> Optional[OrderData]:
+    def insert_order(self, req: OrderRequest) -> OrderData | None:
         """委托下单"""
         if not self.api or not self.connected:
             logger.error("CTP 交易接口未连接或未登录")
@@ -591,7 +591,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
         ctp_req.BrokerID = self.broker
         ctp_req.InvestorID = self.user
         if order.order_sys_id:
-            #优先使用sys_id +exchange
+            # 优先使用sys_id +exchange
             ctp_req.OrderSysID = order.order_sys_id
             ctp_req.ExchangeID = EXCHANGE_VT2CTP.get(order.exchange, "")
 
@@ -871,8 +871,11 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
                 account_id=self.gateway.account_id,
                 balance=round(pTradingAccount.Balance, 2),
                 available=round(pTradingAccount.Available, 2),
-                pre_balance=round(pTradingAccount.PreBalance , 2), 
-                static_balance=round(pTradingAccount.PreBalance+ pTradingAccount.Deposit - pTradingAccount.Withdraw, 2), 
+                pre_balance=round(pTradingAccount.PreBalance, 2),
+                static_balance=round(
+                    pTradingAccount.PreBalance + pTradingAccount.Deposit - pTradingAccount.Withdraw,
+                    2,
+                ),
                 margin=round(pTradingAccount.CurrMargin, 2),
                 risk_ratio=(
                     round(pTradingAccount.CurrMargin / pTradingAccount.Balance, 4)
@@ -1020,9 +1023,11 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
                     min_volume=pInstrument.MinLimitOrderVolume,
                     expire_date=pInstrument.ExpireDate,
                 )
-                if len(contract.symbol) <= 6 and contract.expire_date and contract.expire_date >= datetime.now().strftime(
-                    "%Y%m%d"
-                ) :
+                if (
+                    len(contract.symbol) <= 6
+                    and contract.expire_date
+                    and contract.expire_date >= datetime.now().strftime("%Y%m%d")
+                ):
                     self.gateway.add_contract(contract)
 
         if bIsLast:
@@ -1156,7 +1161,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
         temp_dir = Path.home() / ".qtrader" / "temp" / f"ctp_{subdir}"
         temp_dir.mkdir(parents=True, exist_ok=True)
         return temp_dir
-    
+
     def _save_contracts(self) -> None:
         """
         合约信息仅加载到内存，不再保存到本地数据库

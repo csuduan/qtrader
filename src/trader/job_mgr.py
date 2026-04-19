@@ -7,7 +7,6 @@ import asyncio
 import csv
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from src.app_context import get_app_context
 from src.models.po import AlarmPo as AlarmModel
@@ -169,7 +168,7 @@ class JobManager:
         """测试日志任务（每5秒执行）"""
         logger.info("这是一条测试日志 - 定时任务运行中")
 
-    async def auto_rotation(self, instruction: Optional[str] = "") -> None:
+    async def auto_rotation(self, instruction: str | None = "") -> None:
         """执行换仓操作"""
         logger.info("开始执行换仓任务")
         try:
@@ -488,6 +487,7 @@ class JobManager:
         4. 持久化策略持仓状态
         """
         from src.app_context import get_app_context
+
         logger.info("开始执行收盘处理任务")
 
         try:
@@ -502,14 +502,13 @@ class JobManager:
             strategy_manager: StrategyManager = app_context.get_strategy_manager()
             strategy_manager.settle_positions()
 
-            # 4. 持久化策略持仓状态     
+            # 4. 持久化策略持仓状态
             await self._persist_strategy_positions()
 
             logger.info("收盘处理任务完成")
 
         except Exception as e:
             logger.exception(f"收盘处理任务执行失败: {e}")
-
 
     async def _persist_strategy_positions(self) -> None:
         """

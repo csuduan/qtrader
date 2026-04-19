@@ -138,6 +138,7 @@ class WebSocketManager {
            console.log('收到连接确认消息:', message.data)
            break
          case 'account_update':
+           //console.log('收到账户更新:', message.data)
            this.onAccountUpdateCallbacks.forEach(cb => cb(message.data))
            break
          case 'position_update':
@@ -152,6 +153,13 @@ class WebSocketManager {
          case 'tick_update':
          case 'quote_update':
            this.onTickUpdateCallbacks.forEach(cb => cb(message.data))
+           break
+         case 'quote_batch_update':
+           // 批量行情推送：data.ticks 为 tick 数组，data.account_id 为账户ID
+           const batchData = message.data as { ticks?: any[], account_id?: string }
+           if (batchData.ticks) {
+             batchData.ticks.forEach(tick => this.onTickUpdateCallbacks.forEach(cb => cb(tick)))
+           }
            break
          default:
            console.warn('未知消息类型:', message.type)

@@ -4,7 +4,6 @@
 """
 
 from datetime import datetime
-from typing import Optional
 
 from sqlalchemy.orm import Session
 
@@ -18,7 +17,7 @@ logger = get_logger(__name__)
 import re
 
 
-def extract_account_id_from_message(message: str) -> Optional[str]:
+def extract_account_id_from_message(message: str) -> str | None:
     """
     从日志消息中提取账户ID
 
@@ -32,10 +31,10 @@ def extract_account_id_from_message(message: str) -> Optional[str]:
 
     # 匹配常见的账户ID模式
     patterns = [
-        r'账户\[?([^\]]+)\]?',  # 账户[DQ] 或 账户DQ
-        r'account_id[:=]\s*(\w+)',  # account_id: DQ 或 account_id=DQ
-        r'trader[-_](\w+)',  # trader-DQ 或 trader_DQ
-        r'account[:=]\s*(\w+)',  # account: DQ
+        r"账户\[?([^\]]+)\]?",  # 账户[DQ] 或 账户DQ
+        r"account_id[:=]\s*(\w+)",  # account_id: DQ 或 account_id=DQ
+        r"trader[-_](\w+)",  # trader-DQ 或 trader_DQ
+        r"account[:=]\s*(\w+)",  # account: DQ
     ]
 
     for pattern in patterns:
@@ -48,9 +47,9 @@ def extract_account_id_from_message(message: str) -> Optional[str]:
 
 def create_alarm_from_log(
     log_message: str,
-    module: Optional[str] = None,
-    function: Optional[str] = None,
-    extra: Optional[dict] = None
+    module: str | None = None,
+    function: str | None = None,
+    extra: dict | None = None,
 ) -> bool:
     """
     从日志记录创建告警
@@ -77,7 +76,7 @@ def create_alarm_from_log(
         # 尝试从 extra 或消息中提取账户ID
         account_id = None
         if extra and isinstance(extra, dict):
-            account_id = extra.get('account_id')
+            account_id = extra.get("account_id")
         if not account_id:
             account_id = extract_account_id_from_message(log_message)
         if not account_id:

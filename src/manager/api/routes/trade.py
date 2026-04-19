@@ -3,7 +3,6 @@
 """
 
 from datetime import datetime
-from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query
 
@@ -20,9 +19,9 @@ router = APIRouter(prefix="/api/trade", tags=["成交"])
 
 
 def _query_trades_from_db(
-    account_id: Optional[str],
+    account_id: str | None,
     date: str,
-) -> List[dict]:
+) -> list[dict]:
     """从PG查询历史成交记录
 
     Args:
@@ -43,7 +42,9 @@ def _query_trades_from_db(
     try:
         target_date = datetime.strptime(date, "%Y-%m-%d")
         start_ts = int(target_date.timestamp())
-        end_ts = int(datetime(target_date.year, target_date.month, target_date.day, 23, 59, 59).timestamp())
+        end_ts = int(
+            datetime(target_date.year, target_date.month, target_date.day, 23, 59, 59).timestamp()
+        )
     except ValueError:
         return []
 
@@ -59,25 +60,31 @@ def _query_trades_from_db(
 
         result = []
         for t in trade_pos:
-            result.append({
-                "account_id": t.account_id,
-                "trade_id": t.trade_id,
-                "order_id": t.order_id or "",
-                "symbol": t.symbol,
-                "direction": t.direction,
-                "offset": t.offset,
-                "price": float(t.price) if t.price else 0,
-                "volume": t.volume or 0,
-                "trade_date_time": datetime.fromtimestamp(t.trade_date_time) if t.trade_date_time else datetime.now(),
-                "created_at": t.created_at or datetime.now(),
-            })
+            result.append(
+                {
+                    "account_id": t.account_id,
+                    "trade_id": t.trade_id,
+                    "order_id": t.order_id or "",
+                    "symbol": t.symbol,
+                    "direction": t.direction,
+                    "offset": t.offset,
+                    "price": float(t.price) if t.price else 0,
+                    "volume": t.volume or 0,
+                    "trade_date_time": (
+                        datetime.fromtimestamp(t.trade_date_time)
+                        if t.trade_date_time
+                        else datetime.now()
+                    ),
+                    "created_at": t.created_at or datetime.now(),
+                }
+            )
         return result
 
 
 @router.get("")
 async def get_trades(
-    account_id: Optional[str] = Query(None, description="账户ID（多账号模式）"),
-    date: Optional[str] = Query(None, description="查询日期（YYYY-MM-DD格式），默认为今日"),
+    account_id: str | None = Query(None, description="账户ID（多账号模式）"),
+    date: str | None = Query(None, description="查询日期（YYYY-MM-DD格式），默认为今日"),
     trading_manager: TradingManager = Depends(get_trading_manager),
 ):
     """
@@ -92,7 +99,7 @@ async def get_trades(
 
         if query_date == today:
             # 当天：从内存缓存查询
-            trades_list: List[TradeData] = await trading_manager.get_trades(account_id=account_id)
+            trades_list: list[TradeData] = await trading_manager.get_trades(account_id=account_id)
             trades_list.sort(key=lambda x: x.trade_time or 0, reverse=True)
 
             data = []
@@ -117,12 +124,16 @@ async def get_trades(
                             else str(trade.direction)
                         ),
                         offset=(
-                            trade.offset.value if hasattr(trade.offset, "value") else str(trade.offset)
+                            trade.offset.value
+                            if hasattr(trade.offset, "value")
+                            else str(trade.offset)
                         ),
                         price=float(trade.price),
                         volume=trade.volume,
                         trade_date_time=(
-                            datetime.fromtimestamp(trade_time_ts) if trade_time_ts else datetime.now()
+                            datetime.fromtimestamp(trade_time_ts)
+                            if trade_time_ts
+                            else datetime.now()
                         ),
                         created_at=datetime.now(),
                     )
@@ -156,7 +167,7 @@ async def get_trades(
 @router.get("/order/{order_id}")
 async def get_trades_by_order(
     order_id: str,
-    account_id: Optional[str] = Query(None, description="账户ID（多账号模式）"),
+    account_id: str | None = Query(None, description="账户ID（多账号模式）"),
     trading_manager: TradingManager = Depends(get_trading_manager),
 ):
     """

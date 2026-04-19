@@ -3,14 +3,13 @@
 统一拦截所有请求并验证JWT Token
 """
 
-from typing import Optional, List
 from fastapi import Request, Response
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
-from src.utils.logger import get_logger
 from src.manager.api.routes.auth import verify_token
+from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 security = HTTPBearer(auto_error=False)
@@ -25,17 +24,17 @@ class AuthMiddleware(BaseHTTPMiddleware):
     """
 
     # 公开接口白名单（支持完整路径或前缀匹配）
-    PUBLIC_PATHS: List[str] = [
-        "/",                    # 根路径
-        "/docs",               # API文档
-        "/openapi.json",       # OpenAPI规范
-        "/api/auth/login",     # 登录接口
+    PUBLIC_PATHS: list[str] = [
+        "/",  # 根路径
+        "/docs",  # API文档
+        "/openapi.json",  # OpenAPI规范
+        "/api/auth/login",  # 登录接口
         "/api/auth/register",  # 注册接口（如有）
-        "/health",             # 健康检查
+        "/health",  # 健康检查
     ]
 
     # 公开路径前缀（以这些前缀开头的路径都免鉴权）
-    PUBLIC_PREFIXES: List[str] = [
+    PUBLIC_PREFIXES: list[str] = [
         "/docs/",
         "/redoc",
         "/static/",
@@ -99,7 +98,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 content='{"code": 401, "message": "缺少认证凭证", "data": null}',
                 status_code=401,
                 headers={"WWW-Authenticate": "Bearer"},
-                media_type="application/json"
+                media_type="application/json",
             )
 
         # 解析Bearer Token
@@ -111,7 +110,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     content='{"code": 401, "message": "无效的认证格式，请使用Bearer Token", "data": null}',
                     status_code=401,
                     headers={"WWW-Authenticate": "Bearer"},
-                    media_type="application/json"
+                    media_type="application/json",
                 )
 
             # 验证Token
@@ -123,14 +122,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     content='{"code": 401, "message": "认证凭证无效或已过期", "data": null}',
                     status_code=401,
                     headers={"WWW-Authenticate": "Bearer"},
-                    media_type="application/json"
+                    media_type="application/json",
                 )
 
             # Token有效，将用户信息存入请求状态
-            request.state.user = {
-                "user_id": payload.get("sub"),
-                "role": payload.get("role")
-            }
+            request.state.user = {"user_id": payload.get("sub"), "role": payload.get("role")}
 
             logger.debug(f"鉴权成功: {payload.get('sub')} - {path}")
 
@@ -140,7 +136,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 content='{"code": 401, "message": "认证处理失败", "data": null}',
                 status_code=401,
                 headers={"WWW-Authenticate": "Bearer"},
-                media_type="application/json"
+                media_type="application/json",
             )
 
         # 继续处理请求

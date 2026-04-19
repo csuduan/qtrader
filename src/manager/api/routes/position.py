@@ -4,7 +4,6 @@
 
 import math
 from datetime import datetime
-from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query
 
@@ -20,7 +19,7 @@ router = APIRouter(prefix="/api/position", tags=["持仓"])
 
 @router.get("")
 async def get_positions(
-    account_id: Optional[str] = Query(None, description="账户ID（多账号模式）"),
+    account_id: str | None = Query(None, description="账户ID（多账号模式）"),
     trading_manager=Depends(get_trading_manager),
 ):
     """
@@ -80,7 +79,7 @@ async def get_positions(
 @router.get("/{symbol}")
 async def get_position_by_symbol(
     symbol: str,
-    account_id: Optional[str] = Query(None, description="账户ID（多账号模式）"),
+    account_id: str | None = Query(None, description="账户ID（多账号模式）"),
     trading_manager=Depends(get_trading_manager),
 ):
     """

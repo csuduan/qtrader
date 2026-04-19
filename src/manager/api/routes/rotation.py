@@ -4,7 +4,6 @@
 """
 
 from datetime import datetime
-from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel
@@ -25,30 +24,30 @@ class RotationInstructionResponse(BaseModel):
     """换仓指令响应"""
 
     id: int
-    account_id: Optional[str] = None
-    strategy_id: Optional[str] = None
-    symbol: Optional[str] = None
-    exchange_id: Optional[str] = None
-    offset: Optional[str] = None
-    direction: Optional[str] = None
-    volume: Optional[int] = 0
-    filled_volume: Optional[int] = 0
-    price: Optional[float] = 0
-    order_time: Optional[str] = None
-    trading_date: Optional[str] = None
+    account_id: str | None = None
+    strategy_id: str | None = None
+    symbol: str | None = None
+    exchange_id: str | None = None
+    offset: str | None = None
+    direction: str | None = None
+    volume: int | None = 0
+    filled_volume: int | None = 0
+    price: float | None = 0
+    order_time: str | None = None
+    trading_date: str | None = None
     enabled: bool
-    status: Optional[str] = None
+    status: str | None = None
     attempt_count: int = 0
     remaining_attempts: int = 0
     remaining_volume: int = 0
-    current_order_id: Optional[str] = None
-    order_placed_time: Optional[datetime] = None
-    last_attempt_time: Optional[datetime] = None
-    error_message: Optional[str] = None
-    source: Optional[str] = None
+    current_order_id: str | None = None
+    order_placed_time: datetime | None = None
+    last_attempt_time: datetime | None = None
+    error_message: str | None = None
+    source: str | None = None
     is_deleted: bool = False
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     class Config:
         from_attributes = True
@@ -65,29 +64,29 @@ class RotationInstructionCreate(BaseModel):
     direction: str
     volume: int
     price: float = 0
-    order_time: Optional[str] = None
-    trading_date: Optional[str] = None
+    order_time: str | None = None
+    trading_date: str | None = None
     enabled: bool = True
 
 
 class RotationInstructionUpdate(BaseModel):
     """更新换仓指令请求"""
 
-    enabled: Optional[bool] = None
-    status: Optional[str] = None
-    filled_volume: Optional[int] = None
-    direction: Optional[str] = None
-    offset: Optional[str] = None
-    volume: Optional[int] = None
+    enabled: bool | None = None
+    status: str | None = None
+    filled_volume: int | None = None
+    direction: str | None = None
+    offset: str | None = None
+    volume: int | None = None
 
 
 def _query_rotation_from_db(
     account_id: str,
     limit: int,
     offset: int,
-    status: Optional[str],
-    enabled: Optional[bool],
-    trading_date: Optional[str],
+    status: str | None,
+    enabled: bool | None,
+    trading_date: str | None,
 ):
     """从数据库查询换仓指令列表"""
     db = get_database()
@@ -97,7 +96,7 @@ def _query_rotation_from_db(
     with db.get_session() as session:
         query = session.query(RotationInstructionPo).filter(
             RotationInstructionPo.account_id == account_id,
-            RotationInstructionPo.is_deleted.is_(False)
+            RotationInstructionPo.is_deleted.is_(False),
         )
 
         if status:
@@ -112,9 +111,12 @@ def _query_rotation_from_db(
 
         total = query.count()
 
-        instructions = query.order_by(
-            RotationInstructionPo.created_at.desc()
-        ).offset(offset).limit(limit).all()
+        instructions = (
+            query.order_by(RotationInstructionPo.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
 
         data = [
             RotationInstructionResponse(
@@ -122,7 +124,9 @@ def _query_rotation_from_db(
                 account_id=inst.account_id,
                 strategy_id=inst.strategy_id,
                 symbol=inst.symbol,
-                exchange_id=inst.symbol.split(".")[-1] if inst.symbol and "." in inst.symbol else None,
+                exchange_id=(
+                    inst.symbol.split(".")[-1] if inst.symbol and "." in inst.symbol else None
+                ),
                 offset=inst.offset,
                 direction=inst.direction,
                 volume=inst.volume,
@@ -161,9 +165,9 @@ async def get_rotation_instructions(
     account_id: str = Query(..., description="账户ID"),
     limit: int = Query(100, description="返回记录数量"),
     offset: int = Query(0, description="偏移量"),
-    status: Optional[str] = Query(None, description="状态筛选"),
-    enabled: Optional[bool] = Query(None, description="是否启用筛选"),
-    trading_date: Optional[str] = Query(None, description="交易日筛选"),
+    status: str | None = Query(None, description="状态筛选"),
+    enabled: bool | None = Query(None, description="是否启用筛选"),
+    trading_date: str | None = Query(None, description="交易日筛选"),
     trading_manager: TradingManager = Depends(get_trading_manager),
 ):
     """
@@ -202,7 +206,7 @@ async def get_rotation_instructions(
                 instructions = [i for i in instructions if i.get("enabled") == enabled]
 
             total = len(instructions)
-            paginated = instructions[offset:offset + limit]
+            paginated = instructions[offset : offset + limit]
 
             # 补充缺失字段以兼容前端
             for item in paginated:
@@ -249,11 +253,15 @@ async def get_rotation_instruction(
             return error_response(code=500, message="数据库未初始化")
 
         with db.get_session() as session:
-            inst = session.query(RotationInstructionPo).filter(
-                RotationInstructionPo.id == instruction_id,
-                RotationInstructionPo.account_id == account_id,
-                RotationInstructionPo.is_deleted.is_(False)
-            ).first()
+            inst = (
+                session.query(RotationInstructionPo)
+                .filter(
+                    RotationInstructionPo.id == instruction_id,
+                    RotationInstructionPo.account_id == account_id,
+                    RotationInstructionPo.is_deleted.is_(False),
+                )
+                .first()
+            )
 
             if not inst:
                 return error_response(code=404, message="换仓指令不存在")
@@ -263,7 +271,9 @@ async def get_rotation_instruction(
                 account_id=inst.account_id,
                 strategy_id=inst.strategy_id,
                 symbol=inst.symbol,
-                exchange_id=inst.symbol.split(".")[-1] if inst.symbol and "." in inst.symbol else None,
+                exchange_id=(
+                    inst.symbol.split(".")[-1] if inst.symbol and "." in inst.symbol else None
+                ),
                 offset=inst.offset,
                 direction=inst.direction,
                 volume=inst.volume,
@@ -361,7 +371,7 @@ async def delete_rotation_instruction(
 
 @router.post("/clear")
 async def clear_rotation_instructions(
-    account_id: Optional[str] = Query(None, description="账户ID（多账号模式）"),
+    account_id: str | None = Query(None, description="账户ID（多账号模式）"),
     trading_manager: TradingManager = Depends(get_trading_manager),
 ):
     """
@@ -416,7 +426,7 @@ async def import_rotation_instructions(
 class BatchRequest(BaseModel):
     """批量操作请求"""
 
-    ids: List[int]
+    ids: list[int]
 
 
 @router.post("/batch/execute")

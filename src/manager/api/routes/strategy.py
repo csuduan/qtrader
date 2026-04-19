@@ -5,7 +5,6 @@
 """
 
 import asyncio
-from typing import List, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
@@ -53,7 +52,7 @@ async def list_strategies(
         account_id: 账户ID
 
     Returns:
-        List[StrategyRes]: 策略状态列表
+        list[StrategyRes]: 策略状态列表
     """
     try:
         strategies = await trading_manager.list_strategies(account_id)
@@ -302,7 +301,7 @@ async def update_strategy(
 @router.post("/{strategy_id}/update-signal")
 async def update_strategy_signal(
     strategy_id: str,
-    signal: Optional[dict] = Body(None, description="信号数据，不传或传空表示清除信号"),
+    signal: dict | None = Body(None, description="信号数据，不传或传空表示清除信号"),
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
 ):
@@ -630,7 +629,7 @@ async def init_strategy(
 async def get_strategy_order_cmds(
     strategy_id: str,
     account_id: str = Query(..., description="账户ID"),
-    status: Optional[str] = Query(None, description="状态过滤: active/finished"),
+    status: str | None = Query(None, description="状态过滤: active/finished"),
     trading_manager: TradingManager = Depends(get_trading_manager),
 ):
     """获取策略的报单指令历史"""
@@ -750,7 +749,10 @@ async def send_strategy_order_cmd(
 @router.post("/{strategy_id}/update-position-detail")
 async def update_strategy_position_detail(
     strategy_id: str,
-    position: dict = Body(..., description="持仓详情数据 {symbol, pos_long_td, pos_long_yd, pos_short_td, pos_short_yd, hold_price_long, hold_price_short, close_profit}"),
+    position: dict = Body(
+        ...,
+        description="持仓详情数据 {symbol, pos_long_td, pos_long_yd, pos_short_td, pos_short_yd, hold_price_long, hold_price_short, close_profit}",
+    ),
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
 ):

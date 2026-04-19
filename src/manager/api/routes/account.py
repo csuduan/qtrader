@@ -2,8 +2,6 @@
 账户相关API路由
 """
 
-from typing import List, Optional
-
 from fastapi import APIRouter, Body, Depends, Query
 
 from src.app_context import get_app_context
@@ -21,7 +19,7 @@ router = APIRouter(prefix="/api/account", tags=["账户"])
 
 @router.get("")
 async def get_account_info(
-    account_id: Optional[str] = Query(None, description="账户ID，不传则返回第一个账户"),
+    account_id: str | None = Query(None, description="账户ID，不传则返回第一个账户"),
     trading_manager: TradingManager = Depends(get_trading_manager),
 ):
     """
@@ -336,7 +334,7 @@ async def resume_account_trading(
 
 @router.post("/sync")
 async def sync_all_accounts(
-    account_id: Optional[str] = Query(None, description="账户ID，不传则同步所有账户"),
+    account_id: str | None = Query(None, description="账户ID，不传则同步所有账户"),
     trading_manager: TradingManager = Depends(get_trading_manager),
 ):
     """

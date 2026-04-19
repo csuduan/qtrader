@@ -14,7 +14,7 @@ import uuid
 from collections import deque
 from functools import wraps
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable
 
 from src.utils.ipc.protocol import (
     MessageBody,
@@ -149,7 +149,7 @@ class SocketClientConnection:
             self.connected = False
             return False
 
-    async def receive_message(self) -> Optional[MessageBody]:
+    async def receive_message(self) -> MessageBody | None:
         """
         接收消息
 
@@ -198,16 +198,16 @@ class SocketServer:
     ):
         self.socket_path = socket_path
         self.account_id = account_id
-        self.server: Optional[asyncio.Server] = None
-        self._clients: Dict[str, SocketClientConnection] = {}
+        self.server: asyncio.Server | None = None
+        self._clients: dict[str, SocketClientConnection] = {}
         self._clients_lock = asyncio.Lock()
-        self._req_handlers: Dict[str, Callable] = {}
+        self._req_handlers: dict[str, Callable] = {}
         self._running = False
 
         # 健康检查
         self._enable_health_check = enable_health_check
         self._health_check_interval = health_check_interval
-        self._health_check_task: Optional[asyncio.Task] = None
+        self._health_check_task: asyncio.Task | None = None
 
         # 推送缓冲队列：Manager 断开时缓存推送消息，重连后自动发送
         self._push_queue: deque[MessageBody] = deque(maxlen=self.PUSH_QUEUE_MAX_SIZE)
@@ -294,7 +294,6 @@ class SocketServer:
                 pass
             self._health_check_task = None
             logger.info("健康检查任务已停止")
-
 
         # 先关闭所有客户端连接（关键！否则 wait_closed 会阻塞在 handler 上）
         async with self._clients_lock:
@@ -449,7 +448,7 @@ class SocketServer:
                     break
 
                 # 检查所有连接的心跳状态
-                dead_connections: List[str] = []
+                dead_connections: list[str] = []
                 current_time = asyncio.get_event_loop().time()
 
                 async with self._clients_lock:
@@ -589,7 +588,7 @@ class SocketServer:
         """获取当前连接数"""
         return sum(1 for conn in self._clients.values() if conn.is_connected())
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """获取统计信息"""
         return {
             **self._stats,

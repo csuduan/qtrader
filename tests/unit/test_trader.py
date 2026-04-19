@@ -459,7 +459,6 @@ class TestEventRegistration:
 
             expected_calls = [
                 call(EventTypes.ACCOUNT_UPDATE, trader_instance._on_account_update),
-                call(EventTypes.ACCOUNT_STATUS, trader_instance._on_account_update),
                 call(EventTypes.ORDER_UPDATE, trader_instance._on_order_update),
                 call(EventTypes.TRADE_UPDATE, trader_instance._on_trade_update),
                 call(EventTypes.POSITION_UPDATE, trader_instance._on_position_update),

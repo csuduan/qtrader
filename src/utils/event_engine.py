@@ -19,8 +19,6 @@ class EventTypes:
     ACCOUNT_UPDATE = "e:account.update"
     # 账户就绪通知事件
     ACCOUNT_READY = "e:account.ready"
-    # 账户状态事件
-    ACCOUNT_STATUS = "e:account.status"
     # 持仓事件
     POSITION_UPDATE = "e:position.update"
     # 委托单事件
@@ -29,6 +27,7 @@ class EventTypes:
     TRADE_UPDATE = "e:trade.created"
     # 行情事件
     TICK_UPDATE = "e:tick.update"
+    TICK_BATCH_UPDATE = "e:tick.batch_update"
     KLINE_UPDATE = "e:kline.update"
     # 合约更新事件
     CONTRACT_UPDATE = "e:contract.update"

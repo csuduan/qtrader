@@ -10,7 +10,6 @@
 """
 
 from datetime import datetime
-from typing import Dict, List, Optional
 
 from src.utils.logger import get_logger
 from src.utils.shared_database import SharedDatabase
@@ -41,16 +40,16 @@ class ContractInfo:
         self,
         symbol: str,
         exchange_id: str,
-        instrument_name: Optional[str] = None,
+        instrument_name: str | None = None,
         product_type: str = "FUTURES",
         volume_multiple: int = 1,
         price_tick: float = 0.01,
         min_volume: int = 1,
-        option_strike: Optional[float] = None,
-        option_underlying: Optional[str] = None,
-        option_type: Optional[str] = None,
-        update_date: Optional[str] = None,
-        data_source: Optional[str] = None,
+        option_strike: float | None = None,
+        option_underlying: str | None = None,
+        option_type: str | None = None,
+        update_date: str | None = None,
+        data_source: str | None = None,
         is_active: bool = True,
     ):
         self.symbol = symbol
@@ -104,16 +103,16 @@ class PublicDataService:
         """
         self.shared_db = shared_db
         # 内存缓存：{symbol: ContractInfo}
-        self._contracts: Dict[str, ContractInfo] = {}
+        self._contracts: dict[str, ContractInfo] = {}
         # 按数据源分组：{data_source: {symbol: ContractInfo}}
-        self._contracts_by_source: Dict[str, Dict[str, ContractInfo]] = {}
+        self._contracts_by_source: dict[str, dict[str, ContractInfo]] = {}
         # 最近更新时间
-        self._last_updated: Optional[datetime] = None
+        self._last_updated: datetime | None = None
         logger.info("PublicDataService 初始化完成")
 
     # ==================== 合约数据写入 ====================
 
-    def upsert_contracts(self, contracts: List[dict], data_source: str) -> int:
+    def upsert_contracts(self, contracts: list[dict], data_source: str) -> int:
         """
         批量写入/更新合约信息（来自某个数据源）
 
@@ -155,15 +154,15 @@ class PublicDataService:
                     existing.instrument_name = contract_dict.get(
                         "instrument_name", existing.instrument_name
                     )
-                    existing.product_type = contract_dict.get(
-                        "product_type", existing.product_type
-                    )
+                    existing.product_type = contract_dict.get("product_type", existing.product_type)
                     existing.volume_multiple = contract_dict.get(
                         "volume_multiple", existing.volume_multiple
                     )
                     existing.price_tick = contract_dict.get("price_tick", existing.price_tick)
                     existing.min_volume = contract_dict.get("min_volume", existing.min_volume)
-                    existing.min_open_volume = contract_dict.get("min_open_volume", existing.min_open_volume)
+                    existing.min_open_volume = contract_dict.get(
+                        "min_open_volume", existing.min_open_volume
+                    )
                     existing.option_strike = contract_dict.get("option_strike")
                     existing.option_underlying = contract_dict.get("option_underlying")
                     existing.option_type = contract_dict.get("option_type")
@@ -220,11 +219,11 @@ class PublicDataService:
 
     def get_contracts(
         self,
-        exchange_id: Optional[str] = None,
-        product_type: Optional[str] = None,
-        data_source: Optional[str] = None,
+        exchange_id: str | None = None,
+        product_type: str | None = None,
+        data_source: str | None = None,
         active_only: bool = False,
-    ) -> List[ContractInfo]:
+    ) -> list[ContractInfo]:
         """
         获取合约信息列表（从内存缓存）
 
@@ -250,7 +249,7 @@ class PublicDataService:
 
         return contracts
 
-    def get_contracts_for_push(self, data_source: Optional[str] = None) -> List[dict]:
+    def get_contracts_for_push(self, data_source: str | None = None) -> list[dict]:
         """
         获取用于推送给Trader的合约数据
 
@@ -263,7 +262,7 @@ class PublicDataService:
         contracts = self.get_contracts(data_source=data_source)
         return [c.to_dict() for c in contracts]
 
-    def load_from_database(self, date_filter: Optional[str] = None) -> int:
+    def load_from_database(self, date_filter: str | None = None) -> int:
         """
         从共享数据库加载合约信息到内存缓存
 
@@ -320,7 +319,7 @@ class PublicDataService:
         return len(self._contracts)
 
     @property
-    def last_updated(self) -> Optional[datetime]:
+    def last_updated(self) -> datetime | None:
         """返回最近更新时间"""
         return self._last_updated
 

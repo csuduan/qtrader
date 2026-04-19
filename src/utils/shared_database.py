@@ -24,8 +24,7 @@ _shared_db: Optional["SharedDatabase"] = None
 class SharedDatabase:
     """PostgreSQL 共享数据库管理类"""
 
-    def __init__(self, db_url: str, echo: bool = False,
-                 pool_size: int = 5, max_overflow: int = 10):
+    def __init__(self, db_url: str, echo: bool = False, pool_size: int = 5, max_overflow: int = 10):
         """
         初始化共享数据库连接
 
@@ -84,8 +83,9 @@ class SharedDatabase:
         logger.info("共享数据库连接已关闭")
 
 
-def init_shared_database(db_url: str, echo: bool = False,
-                         pool_size: int = 5, max_overflow: int = 10) -> "SharedDatabase":
+def init_shared_database(
+    db_url: str, echo: bool = False, pool_size: int = 5, max_overflow: int = 10
+) -> "SharedDatabase":
     """
     初始化共享数据库
 

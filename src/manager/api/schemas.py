@@ -4,7 +4,7 @@ API数据模型定义
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -13,9 +13,9 @@ class AccountRes(BaseModel):
     """账户信息响应"""
 
     account_id: str
-    name: Optional[str] = None
-    broker_type: Optional[str] = None
-    broker_name: Optional[str] = None
+    name: str | None = None
+    broker_type: str | None = None
+    broker_name: str | None = None
     currency: str = "CNY"
     balance: float
     pre_balance: float
@@ -27,9 +27,9 @@ class AccountRes(BaseModel):
     today_profit: float
     risk_ratio: float
     updated_at: datetime
-    user_id: Optional[str] = None
+    user_id: str | None = None
     risk_status: dict = {}
-    status: Optional[str] = None  # Trader状态: stopped, connecting, connected
+    status: str | None = None  # Trader状态: stopped, connecting, connected
     trade_paused: bool = False  # 是否暂停交易
     md_connected: bool = False  # 行情连接状态
     td_connected: bool = False  # 交易连接状态
@@ -43,23 +43,23 @@ class PositionRes(BaseModel):
 
     id: int
     account_id: str
-    exchange_id: Optional[str] = None
-    symbol: Optional[str] = None
+    exchange_id: str | None = None
+    symbol: str | None = None
     pos_long: int
     pos_short: int
-    pos_long_yd: Optional[int] = None
-    pos_short_yd: Optional[int] = None
-    pos_long_td: Optional[int] = None
-    pos_short_td: Optional[int] = None
-    hold_price_long: Optional[float] = None
-    hold_price_short: Optional[float] = None
-    hold_profit_long: Optional[float] = None
-    hold_profit_short: Optional[float] = None
-    close_profit_long: Optional[float] = None
-    close_profit_short: Optional[float] = None
-    margin_long: Optional[float] = None
-    margin_short: Optional[float] = None
-    updated_at: Optional[datetime] = None
+    pos_long_yd: int | None = None
+    pos_short_yd: int | None = None
+    pos_long_td: int | None = None
+    pos_short_td: int | None = None
+    hold_price_long: float | None = None
+    hold_price_short: float | None = None
+    hold_profit_long: float | None = None
+    hold_profit_short: float | None = None
+    close_profit_long: float | None = None
+    close_profit_short: float | None = None
+    margin_long: float | None = None
+    margin_short: float | None = None
+    updated_at: datetime | None = None
 
     class Config:
         from_attributes = True
@@ -71,14 +71,14 @@ class TradeRes(BaseModel):
     id: int
     account_id: str
     trade_id: str
-    order_id: Optional[str] = None
+    order_id: str | None = None
     symbol: str
     direction: str
     offset: str
     price: float
     volume: int
     trade_date_time: datetime
-    order_price: Optional[float] = None  # 报单价格（用于计算滑点）
+    order_price: float | None = None  # 报单价格（用于计算滑点）
     created_at: datetime
 
     class Config:
@@ -91,16 +91,16 @@ class OrderRes(BaseModel):
     id: int
     account_id: str
     order_id: str
-    exchange_order_id: Optional[str] = None
+    exchange_order_id: str | None = None
     symbol: str
     direction: str
     offset: str
     volume_orign: int
     volume_left: int
-    limit_price: Optional[float] = None
+    limit_price: float | None = None
     price_type: str
     status: str
-    last_msg: Optional[str] = None
+    last_msg: str | None = None
     insert_date_time: datetime
 
     class Config:
@@ -127,7 +127,7 @@ class ManualOrderReq(BaseModel):
     direction: str = Field(..., description="买卖方向: BUY/SELL")
     offset: str = Field(..., description="开平标志: OPEN/CLOSE/CLOSETODAY")
     volume: int = Field(..., gt=0, description="手数，必须大于0")
-    price: Optional[float] = Field(0, description="价格")
+    price: float | None = Field(0, description="价格")
 
 
 class SystemStatusRes(BaseModel):
@@ -143,8 +143,8 @@ class SystemStatusRes(BaseModel):
 class ConnectReq(BaseModel):
     """连接请求"""
 
-    username: Optional[str] = None
-    password: Optional[str] = None
+    username: str | None = None
+    password: str | None = None
 
 
 class Message(BaseModel):
@@ -161,12 +161,12 @@ class AlarmRes(BaseModel):
     id: int
     account_id: str
     alarm_type: str = "exception"
-    indicator: Optional[str] = None
+    indicator: str | None = None
     alarm_date: str
     alarm_time: str
     source: str
     title: str
-    detail: Optional[str] = None
+    detail: str | None = None
     status: str
     created_at: datetime
 
@@ -238,14 +238,14 @@ class StrategyRes(BaseModel):
     # 运行时实际生效的合约代码（优先从params取，否则从config取）
     symbol: str = ""
     config: dict | None = None
-    base_params: List = []  # 基础参数定义
-    ext_params: List = []  # 扩展参数定义
+    base_params: list = []  # 基础参数定义
+    ext_params: list = []  # 扩展参数定义
     # 信号信息（从策略的get_signal()获取）
     signal: dict | None = None
     pos_long: int = 0  # 总多头持仓量
     pos_short: int = 0  # 总空头持仓量
     # 多合约持仓详情（新增）
-    positions: List[StrategyPositionRes] = []  # 所有合约持仓
+    positions: list[StrategyPositionRes] = []  # 所有合约持仓
     trading_status: str | None = None
     # 时间戳
     updated_at: datetime = Field(default_factory=datetime.now)
@@ -295,7 +295,7 @@ class StrategyUpdateReq(BaseModel):
 class StrategyBatchOpReq(BaseModel):
     """策略批量操作请求"""
 
-    strategy_ids: List[str]  # 要操作的策略ID列表
+    strategy_ids: list[str]  # 要操作的策略ID列表
     operation: str  # 操作类型: start, stop, restart
 
 
@@ -304,11 +304,11 @@ class StrategyParamsRes(BaseModel):
 
     strategy_id: str
     # 参数文件（默认显示）
-    params_file: Optional[str] = None
+    params_file: str | None = None
     # 详细参数（悬浮显示）
     params: dict = {}
     # 关键参数摘要（用于快速展示）
-    summary: Dict[str, Any] = {}
+    summary: dict[str, Any] = {}
 
     model_config = {"populate_by_name": True}
 
@@ -328,7 +328,7 @@ class StrategyStatusRes(BaseModel):
     trade_count: int = 0
     total_pnl: float = 0.0
     # 时间戳
-    last_trade_date: Optional[str] = None
+    last_trade_date: str | None = None
     updated_at: datetime = Field(default_factory=datetime.now)
 
 
@@ -342,11 +342,11 @@ class TraderStatusRes(BaseModel):
     connected: bool
     connecting: bool
     created_process: bool
-    pid: Optional[int] = None
-    start_time: Optional[datetime] = None
-    last_heartbeat: Optional[datetime] = None
+    pid: int | None = None
+    start_time: datetime | None = None
+    last_heartbeat: datetime | None = None
     restart_count: int = 0
-    socket_path: Optional[str] = None
+    socket_path: str | None = None
 
 
 class ResourcePoint(BaseModel):
@@ -380,7 +380,7 @@ class ResourceSnapshot(BaseModel):
 class ResourceHistory(BaseModel):
     """资源监控历史数据"""
 
-    points: List[ResourcePoint]
+    points: list[ResourcePoint]
     interval_seconds: int = 5
 
 
@@ -392,13 +392,13 @@ class OrderCmdRes(BaseModel):
     symbol: str
     filled_volume: int
     volume: int
-    direction: Optional[str] = None
-    offset: Optional[str] = None
-    limit_price: Optional[float] = None
-    source: Optional[str] = None
-    started_at: Optional[datetime] = None
-    finished_at: Optional[datetime] = None
+    direction: str | None = None
+    offset: str | None = None
+    limit_price: float | None = None
+    source: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
     total_orders: int = 0
-    finish_reason: Optional[str] = None
+    finish_reason: str | None = None
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)

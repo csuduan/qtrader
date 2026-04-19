@@ -14,7 +14,7 @@ import asyncio
 import threading
 import time
 from datetime import datetime
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import TYPE_CHECKING
 
 from src.models.object import (
     Direction,
@@ -57,13 +57,13 @@ class OrderCmdExecutor:
         self._trading_engine = trading_engine
 
         # OrderCmd 注册表
-        self._pending_cmds: Dict[str, "OrderCmd"] = {}
-        self._history_cmds: Dict[str, "OrderCmd"] = {}
+        self._pending_cmds: dict[str, "OrderCmd"] = {}
+        self._history_cmds: dict[str, "OrderCmd"] = {}
 
         # 控制参数
         self._running = False
-        self._task: Optional[asyncio.Task] = None
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._task: asyncio.Task | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
 
         # 统计
         self._trig_count = 0
@@ -235,7 +235,7 @@ class OrderCmdExecutor:
                 await self._maybe_log_stats()
             except Exception as e:
                 self.logger.exception(f"执行循环异常: {e}")
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(0.1)
         self.logger.info("执行器主循环退出")
 
     def _process_cmd(self, cmd: "OrderCmd") -> None:

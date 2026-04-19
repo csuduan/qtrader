@@ -11,16 +11,16 @@ import sys
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, cast
+from typing import Any, Callable, cast
 
 from src.app_context import AppContext, get_app_context
+from src.manager.service.alarm_service import AlarmService
 from src.models.object import AccountData, OrderData, PositionData, TickData, TradeData, TraderState
 from src.utils.config_loader import AccountConfig, AppConfig, get_config_loader
 from src.utils.event_engine import EventTypes
 from src.utils.ipc import SocketClient
 from src.utils.logger import get_logger
 from src.utils.scheduler import Job
-from src.manager.service.alarm_service import AlarmService
 
 logger = get_logger(__name__)
 ctx: AppContext = get_app_context()
@@ -59,7 +59,7 @@ class TraderProxy:
         # ==================== 状态管理 ====================
         self._state: TraderState = TraderState.STOPPED
         self._state_lock = asyncio.Lock()
-        self.start_time: Optional[datetime] = None
+        self.start_time: datetime | None = None
         self.restart_count = 0
         self.last_heartbeat = datetime.now()
         self._manual_stop: bool = False  # 是否为手动停止（手动停止不触发故障告警）
@@ -74,25 +74,25 @@ class TraderProxy:
         self.pid_file = str(socket_dir_abs / f"qtrader_{self.account_id}.pid")
 
         # ==================== 连接管理 ====================
-        self.socket_client: Optional[SocketClient] = None
-        self._connect_task: Optional[asyncio.Task] = None
-        self._socket_monitor_task: Optional[asyncio.Task] = None  # socket文件监听任务
+        self.socket_client: SocketClient | None = None
+        self._connect_task: asyncio.Task | None = None
+        self._socket_monitor_task: asyncio.Task | None = None  # socket文件监听任务
         self._socket_check_interval: float = 3.0  # socket检测间隔（秒）
 
         # ==================== 数据缓存（用于本地计算盈亏）====================
         # 最新行情缓存 (symbol -> tick_data)
-        self._tick_cache: Dict[str, Dict] = {}
+        self._tick_cache: dict[str, dict] = {}
         # 持仓缓存（由Trader推送维护，全量快照 + 增量更新）
-        self._position_cache: Dict[str, PositionData] = {}  # key: symbol
+        self._position_cache: dict[str, PositionData] = {}  # key: symbol
         # 订单缓存（由Trader推送维护，order_id -> order_dict）
-        self._order_cache: Dict[str, OrderData] = {}
+        self._order_cache: dict[str, OrderData] = {}
         # 成交缓存（由Trader推送维护，trade_id -> trade_dict）
-        self._trade_cache: Dict[str, TradeData] = {}
+        self._trade_cache: dict[str, TradeData] = {}
         # 账户内存缓存（常驻，由DB初始化 + Trader推送更新）
-        self._account_cache: Optional[AccountData] = None
+        self._account_cache: AccountData | None = None
         # WebSocket推送限制
         self._ws_push_interval: float = 2.0  # 持仓最小推送间隔2秒
-        self._last_position_push_time: Dict[str, float] = {}
+        self._last_position_push_time: dict[str, float] = {}
 
         # 从DB加载初始账户数据
         self._load_account_from_db()
@@ -122,32 +122,13 @@ class TraderProxy:
             self._state = new_state
             if old_state != new_state:
                 logger.info(f"TraderProxy [{self.account_id}] 状态变更: {old_state} -> {new_state}")
+                if self._account_cache:
+                    self._account_cache.status = self._state
+                    if new_state != TraderState.CONNECTED:
+                        self._account_cache.md_connected = False
+                        self._account_cache.td_connected = False 
+                    self._emit_data("account", self._account_cache.model_dump())
 
-        # 状态变化时触发账户更新事件，通知前端刷新
-        try:
-            event_engine = ctx.get_event_engine()
-            if event_engine:
-                # 构造账户状态更新数据
-                account_update = {
-                    "account_id": self.account_id,
-                    "status": new_state.value,
-                    "timestamp": datetime.now().isoformat(),
-                }
-                event_engine.put(EventTypes.ACCOUNT_STATUS, account_update)
-                logger.debug(f"推送账户状态更新事件: {account_update}")
-        except Exception as e:
-            logger.error(f"推送账户状态更新事件失败: {e}")
-
-        # 根据状态更新连接状态
-        if old_state == TraderState.CONNECTED and new_state != TraderState.CONNECTED:
-            # 从连接状态变为非连接状态，重置网关连接状态并推送
-            if self._account_cache:
-                self._account_cache.md_connected = False
-                self._account_cache.td_connected = False
-                logger.info(f"Trader [{self.account_id}] 断开，重置网关连接状态")
-                self._emit_data("account", self._account_cache.model_dump())
-        elif new_state == TraderState.STOPPED and old_state != TraderState.STOPPED:
-            self._last_position_push_time.clear()
 
     def _is_state(self, state: TraderState) -> bool:
         """检查是否为指定状态"""
@@ -174,7 +155,7 @@ class TraderProxy:
         # 从环境变量获取 conda 环境名，默认为 "qts"
         conda_env = os.environ.get("CONDA_ENV_NAME", "qts")
 
-        cmd: List[str] = [
+        cmd: list[str] = [
             "conda",
             "run",
             "-n",
@@ -503,12 +484,8 @@ class TraderProxy:
             # 更新账户缓存
             account_data = data.get("account")
             if account_data:
-                if self._account_cache:
-                    merged = self._account_cache.model_dump()
-                    merged.update(account_data)
-                    self._account_cache = AccountData.model_validate(merged)
-                else:
-                    self._account_cache = AccountData.model_validate(account_data)
+                self._account_cache = AccountData.model_validate(account_data)
+                self._emit_data("account", self._account_cache.model_dump())
 
             # 更新持仓缓存
             positions_data = data.get("positions", [])
@@ -548,13 +525,13 @@ class TraderProxy:
             )
 
         except Exception as e:
-            logger.warning(f"TraderProxy [{self.account_id}] 同步完整数据失败: {e}")
+            logger.exception(f"TraderProxy [{self.account_id}] 同步完整数据失败: {e}")
 
     def _update_heartbeat(self) -> None:
         """更新心跳时间"""
         self.last_heartbeat = datetime.now()
 
-    def _on_msg_callback(self, msg_type: str, data: Dict) -> None:
+    def _on_msg_callback(self, msg_type: str, data: dict) -> None:
         """
         统一的消息回调接口
 
@@ -575,9 +552,28 @@ class TraderProxy:
                 self._emit_data("tick", data)
                 # 根据tick刷新持仓缓存盈亏并推送
                 self.update_hold_profit(TickData.model_validate(data))
+            elif msg_type == "tick_batch":
+                # 批量tick推送：更新缓存、计算盈亏、推送账户、批量推送行情
+                ticks = data.get("ticks", [])
+                account_data = data.get("account")
+                if ticks:
+                    for tick_dict in ticks:
+                        symbol = tick_dict.get("symbol")
+                        if symbol:
+                            self._tick_cache[symbol] = tick_dict
+                            try:
+                                self.update_hold_profit(TickData.model_validate(tick_dict))
+                            except Exception:
+                                pass
+                    # 批量推送给前端
+                    self._emit_data("tick_batch", {"ticks": ticks, "account_id": self.account_id})
+                # 如果携带账户数据，更新缓存并推送
+                if account_data and isinstance(account_data, dict):
+                    #self._handle_account_update(account_data)
+                    self._account_cache = AccountData.model_validate(account_data)
             elif msg_type == "account":
                 # Trader推送完整账户数据（网关状态变化时），直接更新缓存
-                self._handle_account_status_push(data)
+                self._handle_account_update(data)
             elif msg_type == "order":
                 # 更新订单缓存并推送
                 if isinstance(data, dict) and data.get("order_id"):
@@ -604,7 +600,7 @@ class TraderProxy:
         except Exception as e:
             logger.error(f"处理消息 [{msg_type}] 时出错: {e}")
 
-    def _handle_account_status_push(self, data: Dict) -> None:
+    def _handle_account_update(self, data: dict) -> None:
         """
         处理Trader推送的完整账户状态数据
 
@@ -618,10 +614,6 @@ class TraderProxy:
         try:
             # 直接用推送数据更新缓存
             if self._account_cache:
-                merged = self._account_cache.model_dump()
-                merged.update(data)
-                self._account_cache = AccountData.model_validate(merged)
-            else:
                 self._account_cache = AccountData.model_validate(data)
             # 推送给前端
             self._emit_data("account", self._account_cache.model_dump())
@@ -631,7 +623,7 @@ class TraderProxy:
         except Exception as e:
             logger.exception(f"处理账户状态推送失败: {e}")
 
-    def _handle_trader_ready_push(self, data: Dict) -> None:
+    def _handle_trader_ready_push(self, data: dict) -> None:
         """
         处理Trader就绪通知
 
@@ -640,16 +632,16 @@ class TraderProxy:
         try:
             logger.info(f"Trader [{self.account_id}] 就绪通知收到，准备全量同步")
 
-            # 延迟2秒后执行全量同步，确保Trader数据已准备就绪
+            # 延迟1秒后执行全量同步，确保Trader数据已准备就绪
             async def delayed_sync():
-                await asyncio.sleep(2)
+                await asyncio.sleep(1)
                 await self._sync_account_detail()
 
             asyncio.create_task(delayed_sync())
         except Exception as e:
             logger.exception(f"处理Trader就绪通知失败: {e}")
 
-    def _handle_notify_push(self, data: Dict) -> None:
+    def _handle_notify_push(self, data: dict) -> None:
         """
         处理Trader推送的通知告警
 
@@ -679,7 +671,7 @@ class TraderProxy:
         except Exception as e:
             logger.exception(f"处理通知推送失败: {e}")
 
-    def _emit_data(self, data_type: str, data: Dict) -> None:
+    def _emit_data(self, data_type: str, data: dict) -> None:
         """
         提交到事件驱动中
 
@@ -692,6 +684,7 @@ class TraderProxy:
             event_type = EventTypes.ACCOUNT_UPDATE
             if isinstance(data, dict) and "update_time" in data:
                 data = {**data, "updated_at": data["update_time"]}
+            data['status'] = self._state
         elif data_type == "order":
             event_type = EventTypes.ORDER_UPDATE
         elif data_type == "trade":
@@ -700,6 +693,8 @@ class TraderProxy:
             event_type = EventTypes.POSITION_UPDATE
         elif data_type == "tick":
             event_type = EventTypes.TICK_UPDATE
+        elif data_type == "tick_batch":
+            event_type = EventTypes.TICK_BATCH_UPDATE
         elif data_type == "alarm":
             # 告警类型：保存到数据库并触发事件
             self._handle_alarm_data(data)
@@ -711,7 +706,7 @@ class TraderProxy:
                 event_engine.put(event_type, data)
                 logger.debug(f"推送事件 [{event_type}] 从Trader [{self.account_id}]")
 
-    def _handle_alarm_data(self, data: Dict) -> None:
+    def _handle_alarm_data(self, data: dict) -> None:
         """
         处理异常告警数据（来自Trader的ERROR日志）
 
@@ -835,7 +830,7 @@ class TraderProxy:
 
     # ==================== 数据同步接口 ====================
 
-    async def sync_all(self) -> Dict[str, Any]:
+    async def sync_all(self) -> dict[str, Any]:
         """
         手动触发全量同步：账户+持仓+挂单+成交+行情
 
@@ -865,7 +860,7 @@ class TraderProxy:
 
     # ==================== 数据查询接口 ====================
 
-    async def get_account(self) -> Optional[AccountData]:
+    async def get_account(self) -> AccountData | None:
         """获取账户数据 - 优先从Trader实时查询，未连接时使用缓存
 
         内存缓存由以下途径维护：
@@ -903,7 +898,7 @@ class TraderProxy:
             status=TraderState.CONNECTED if self._is_state(TraderState.CONNECTED) else self._state,
         )
 
-    def get_account_cached(self) -> Optional[AccountData]:
+    def get_account_cached(self) -> AccountData | None:
         """获取缓存的账户数据（不走RPC）"""
         if self._account_cache:
             account_data = self._account_cache.model_copy()
@@ -916,11 +911,11 @@ class TraderProxy:
             status=TraderState.CONNECTED if self._is_state(TraderState.CONNECTED) else self._state,
         )
 
-    async def get_order(self, order_id: str) -> Optional[OrderData]:
+    async def get_order(self, order_id: str) -> OrderData | None:
         """获取订单数据 - 优先从Trader实时查询，未连接时使用缓存"""
         return self._order_cache.get(order_id)
 
-    async def get_orders(self) -> List[OrderData]:
+    async def get_orders(self) -> list[OrderData]:
         """获取所有订单数据 - 优先从Trader实时查询，未连接时使用缓存"""
         if self.socket_client and self.socket_client.is_connected():
             try:
@@ -934,20 +929,20 @@ class TraderProxy:
                 logger.warning(f"TraderProxy [{self.account_id}] 从Trader查询订单数据失败: {e}")
         return list(self._order_cache.values())
 
-    async def get_active_orders(self) -> List[OrderData]:
+    async def get_active_orders(self) -> list[OrderData]:
         """获取活动订单 - 优先从Trader实时查询，未连接时使用缓存"""
         orders = await self.get_orders()
         return [item for item in orders if item.is_active()]
 
-    async def get_trade(self, trade_id: str) -> Optional[TradeData]:
+    async def get_trade(self, trade_id: str) -> TradeData | None:
         """获取成交数据 - 从内存缓存返回"""
         return self._trade_cache.get(trade_id)
 
-    async def get_trades(self) -> List[TradeData]:
+    async def get_trades(self) -> list[TradeData]:
         """获取所有成交数据 - 从内存缓存返回"""
         return list(self._trade_cache.values())
 
-    async def get_positions(self) -> List[PositionData]:
+    async def get_positions(self) -> list[PositionData]:
         """获取持仓列表 - 优先从Trader实时查询，未连接时使用缓存"""
         if self.socket_client and self.socket_client.is_connected():
             try:
@@ -961,32 +956,32 @@ class TraderProxy:
                 logger.warning(f"TraderProxy [{self.account_id}] 从Trader查询持仓数据失败: {e}")
         return list(self._position_cache.values())
 
-    async def get_quotes(self) -> List[TickData]:
+    async def get_quotes(self) -> list[TickData]:
         """获取所有行情数据 - 从内存缓存返回"""
         return [TickData(**item) for item in self._tick_cache.values()]
 
-    async def get_quotes_from_trader(self) -> List[TickData]:
+    async def get_quotes_from_trader(self) -> list[TickData]:
         """实时从Trader进程获取行情数据（IPC）"""
         if not self.socket_client:
             return []
         data = await self.socket_client.request("get_quotes", {}, timeout=5.0)
         if data:
-            items = cast(List[Dict[str, Any]], data)
+            items = cast(list[dict[str, Any]], data)
             return [TickData(**item) for item in items]
         return []
 
-    async def get_jobs(self) -> List[Job]:
+    async def get_jobs(self) -> list[Job]:
         """实时获取所有任务数据"""
         if not self.socket_client:
             return []
         data = await self.socket_client.request("get_jobs", {}, timeout=5.0)
         if data:
-            items = cast(List[Dict[str, Any]], data)
+            items = cast(list[dict[str, Any]], data)
             return [Job(**item) for item in items]
         return []
 
     async def send_request(
-        self, request_type: str, data: Dict[str, Any], timeout: float = 10.0
+        self, request_type: str, data: dict[str, Any], timeout: float = 10.0
     ) -> Any:
         """
         通用请求发送方法
@@ -1014,7 +1009,7 @@ class TraderProxy:
 
     async def send_order_request(
         self, symbol: str, direction: str, offset: str, volume: int, price: float = 0
-    ) -> Optional[str]:
+    ) -> str | None:
         """
         发送下单请求到 Trader
 
@@ -1199,7 +1194,7 @@ class TraderProxy:
         }
         return await self.update_alert_config(config)
 
-    async def get_alert_wechat(self) -> Optional[bool]:
+    async def get_alert_wechat(self) -> bool | None:
         """
         获取微信告警配置（已废弃，请使用 get_alert_config）
 
@@ -1214,7 +1209,7 @@ class TraderProxy:
             return config.get("immediate", False) or config.get("threshold", False)
         return None
 
-    async def update_alert_config(self, config: Dict[str, Any]) -> bool:
+    async def update_alert_config(self, config: dict[str, Any]) -> bool:
         """
         更新告警配置
 
@@ -1237,7 +1232,7 @@ class TraderProxy:
             logger.error(f"TraderProxy [{self.account_id}] 更新告警配置请求失败: {e}")
             return False
 
-    async def get_alert_config(self) -> Optional[Dict[str, Any]]:
+    async def get_alert_config(self) -> (dict[str, Any]) | None:
         """
         获取告警配置
 
@@ -1476,7 +1471,7 @@ class TraderProxy:
             logger.error(f"TraderProxy [{self.account_id}] 初始化策略请求失败: {e}")
             return {"success": False, "message": f"请求失败: {str(e)}"}
 
-    async def get_strategy_order_cmds(self, strategy_id: str, status: Optional[str]) -> list:
+    async def get_strategy_order_cmds(self, strategy_id: str, status: str | None) -> list:
         """
         获取策略的报单指令历史
 
@@ -1652,7 +1647,7 @@ class TraderProxy:
             return heartbeat_age < self.heartbeat_timeout
         return False
 
-    def _get_pid(self) -> Optional[int]:
+    def _get_pid(self) -> int | None:
         """获取PID，从 PID 文件读取"""
         pid_file = Path(self.pid_file)
         if pid_file.exists():
@@ -1662,7 +1657,7 @@ class TraderProxy:
                 pass
         return None
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """
         获取状态信息
 

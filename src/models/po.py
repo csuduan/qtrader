@@ -4,7 +4,6 @@
 """
 
 from datetime import datetime
-from typing import Optional
 
 from sqlalchemy import (
     Boolean,
@@ -273,7 +272,9 @@ class AlarmPo(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     account_id = Column(String(50), nullable=False, index=True)
-    alarm_type = Column(String(20), nullable=False, default="exception", index=True)  # notification/exception
+    alarm_type = Column(
+        String(20), nullable=False, default="exception", index=True
+    )  # notification/exception
     indicator = Column(String(20), nullable=True)  # 1min/5min/1hour
     alarm_date = Column(String(10), nullable=False, index=True)
     alarm_time = Column(String(8), nullable=False)
@@ -284,7 +285,9 @@ class AlarmPo(Base):
     created_at = Column(DateTime, default=datetime.now, index=True)
 
     def __repr__(self):
-        return f"<AlarmPo(account_id={self.account_id}, type={self.alarm_type}, title={self.title})>"
+        return (
+            f"<AlarmPo(account_id={self.account_id}, type={self.alarm_type}, title={self.title})>"
+        )
 
 
 class SystemParamPo(Base):
@@ -302,9 +305,7 @@ class SystemParamPo(Base):
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
-    __table_args__ = (
-        UniqueConstraint("account_id", "param_key", name="uq_sysparam_account_key"),
-    )
+    __table_args__ = (UniqueConstraint("account_id", "param_key", name="uq_sysparam_account_key"),)
 
     def __repr__(self):
         return f"<SystemParamPo(key={self.param_key}, type={self.param_type}, value={self.param_value})>"

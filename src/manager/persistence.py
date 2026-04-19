@@ -8,12 +8,11 @@ Manager 是共享数据库（qtrader.db）的唯一写入者。
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
 
 from src.app_context import get_app_context as ctx
 from src.models.po import AccountPo, PositionPo, TradePo
-from src.utils.database import get_database
 from src.utils.async_event_engine import AsyncEventEngine
+from src.utils.database import get_database
 from src.utils.event_engine import EventTypes
 from src.utils.logger import get_logger
 
@@ -98,9 +97,7 @@ class ManagerPersistence:
         try:
             with db.get_session() as session:
                 strategy_id = data.get("strategy_id")
-                query = session.query(PositionPo).filter_by(
-                    account_id=account_id, symbol=symbol
-                )
+                query = session.query(PositionPo).filter_by(account_id=account_id, symbol=symbol)
                 if strategy_id:
                     query = query.filter_by(strategy_id=strategy_id)
                 else:
@@ -190,7 +187,7 @@ class ManagerPersistence:
 
 
 # 全局实例
-_persistence: Optional[ManagerPersistence] = None
+_persistence: ManagerPersistence | None = None
 
 
 def init_persistence(event_engine: AsyncEventEngine) -> ManagerPersistence:
@@ -202,6 +199,6 @@ def init_persistence(event_engine: AsyncEventEngine) -> ManagerPersistence:
     return _persistence
 
 
-def get_persistence() -> Optional[ManagerPersistence]:
+def get_persistence() -> ManagerPersistence | None:
     """获取持久化服务实例"""
     return _persistence

@@ -12,7 +12,7 @@ RSI 可执行策略
 
 from collections import deque
 from datetime import datetime, time, timedelta
-from typing import Any, List, Optional
+from typing import Any
 
 import numpy as np
 from pydantic import BaseModel, Field
@@ -72,8 +72,8 @@ class RsiStrategy(BaseStrategy):
         # 本策略临时变量
         self.short_k_bars: deque[BarData] = deque()  # 短周期K线（short_k分钟）
         self.long_k_bars: deque[BarData] = deque()  # 长周期K线（long_k分钟）
-        self._long_bar_buf: List[BarData] = []  # 长周期K线缓存
-        self._short_bar_buf: List[BarData] = []  # 短周期K线缓存
+        self._long_bar_buf: list[BarData] = []  # 长周期K线缓存
+        self._short_bar_buf: list[BarData] = []  # 短周期K线缓存
 
         # 创建RsiParam实例
         if self.config.params and len(self.config.params) > 0:
@@ -345,25 +345,33 @@ class RsiStrategy(BaseStrategy):
         Returns:
             退出原因 ("TP"/"SL"/None)
         """
-        
+
         open_price = signal.entry_price or current_price
         if signal.side == 1:
             # 多头仓位
             profit_pct = (current_price - open_price) / open_price
             if profit_pct >= self.param.take_profit_pct:
-                logger.info(f"策略 [{self.strategy_id}] 多头止盈:  当前价格={current_price:.2f}, 开仓价格={open_price:.2f}, 盈利率={profit_pct:.2}")
+                logger.info(
+                    f"策略 [{self.strategy_id}] 多头止盈:  当前价格={current_price:.2f}, 开仓价格={open_price:.2f}, 盈利率={profit_pct:.2}"
+                )
                 return "TP"
             if profit_pct <= -self.param.stop_loss_pct:
-                logger.info(f"策略 [{self.strategy_id}] 多头止损:  当前价格={current_price:.2f}, 开仓价格={open_price:.2f}, 亏损率={profit_pct:.2}")
+                logger.info(
+                    f"策略 [{self.strategy_id}] 多头止损:  当前价格={current_price:.2f}, 开仓价格={open_price:.2f}, 亏损率={profit_pct:.2}"
+                )
                 return "SL"
         else:
             # 空头仓位
             profit_pct = (open_price - current_price) / open_price
             if profit_pct >= self.param.take_profit_pct:
-                logger.info(f"策略 [{self.strategy_id}] 空头止盈:  当前价格={current_price:.2f}, 开仓价格={open_price:.2f}, 盈利率={profit_pct:.2}")
+                logger.info(
+                    f"策略 [{self.strategy_id}] 空头止盈:  当前价格={current_price:.2f}, 开仓价格={open_price:.2f}, 盈利率={profit_pct:.2}"
+                )
                 return "TP"
             if profit_pct <= -self.param.stop_loss_pct:
-                logger.info(f"策略 [{self.strategy_id}] 空头止损:  当前价格={current_price:.2f}, 开仓价格={open_price:.2f}, 亏损率={profit_pct:.2}")
+                logger.info(
+                    f"策略 [{self.strategy_id}] 空头止损:  当前价格={current_price:.2f}, 开仓价格={open_price:.2f}, 亏损率={profit_pct:.2}"
+                )
                 return "SL"
 
         return None

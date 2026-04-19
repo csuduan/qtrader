@@ -217,7 +217,7 @@ class TestTqGatewayInitialization:
     def test_initialization_connection_status(self, gateway: TqGateway):
         """测试连接状态初始为 False"""
         assert gateway.connected is False
-        assert gateway._tq_running is False
+        assert gateway._running is False
 
     def test_initialization_subscribe_symbols(self, gateway: TqGateway, trader_config: TraderConfig):
         """测试订阅符号初始化"""
@@ -248,7 +248,7 @@ class TestTqGatewayConnect:
     @pytest.mark.asyncio
     async def test_connect_already_running(self, gateway: TqGateway):
         """测试重复连接处理"""
-        gateway._tq_running = True
+        gateway._running = True
         result = await gateway.connect()
 
         assert result is True
@@ -272,14 +272,14 @@ class TestTqGatewayDisconnect:
     @pytest.mark.asyncio
     async def test_disconnect_stops_polling(self, gateway: TqGateway):
         """测试正确停止轮询"""
-        gateway._tq_running = True
+        gateway._running = True
         gateway.connected = True
         gateway._dispatcher_task = asyncio.create_task(asyncio.sleep(1))
 
         result = await gateway.disconnect()
 
         assert result is True
-        assert gateway._tq_running is False
+        assert gateway._running is False
         assert gateway.connected is False
 
     @pytest.mark.asyncio
@@ -289,7 +289,7 @@ class TestTqGatewayDisconnect:
             while True:
                 await asyncio.sleep(0.1)
 
-        gateway._tq_running = True
+        gateway._running = True
         gateway._dispatcher_task = asyncio.create_task(dummy_dispatcher())
 
         await gateway.disconnect()

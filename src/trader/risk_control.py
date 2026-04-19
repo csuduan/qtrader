@@ -4,7 +4,6 @@
 """
 
 from datetime import datetime, time
-from typing import Optional
 
 from src.utils.config_loader import RiskControlConfig
 from src.utils.logger import get_logger
@@ -25,7 +24,7 @@ class RiskControl:
         self.config = config
         self.daily_order_count = 0
         self.daily_cancel_count = 0
-        self._last_reset_date: Optional[datetime] = None
+        self._last_reset_date: datetime | None = None
 
         logger.info(
             f"风控模块初始化完成 - 最大报单次数: {config.max_daily_orders}, "

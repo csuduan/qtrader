@@ -7,7 +7,6 @@
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
 
 from fastapi import APIRouter, Query
 
@@ -57,13 +56,11 @@ async def get_log(
                     log_file = log_files[0]
                 else:
                     return success_response(
-                        data={"lines": [], "offset": 0, "has_more": False},
-                        message="日志文件不存在"
+                        data={"lines": [], "offset": 0, "has_more": False}, message="日志文件不存在"
                     )
             else:
                 return success_response(
-                    data={"lines": [], "offset": 0, "has_more": False},
-                    message="日志目录不存在"
+                    data={"lines": [], "offset": 0, "has_more": False}, message="日志目录不存在"
                 )
 
         # 获取文件当前大小
@@ -73,7 +70,7 @@ async def get_log(
         if offset > file_size:
             offset = 0
 
-        lines: List[str] = []
+        lines: list[str] = []
 
         with open(log_file, "r", encoding="utf-8", errors="replace") as f:
             # 如果 offset 为 0 且文件较大，从文件末尾读取最近的内容
@@ -119,7 +116,7 @@ async def get_log(
                 "has_more": has_more,
                 "file_size": file_size,
             },
-            message="获取成功"
+            message="获取成功",
         )
 
     except Exception as e:
@@ -149,11 +146,13 @@ async def get_log_files(
         for log_file in sorted(account_log_dir.glob("*.log")):
             try:
                 stat = log_file.stat()
-                files.append({
-                    "name": log_file.name,
-                    "size": stat.st_size,
-                    "mtime": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                })
+                files.append(
+                    {
+                        "name": log_file.name,
+                        "size": stat.st_size,
+                        "mtime": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                    }
+                )
             except Exception as e:
                 logger.warning(f"获取文件信息失败 {log_file}: {e}")
 
@@ -213,7 +212,7 @@ async def download_log(
                 "content": content,
                 "size": len(content),
             },
-            message="获取成功"
+            message="获取成功",
         )
 
     except Exception as e:

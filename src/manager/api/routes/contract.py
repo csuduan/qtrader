@@ -2,8 +2,6 @@
 合约信息相关API路由
 """
 
-from typing import List, Optional
-
 from fastapi import APIRouter, Query, Request
 
 from src.manager.api.responses import error_response, success_response
@@ -19,10 +17,10 @@ router = APIRouter(prefix="/api/contract", tags=["合约"])
 @router.get("/list")
 async def get_contracts(
     request: Request,
-    exchange_id: Optional[str] = Query(None, description="交易所筛选"),
-    product_type: Optional[str] = Query(None, description="产品类型筛选"),
-    symbol_keyword: Optional[str] = Query(None, description="合约代码关键词"),
-    account_id: Optional[str] = Query(None, description="账户ID，不传则查询所有账户"),
+    exchange_id: str | None = Query(None, description="交易所筛选"),
+    product_type: str | None = Query(None, description="产品类型筛选"),
+    symbol_keyword: str | None = Query(None, description="合约代码关键词"),
+    account_id: str | None = Query(None, description="账户ID，不传则查询所有账户"),
 ):
     """
     获取合约列表
@@ -59,21 +57,23 @@ async def get_contracts(
             # 转换字段名称以兼容前端
             result = []
             for c in contracts:
-                result.append({
-                    "symbol": c.symbol,
-                    "exchange_id": c.exchange_id,
-                    "name": c.instrument_name or "",
-                    "product_type": c.product_type,
-                    "volume_multiple": c.volume_multiple,
-                    "price_tick": float(c.price_tick) if c.price_tick else 0.01,
-                    "min_volume": c.min_volume,
-                    "min_open_volume": c.min_volume,  # 暂时用min_volume
-                    "option_strike": float(c.option_strike) if c.option_strike else None,
-                    "option_underlying": c.option_underlying,
-                    "option_type": c.option_type,
-                    "update_date": c.update_date,
-                    "updated_at": c.updated_at.isoformat() if c.updated_at else None,
-                })
+                result.append(
+                    {
+                        "symbol": c.symbol,
+                        "exchange_id": c.exchange_id,
+                        "name": c.instrument_name or "",
+                        "product_type": c.product_type,
+                        "volume_multiple": c.volume_multiple,
+                        "price_tick": float(c.price_tick) if c.price_tick else 0.01,
+                        "min_volume": c.min_volume,
+                        "min_open_volume": c.min_volume,  # 暂时用min_volume
+                        "option_strike": float(c.option_strike) if c.option_strike else None,
+                        "option_underlying": c.option_underlying,
+                        "option_type": c.option_type,
+                        "update_date": c.update_date,
+                        "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+                    }
+                )
 
         return success_response(data=result, message="获取成功")
     except Exception as e:
@@ -95,9 +95,9 @@ async def get_exchanges(request: Request):
 
         with db.get_session() as session:
             # 从数据库统计每个交易所的活跃合约数量
-            contracts = session.query(ContractPo.exchange_id).filter(
-                ContractPo.is_active.is_(True)
-            ).all()
+            contracts = (
+                session.query(ContractPo.exchange_id).filter(ContractPo.is_active.is_(True)).all()
+            )
 
             exchange_counts = {}
             for (ex_id,) in contracts:
@@ -120,7 +120,7 @@ async def get_exchanges(request: Request):
 @router.post("/refresh")
 async def refresh_contracts(
     request: Request,
-    account_id: Optional[str] = Query(None, description="账户ID，不传则刷新所有账户"),
+    account_id: str | None = Query(None, description="账户ID，不传则刷新所有账户"),
 ):
     """
     强制刷新合约信息

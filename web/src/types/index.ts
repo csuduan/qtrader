@@ -159,6 +159,7 @@ export type WSMessageType =
   | 'tick_update'
   | 'quote_update'
   | 'alarm_update'
+  | 'quote_batch_update'
 
 /** WebSocket 消息 */
 export interface WSMessage<T = any> {

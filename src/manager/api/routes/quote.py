@@ -2,8 +2,6 @@
 行情相关API路由
 """
 
-from typing import List
-
 from fastapi import APIRouter, Depends
 
 from src.manager.api.dependencies import get_trading_manager

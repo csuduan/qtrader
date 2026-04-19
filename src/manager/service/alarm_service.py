@@ -5,7 +5,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from src.models.object import AlarmType
 from src.utils.logger import get_logger
@@ -33,8 +33,7 @@ class AlarmService:
     def __init__(self, trading_manager: "TradingManager"):
         self.trading_manager = trading_manager
         # 压制状态缓存（仅存内存）: {account_id: {indicator: SuppressionStatus}}
-        self._suppression_cache: Dict[str, Dict[str, SuppressionStatus]] = {}
-
+        self._suppression_cache: dict[str, dict[str, SuppressionStatus]] = {}
 
     async def check_exception_thresholds(self) -> None:
         """
@@ -105,7 +104,7 @@ class AlarmService:
             session.close()
 
     async def _trigger_exception_alarm(
-        self, account_id: str, indicator: str, count: int, threshold: int, source_data: Dict
+        self, account_id: str, indicator: str, count: int, threshold: int, source_data: dict
     ) -> None:
         """触发异常告警并设置压制"""
         app_config = self.trading_manager.app_config
@@ -117,9 +116,7 @@ class AlarmService:
         )
 
         # 免打扰检查
-        if self._is_dnd(
-            app_config.alert.exception.dnd_start, app_config.alert.exception.dnd_end
-        ):
+        if self._is_dnd(app_config.alert.exception.dnd_start, app_config.alert.exception.dnd_end):
             logger.debug("免打扰时段，跳过异常告警通知")
         else:
             try:
@@ -153,7 +150,7 @@ class AlarmService:
             return False
         return suppression.is_active
 
-    def clear_suppression(self, account_id: str, indicator: Optional[str] = None) -> None:
+    def clear_suppression(self, account_id: str, indicator: str | None = None) -> None:
         """
         清除压制状态
 
@@ -181,14 +178,16 @@ class AlarmService:
         self._suppression_cache.clear()
         logger.info("已清除所有异常告警压制状态")
 
-    def get_suppression_status(self, account_id: Optional[str] = None) -> Dict[str, Dict[str, Dict[str, Any]]]:
+    def get_suppression_status(
+        self, account_id: str | None = None
+    ) -> dict[str, dict[str, dict[str, Any]]]:
         """
         获取压制状态
 
         Returns:
             {"DQ": {"1min": {"suppressed": true, "since": "..."}, ...}}
         """
-        result: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        result: dict[str, dict[str, dict[str, Any]]] = {}
         accounts = [account_id] if account_id else list(self._suppression_cache.keys())
 
         for acc in accounts:
@@ -206,7 +205,6 @@ class AlarmService:
     def _is_dnd(self, start: int, end: int) -> bool:
         """检查是否免打扰时段"""
         return is_dnd_now(start, end)
-
 
     def notify_alarm(
         self,

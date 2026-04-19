@@ -4,8 +4,7 @@ WebSocket管理模块
 
 import asyncio
 import json
-from datetime import datetime
-from typing import Optional
+from datetime import datetime, date
 
 import simplejson as json
 from fastapi import WebSocket
@@ -14,6 +13,7 @@ from src.app_context import AppContext, get_app_context
 from src.utils.async_event_engine import AsyncEventEngine
 from src.utils.event_engine import EventTypes
 from src.utils.logger import get_logger
+from src.utils.json_util import datetime_handler
 
 logger = get_logger(__name__)
 ctx: AppContext = get_app_context()
@@ -33,8 +33,8 @@ class WebSocketManager:
         event_engine.register(EventTypes.ORDER_UPDATE, self.broadcast_order)
         event_engine.register(EventTypes.TRADE_UPDATE, self.broadcast_trade)
         event_engine.register(EventTypes.TICK_UPDATE, self.broadcast_quote)
+        event_engine.register(EventTypes.TICK_BATCH_UPDATE, self.broadcast_quotes)
         event_engine.register(EventTypes.ACCOUNT_UPDATE, self.broadcast_account)
-        event_engine.register(EventTypes.ACCOUNT_STATUS, self.broadcast_account_status)
         logger.info("WEBSOCKET已注册事件引擎订阅")
 
     async def connect(self, websocket: WebSocket):
@@ -56,13 +56,19 @@ class WebSocketManager:
             self.quote_subscriptions[websocket] = subscribed
             logger.info(f"WebSocket行情订阅状态更新: {subscribed}")
 
+    
+
     async def broadcast(self, message: dict):
         """广播消息到所有连接"""
         if not self.active_connections:
             return
-        message_str = json.dumps(message, ignore_nan=True)
-        disconnected = set()
+        try:
+            message_str = json.dumps(message, ignore_nan=True,default=datetime_handler)
+        except Exception as e:
+            logger.error(f"JSON序列化消息失败: {e} {message}")
+            return
 
+        disconnected = set()
         for connection in self.active_connections:
             try:
                 await connection.send_text(message_str)
@@ -96,6 +102,7 @@ class WebSocketManager:
 
     async def broadcast_account(self, account_data: dict) -> None:
         """广播账户信息更新"""
+        logger.debug(f"广播账户信息更新: {account_data}")
         await self.broadcast(
             {
                 "type": "account_update",
@@ -145,14 +152,15 @@ class WebSocketManager:
             "quote",
         )
 
-    async def broadcast_account_status(self, status_data: dict) -> None:
-        """广播账户状态更新（暂停/恢复、连接/断开等）"""
-        await self.broadcast(
+    async def broadcast_quotes(self, quotes_data: dict) -> None:
+        """广播批量行情更新（仅推送给订阅了行情的连接）"""
+        await self.broadcast_to_subscribers(
             {
-                "type": "account_update",
-                "data": status_data,
+                "type": "quote_batch_update",
+                "data": quotes_data,
                 "timestamp": datetime.now().isoformat(),
-            }
+            },
+            "quote",
         )
 
 

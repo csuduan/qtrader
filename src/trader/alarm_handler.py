@@ -4,7 +4,6 @@ Trader端告警处理器
 """
 
 from datetime import datetime
-from typing import Optional
 
 from src.models.object import AlarmData
 from src.utils.logger import get_logger

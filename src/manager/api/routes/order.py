@@ -2,8 +2,6 @@
 委托单相关API路由
 """
 
-from typing import List, Optional
-
 from fastapi import APIRouter, Depends, Query
 
 from src.manager.api.dependencies import get_trading_manager
@@ -19,7 +17,7 @@ router = APIRouter(prefix="/api/order", tags=["委托单"])
 
 def _query_orders_from_db(
     status: str,
-    account_id: Optional[str],
+    account_id: str | None,
     limit: int,
     offset: int,
 ):
@@ -41,14 +39,11 @@ def _query_orders_from_db(
         if status == "FINISHED":
             query = query.filter(
                 (OrderPo.status == "FINISHED") & (OrderPo.volume_left < OrderPo.volume_orign)
-                )
+            )
         elif status == "REJECTED":
             query = query.filter(
                 (OrderPo.status == "REJECTED")
-                | (
-                    (OrderPo.status == "FINISHED")
-                    & (OrderPo.volume_left == OrderPo.volume_orign)
-                )
+                | ((OrderPo.status == "FINISHED") & (OrderPo.volume_left == OrderPo.volume_orign))
             )
 
         query = query.order_by(OrderPo.insert_date_time.desc())
@@ -83,7 +78,7 @@ def _query_orders_from_db(
 @router.get("")
 async def get_orders(
     status: str = Query(..., description="委托单状态: ALIVE/FINISHED/REJECTED"),
-    account_id: Optional[str] = Query(None, description="账户ID（多账号模式）"),
+    account_id: str | None = Query(None, description="账户ID（多账号模式）"),
     limit: int = Query(100, ge=1, le=1000, description="返回记录数量"),
     offset: int = Query(0, ge=0, description="偏移量"),
     trading_manager: TradingManager = Depends(get_trading_manager),
@@ -119,7 +114,9 @@ async def get_orders(
                     account_id=order.account_id,
                     order_id=order.order_id,
                     order_sys_id=order.order_sys_id,
-                    exchange_order_id=order.exchange.value if hasattr(order.exchange, "value") else "",
+                    exchange_order_id=(
+                        order.exchange.value if hasattr(order.exchange, "value") else ""
+                    ),
                     symbol=order.symbol,
                     direction=(
                         order.direction.value
@@ -153,7 +150,7 @@ async def get_orders(
 @router.get("/{order_id}")
 async def get_order_by_id(
     order_id: str,
-    account_id: Optional[str] = Query(None, description="账户ID（多账号模式）"),
+    account_id: str | None = Query(None, description="账户ID（多账号模式）"),
     trading_manager=Depends(get_trading_manager),
 ):
     """

@@ -7,7 +7,7 @@ import asyncio
 import csv
 import os
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from cachetools import TTLCache
 
@@ -40,7 +40,7 @@ logger = get_logger(__name__)
 _csv_cache: TTLCache = TTLCache(maxsize=100, ttl=60)
 
 
-def load_csv_file(csv_path: str) -> Dict[str, dict]:
+def load_csv_file(csv_path: str) -> dict[str, dict]:
     """加载CSV文件到缓存（使用TTLCache自动过期）"""
     if csv_path in _csv_cache:
         return _csv_cache[csv_path]
@@ -106,20 +106,20 @@ def load_strategy_params(config: StrategyConfig, strategy_id: str) -> dict:
 class StrategyManager:
     """策略管理器"""
 
-    def __init__(self, strategies_config: Dict[str, StrategyConfig], trading_engine: TradingEngine):
-        self.strategies_configs: Dict[str, StrategyConfig] = strategies_config or {}
-        self.strategies: Dict[str, BaseStrategy] = {}
+    def __init__(self, strategies_config: dict[str, StrategyConfig], trading_engine: TradingEngine):
+        self.strategies_configs: dict[str, StrategyConfig] = strategies_config or {}
+        self.strategies: dict[str, BaseStrategy] = {}
         self.trading_engine: TradingEngine = trading_engine
         self.subscribed_symbols: set = set()
         # 订单ID -> 策略ID 的映射关系
-        self.order_strategy_map: Dict[str, str] = {}
+        self.order_strategy_map: dict[str, str] = {}
         # cmd_id -> 策略ID 的映射关系
-        self.event_engine: Optional[EventEngine] = None
+        self.event_engine: EventEngine | None = None
 
         # Bar生成器管理器 (symbol -> BarGenerator)
-        self._bar_generators: Dict[str, MultiSymbolBarGenerator] = {}
+        self._bar_generators: dict[str, MultiSymbolBarGenerator] = {}
         # 策略bar订阅映射 (symbol -> {strategy_id -> [interval_str]})
-        self._strategy_bar_subscriptions: Dict[str, Dict[str, List[str]]] = {}
+        self._strategy_bar_subscriptions: dict[str, dict[str, list[str]]] = {}
 
         # 持仓持久化服务
         self._position_service = StrategyPositionService()
@@ -158,7 +158,7 @@ class StrategyManager:
                 logger.info(f"策略 {name} 未启用，跳过")
                 continue
             try:
-                #创建策略
+                # 创建策略
                 strategy_type = config.type
                 strategy_class = get_strategy_class(strategy_type)
                 if strategy_class is None:
@@ -169,7 +169,7 @@ class StrategyManager:
                 strategy.trading_engine = self.trading_engine
                 self.strategies[name] = strategy
 
-                #初始化策略
+                # 初始化策略
                 self.init_strategy(strategy)
 
                 # 从数据库加载策略持仓
@@ -188,7 +188,6 @@ class StrategyManager:
             except Exception as e:
                 logger.exception(f"创建策略 {name} 失败: {e}", exc_info=True)
 
-    
     def init_strategy(self, strategy: BaseStrategy) -> None:
         """初始化策略"""
         if strategy:
@@ -196,12 +195,11 @@ class StrategyManager:
             load_strategy_params(strategy.config, strategy.strategy_id)
             strategy.init(self.trading_engine.trading_day)
 
-    def _get_account_id(self) -> Optional[str]:
+    def _get_account_id(self) -> str | None:
         """获取当前账户ID"""
         if self.trading_engine and self.trading_engine.account:
             return self.trading_engine.account.account_id
         return None
-
 
     def get_strategy_position(self, strategy_id: str, symbol: str):
         """
@@ -219,7 +217,7 @@ class StrategyManager:
             return strategy.get_position(symbol)
         return None
 
-    def get_all_strategy_positions(self, strategy_id: str) -> Dict[str, Any]:
+    def get_all_strategy_positions(self, strategy_id: str) -> dict[str, Any]:
         """
         获取策略的所有持仓
 
@@ -227,7 +225,7 @@ class StrategyManager:
             strategy_id: 策略ID
 
         Returns:
-            Dict: {symbol -> position_dict}
+            dict: {symbol -> position_dict}
         """
         strategy = self.strategies.get(strategy_id)
         if not strategy:
@@ -319,7 +317,7 @@ class StrategyManager:
         trading_day = self.trading_engine.trading_day
         for strategy in self.strategies.values():
             self.init_strategy(strategy)
-    
+
     def settle_positions(self) -> None:
         """结算所有持仓"""
         for strategy in self.strategies.values():
@@ -341,9 +339,9 @@ class StrategyManager:
         symbol: str,
         direction: Direction,
         volume: int,
-        price: Optional[float],
+        price: float | None,
         offset: Offset,
-    ) -> Optional[str]:
+    ) -> str | None:
         """
         插入订单通用方法（异步版本）
 
@@ -453,7 +451,6 @@ class StrategyManager:
             logger.error(f"保存策略持仓失败: {e}")
             return False
 
-
     def get_strategy_position(self, strategy_id: str, symbol: str) -> Optional["PositionData"]:
         """
         获取策略指定合约的持仓
@@ -476,8 +473,8 @@ class StrategyManager:
         symbol: str,
         direction: str,
         volume: int,
-        price: Optional[float] = None,
-    ) -> Optional[str]:
+        price: float | None = None,
+    ) -> str | None:
         """
         开仓 - 通过 TradingEngine
 
@@ -500,8 +497,8 @@ class StrategyManager:
         symbol: str,
         direction: str,
         volume: int,
-        price: Optional[float] = None,
-    ) -> Optional[str]:
+        price: float | None = None,
+    ) -> str | None:
         """
         平仓 - 通过 TradingEngine
 
@@ -650,7 +647,7 @@ class StrategyManager:
             logger.exception(f"回播所有策略失败: {e}")
             return {"success": False, "message": f"回播失败: {str(e)}", "replayed_count": 0}
 
-    def load_hist_bars(self, symbol, interval, start: datetime, end: datetime) -> List[BarData]:
+    def load_hist_bars(self, symbol, interval, start: datetime, end: datetime) -> list[BarData]:
         # 通过网关获取K线数据
         kline_df = self.trading_engine.get_kline(symbol, interval)
         if kline_df is None:

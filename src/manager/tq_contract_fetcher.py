@@ -4,7 +4,6 @@ TqSdk 合约查询器
 """
 
 import logging
-from typing import List, Optional
 
 from tqsdk import TqApi, TqAuth, TqKq
 from tqsdk.exceptions import TqTimeoutError
@@ -25,7 +24,7 @@ class TqContractFetcher:
         """
         self.auth = TqAuth(username, password)
 
-    def fetch_contracts(self) -> Optional[List[dict]]:
+    def fetch_contracts(self) -> list[dict] | None:
         """
         查询所有活跃期货合约基础信息（同步阻塞方法）
 

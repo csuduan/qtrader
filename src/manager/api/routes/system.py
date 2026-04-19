@@ -3,7 +3,6 @@
 """
 
 from datetime import datetime
-from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, Query, Request
 from pydantic import BaseModel
@@ -25,7 +24,7 @@ router = APIRouter(prefix="/api/system", tags=["系统"])
 
 @router.get("/status")
 async def get_system_status(
-    account_id: Optional[str] = Query(None, description="账户ID（多账号模式）"),
+    account_id: str | None = Query(None, description="账户ID（多账号模式）"),
     trading_manager: TradingManager = Depends(get_trading_manager),
 ):
     """
@@ -48,7 +47,7 @@ async def get_system_status(
 
 @router.get("/risk-control")
 async def get_risk_control_status(
-    account_id: Optional[str] = Query(None, description="账户ID（多账号模式）"),
+    account_id: str | None = Query(None, description="账户ID（多账号模式）"),
     trading_manager: TradingManager = Depends(get_trading_manager),
 ):
     """
@@ -63,12 +62,12 @@ async def get_risk_control_status(
 
 @router.put("/risk-control")
 async def update_risk_control(
-    max_daily_orders: Optional[int] = Body(default=None),
-    max_daily_cancels: Optional[int] = Body(default=None),
-    max_order_volume: Optional[int] = Body(default=None),
-    max_split_volume: Optional[int] = Body(default=None),
-    order_timeout: Optional[int] = Body(default=None),
-    account_id: Optional[str] = Body(None, description="账户ID（多账号模式）"),
+    max_daily_orders: int | None = Body(default=None),
+    max_daily_cancels: int | None = Body(default=None),
+    max_order_volume: int | None = Body(default=None),
+    max_split_volume: int | None = Body(default=None),
+    order_timeout: int | None = Body(default=None),
+    account_id: str | None = Body(None, description="账户ID（多账号模式）"),
     trading_manager=Depends(get_trading_manager),
 ):
     """
@@ -102,7 +101,7 @@ async def update_risk_control(
 @router.put("/alert-wechat")
 async def update_alert_wechat(
     alert_wechat: bool = Body(..., description="是否启用微信告警"),
-    account_id: Optional[str] = Body(None, description="账户ID（多账号模式）"),
+    account_id: str | None = Body(None, description="账户ID（多账号模式）"),
     trading_manager=Depends(get_trading_manager),
 ):
     """
@@ -125,7 +124,7 @@ async def update_alert_wechat(
 
 @router.get("/alert-wechat")
 async def get_alert_wechat(
-    account_id: Optional[str] = Query(None, description="账户ID（多账号模式）"),
+    account_id: str | None = Query(None, description="账户ID（多账号模式）"),
     trading_manager=Depends(get_trading_manager),
 ):
     """
@@ -142,15 +141,16 @@ async def get_alert_wechat(
     if alert_config is not None:
         # 兼容旧接口：返回 immediate 和 threshold 的或运算结果
         legacy_value = alert_config.get("immediate", False) or alert_config.get("threshold", False)
-        return success_response(data={"alert_wechat": legacy_value}, message="获取成功（已废弃，请使用 /alert-config）")
+        return success_response(
+            data={"alert_wechat": legacy_value}, message="获取成功（已废弃，请使用 /alert-config）"
+        )
     else:
         return error_response(code=500, message="获取告警配置失败")
 
 
-
 @router.post("/connect")
 async def connect_system(
-    account_id: Optional[str] = Body(None, description="账户ID（多账号模式）"),
+    account_id: str | None = Body(None, description="账户ID（多账号模式）"),
     trading_manager=Depends(get_trading_manager),
 ):
     """
@@ -174,7 +174,7 @@ async def connect_system(
 
 @router.post("/disconnect")
 async def disconnect_system(
-    account_id: Optional[str] = Body(None, description="账户ID（多账号模式）"),
+    account_id: str | None = Body(None, description="账户ID（多账号模式）"),
     trading_manager=Depends(get_trading_manager),
 ):
     """
@@ -194,7 +194,7 @@ async def disconnect_system(
 
 @router.post("/disconnect/gateway")
 async def disconnect_gateway(
-    account_id: Optional[str] = Body(None, description="账户ID（多账号模式）"),
+    account_id: str | None = Body(None, description="账户ID（多账号模式）"),
     trading_manager=Depends(get_trading_manager),
 ):
     """
@@ -216,7 +216,7 @@ async def disconnect_gateway(
 
 @router.post("/trader/start")
 async def start_trader(
-    account_id: Optional[str] = Body(None, description="账户ID（多账号模式）"),
+    account_id: str | None = Body(None, description="账户ID（多账号模式）"),
     trading_manager=Depends(get_trading_manager),
 ):
     """
@@ -235,7 +235,7 @@ async def start_trader(
 
 @router.post("/trader/stop")
 async def stop_trader(
-    account_id: Optional[str] = Body(None, description="账户ID（多账号模式）"),
+    account_id: str | None = Body(None, description="账户ID（多账号模式）"),
     trading_manager=Depends(get_trading_manager),
 ):
     """
@@ -254,7 +254,7 @@ async def stop_trader(
 
 @router.get("/trader/status")
 async def get_trader_status(
-    account_id: Optional[str] = Query(None, description="账户ID（多账号模式）"),
+    account_id: str | None = Query(None, description="账户ID（多账号模式）"),
     trading_manager=Depends(get_trading_manager),
 ):
     """
@@ -288,7 +288,7 @@ async def get_trader_status(
 
 @router.post("/pause")
 async def pause_trading(
-    account_id: Optional[str] = Body(None, description="账户ID（多账号模式）"),
+    account_id: str | None = Body(None, description="账户ID（多账号模式）"),
     trading_manager=Depends(get_trading_manager),
 ):
     """
@@ -308,7 +308,7 @@ async def pause_trading(
 
 @router.post("/resume")
 async def resume_trading(
-    account_id: Optional[str] = Body(None, description="账户ID（多账号模式）"),
+    account_id: str | None = Body(None, description="账户ID（多账号模式）"),
     trading_manager=Depends(get_trading_manager),
 ):
     """
@@ -475,16 +475,18 @@ async def get_manager_alert_config():
 
 class NotificationConfigUpdate(BaseModel):
     """通知告警配置更新（支持部分更新）"""
+
     enabled: bool
-    dnd_start: Optional[int] = None
-    dnd_end: Optional[int] = None
+    dnd_start: int | None = None
+    dnd_end: int | None = None
 
 
 class ExceptionConfigUpdate(BaseModel):
     """异常告警配置更新（支持部分更新）"""
+
     enabled: bool
-    dnd_start: Optional[int] = None
-    dnd_end: Optional[int] = None
+    dnd_start: int | None = None
+    dnd_end: int | None = None
 
 
 @router.put("/manager/alert-config")
@@ -504,8 +506,9 @@ async def update_manager_alert_config(
     - **exception.dnd_end**: 免打扰结束时间（小时）
     """
     try:
-        import yaml
         from pathlib import Path
+
+        import yaml
 
         config_loader = get_config_loader()
         app_config = config_loader.load_config()
@@ -558,7 +561,9 @@ async def update_manager_alert_config(
         with open(config_path, "w", encoding="utf-8") as f:
             yaml.dump(config_data, f, allow_unicode=True, sort_keys=False)
 
-        logger.info(f"Manager告警配置已更新: notification={notification.enabled}, exception={exception.enabled}")
+        logger.info(
+            f"Manager告警配置已更新: notification={notification.enabled}, exception={exception.enabled}"
+        )
 
         return success_response(
             data={

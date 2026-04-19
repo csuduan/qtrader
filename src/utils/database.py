@@ -21,8 +21,7 @@ _db: Optional["Database"] = None
 class Database:
     """PostgreSQL 数据库管理类"""
 
-    def __init__(self, db_url: str, echo: bool = False,
-                 pool_size: int = 5, max_overflow: int = 10):
+    def __init__(self, db_url: str, echo: bool = False, pool_size: int = 5, max_overflow: int = 10):
         """
         初始化数据库连接
 
@@ -99,8 +98,13 @@ class Database:
         logger.info("数据库连接已关闭")
 
 
-def init_database(db_url: str, account_id: str = "default", echo: bool = False,
-                  pool_size: int = 5, max_overflow: int = 10) -> Database:
+def init_database(
+    db_url: str,
+    account_id: str = "default",
+    echo: bool = False,
+    pool_size: int = 5,
+    max_overflow: int = 10,
+) -> Database:
     """
     初始化数据库
 
@@ -123,7 +127,7 @@ def init_database(db_url: str, account_id: str = "default", echo: bool = False,
     return _db
 
 
-def get_database() -> Optional[Database]:
+def get_database() -> Database | None:
     """
     获取全局数据库实例
 
@@ -133,7 +137,7 @@ def get_database() -> Optional[Database]:
     return _db
 
 
-def get_session() -> Optional[Session]:
+def get_session() -> Session | None:
     """
     获取数据库会话
 

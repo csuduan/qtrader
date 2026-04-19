@@ -6,7 +6,7 @@
 import asyncio
 import inspect
 from datetime import datetime
-from typing import Callable, List
+from typing import Callable
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -161,7 +161,7 @@ class TaskScheduler:
             Callable: 执行函数
         """
         # 去掉前缀下划线
-        #method_name = job_method.lstrip("_")
+        # method_name = job_method.lstrip("_")
         method_name = job_method.strip()
 
         # 优先从 JobManager 获取
@@ -185,7 +185,7 @@ class TaskScheduler:
         try:
             cron_parts = cron_expression.split()
             if len(cron_parts) == 6:
-                # 6字段格式：秒 分 时 日 月 周 
+                # 6字段格式：秒 分 时 日 月 周
                 return CronTrigger(
                     second=cron_parts[0],
                     minute=cron_parts[1],
@@ -236,7 +236,7 @@ class TaskScheduler:
         获取所有任务信息
 
         Returns:
-            List[dict]: 任务信息列表
+            list[dict]: 任务信息列表
         """
         return self._jobs
 

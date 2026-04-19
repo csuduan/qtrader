@@ -6,9 +6,13 @@ Gateway适配器基类
 import re
 from abc import ABC, abstractmethod
 from datetime import date, datetime
-from typing import Dict, Optional, Union
+from src.utils.async_event_engine import AsyncEventEngine
+from src.app_context import get_app_context
+from typing import Any
 
 import pandas as pd
+
+ctx = get_app_context()
 
 from src.models.object import (
     AccountData,
@@ -26,7 +30,6 @@ from src.models.object import (
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
-
 
 class BaseGateway(ABC):
     """
@@ -52,29 +55,24 @@ class BaseGateway(ABC):
         """初始化Gateway"""
         self.md_connected: bool = False  # 行情连接状态
         self.td_connected: bool = False  # 交易连接状态
-        self.trading_day: Optional[str] = None
-        self.running: bool = True  # 运行状态
-        self.contracts: Dict[str, ContractData] = {}
-        self._contracts_update_date: Optional[str] = None
-        self.positions: Dict[str, PositionData] = {}
-        # 开仓限制配置 {symbol: min_open_volume}
-        self._open_limit: Optional[Dict[str, int]] = None
+        self.trading_day: str | None = None
+        self.contracts: dict[str, ContractData] = {}
+        self._contracts_update_date: str | None = None
+        self._event_engine: AsyncEventEngine | None = ctx.get_event_engine()
         logger.info(f"{self.gateway_name} Gateway 初始化完成")
 
-    
     async def close(self):
         """关闭Gateway连接"""
         self.running = False
         await self.disconnect()
         logger.info(f"{self.gateway_name} Gateway 已关闭")
 
-
     @property
     def connected(self) -> bool:
         """网关是否已连接（行情和交易都连接时为True）"""
         return self.md_connected and self.td_connected
 
-    def std_symbol(self, symbol: str) -> Optional[str]:
+    def std_symbol(self, symbol: str) -> str | None:
         """
         标准化合约代码
         将各种格式的合约代码转换为统一格式 "symbol"
@@ -130,7 +128,7 @@ class BaseGateway(ABC):
                 return symbol
             return contract.symbol
 
-    def load_contracts(self) -> Optional[dict[str, ContractData]]:
+    def load_contracts(self) -> (dict[str, ContractData]) | None:
         """
         从数据库加载合约信息
 
@@ -243,15 +241,24 @@ class BaseGateway(ABC):
                 self.contracts[contract.symbol] = contract
                 loaded_count += 1
             except Exception as e:
-                logger.warning(
-                    f"解析合约数据失败 [{contract_dict.get('symbol')}]: {e}"
-                )
+                logger.warning(f"解析合约数据失败 [{contract_dict.get('symbol')}]: {e}")
 
         if loaded_count > 0:
             self._contracts_update_date = update_date
             logger.info(f"从 Manager 公共数据加载了 {loaded_count} 个合约信息")
 
         return loaded_count
+
+    
+    def emit_event(self, event_type: str, data: Any) -> None:
+        """
+        触发事件
+
+        Args:
+            event_type: 事件类型
+            data: 事件数据
+        """
+        self._event_engine.put(event_type, data)
 
     @abstractmethod
     async def connect(self) -> bool:
@@ -274,12 +281,12 @@ class BaseGateway(ABC):
         pass
 
     @abstractmethod
-    def get_trading_day(self) -> Optional[str]:
+    def get_trading_day(self) -> str | None:
         """
         获取当前交易日
 
         Returns:
-            Optional[str]: 交易日日期（YYYYMMDD）
+            str | None: 交易日日期（YYYYMMDD）
         """
         pass
 
@@ -311,7 +318,7 @@ class BaseGateway(ABC):
         pass
 
     @abstractmethod
-    def send_order(self, req: OrderRequest) -> Optional[OrderData]:
+    def send_order(self, req: OrderRequest) -> OrderData | None:
         """
         下单
 
@@ -319,7 +326,7 @@ class BaseGateway(ABC):
             req: 下单请求
 
         Returns:
-            Optional[OrderData]: 报单信息，失败返回None
+            OrderData | None: 报单信息，失败返回None
         """
         pass
 
@@ -339,12 +346,12 @@ class BaseGateway(ABC):
     # ==================== 查询接口 ====================
 
     @abstractmethod
-    def get_account(self) -> Optional[AccountData]:
+    def get_account(self) -> AccountData | None:
         """
         查询账户信息
 
         Returns:
-            Optional[AccountData]: 账户数据
+            AccountData | None: 账户数据
         """
         pass
 
@@ -384,7 +391,7 @@ class BaseGateway(ABC):
         查询所有合约信息
 
         Returns:
-            Dict[str, ContractData]: 合约字典 {symbol: ContractData}
+            dict[str, ContractData]: 合约字典 {symbol: ContractData}
         """
 
     @abstractmethod
@@ -408,7 +415,7 @@ class BaseGateway(ABC):
         pass
 
     @abstractmethod
-    def get_kline(self, symbol: str, interval: str) -> Optional[pd.DataFrame]:
+    def get_kline(self, symbol: str, interval: str) -> pd.DataFrame | None:
         """
         获取K线数据
 
@@ -417,6 +424,6 @@ class BaseGateway(ABC):
             interval: 周期（如"M1"）
 
         Returns:
-            Optional[pd.DataFrame]: K线数据框，失败返回None
+            pd.DataFrame | None: K线数据框，失败返回None
         """
         pass

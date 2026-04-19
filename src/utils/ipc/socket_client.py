@@ -11,7 +11,7 @@ Socket客户端 - V2版本，使用标准协议
 import asyncio
 import inspect
 import uuid
-from typing import Any, Awaitable, Callable, Dict, Optional, Union
+from typing import Any, Awaitable, Callable
 
 from src.utils.ipc.protocol import (
     MessageBody,
@@ -27,7 +27,7 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 HandlerType = Callable[[str, Any], None] | Callable[[str, Any], Awaitable[None]]
-PushHandlerType = Callable[[str, Dict], Any] | Callable[[str, Dict], Awaitable[Any]]
+PushHandlerType = Callable[[str, dict], Any] | Callable[[str, dict], Awaitable[Any]]
 
 
 class SocketClient:
@@ -50,7 +50,7 @@ class SocketClient:
         self,
         socket_path: str,
         account_id: str,
-        on_data_callback: Optional[HandlerType] = None,
+        on_data_callback: HandlerType | None = None,
         auto_reconnect: bool = True,
         reconnect_interval: float = 3.0,
         max_reconnect_attempts: int = 1000,  # 0表示无限重试
@@ -72,37 +72,37 @@ class SocketClient:
         """
         self.socket_path = socket_path
         self.account_id = account_id
-        self.reader: Optional[asyncio.StreamReader] = None
-        self.writer: Optional[asyncio.StreamWriter] = None
+        self.reader: asyncio.StreamReader | None = None
+        self.writer: asyncio.StreamWriter | None = None
         self.connected = False
-        self.on_data_callback: Optional[HandlerType] = on_data_callback
+        self.on_data_callback: HandlerType | None = on_data_callback
         self.protocol = MessageProtocol()
 
         # 请求-响应相关
-        self._pending_requests: Dict[str, asyncio.Future] = {}
-        self._receiving_task: Optional[asyncio.Task] = None
+        self._pending_requests: dict[str, asyncio.Future] = {}
+        self._receiving_task: asyncio.Task | None = None
         self._request_timeout = request_timeout
 
         # 重连相关
         self._auto_reconnect = auto_reconnect
         self._reconnect_interval = reconnect_interval
         self._max_reconnect_attempts = max_reconnect_attempts
-        self._reconnect_task: Optional[asyncio.Task] = None
+        self._reconnect_task: asyncio.Task | None = None
         self._backoff = BackoffStrategy(
             initial_delay=reconnect_interval, max_delay=60.0, multiplier=1.5
         )
 
         # 心跳相关
         self._heartbeat_interval = heartbeat_interval
-        self._heartbeat_task: Optional[asyncio.Task] = None
+        self._heartbeat_task: asyncio.Task | None = None
         self._health_checker = HealthChecker(interval=heartbeat_interval, timeout=5.0)
 
         # 推送处理器
-        self._push_handlers: Dict[str, PushHandlerType] = {}
+        self._push_handlers: dict[str, PushHandlerType] = {}
 
         # 连接断开回调
-        self._on_disconnect_callback: Optional[Callable[[], Any]] = None
-        self._on_connect_callback: Optional[Callable[[], Any]] = None
+        self._on_disconnect_callback: (Callable[[], Any]) | None = None
+        self._on_connect_callback: (Callable[[], Any]) | None = None
 
         logger.info(f"SocketClient V2 初始化: {socket_path}")
 
@@ -216,8 +216,8 @@ class SocketClient:
         logger.info(f"SocketClient V2 已断开")
 
     async def request(
-        self, request_type: str, data: Dict[str, Any], timeout: Optional[float] = None
-    ) -> Optional[Dict[str, Any]]:
+        self, request_type: str, data: dict[str, Any], timeout: float | None = None
+    ) -> (dict[str, Any]) | None:
         """
         发送请求并等待响应
 
@@ -234,7 +234,7 @@ class SocketClient:
             return None
 
         request_id = str(uuid.uuid4())
-        future: asyncio.Future[Dict[str, Any]] = asyncio.Future()
+        future: asyncio.Future[dict[str, Any]] = asyncio.Future()
         self._pending_requests[request_id] = future
 
         try:
@@ -437,7 +437,7 @@ class SocketClient:
         """检查是否已连接"""
         return self.connected and self.writer is not None and not self.writer.is_closing()
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """获取统计信息"""
         return {
             "connected": self.connected,

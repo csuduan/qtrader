@@ -11,10 +11,12 @@ import threading
 import time
 from contextlib import closing
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any
+from src.utils.event import EventTypes
+
 
 from pandas import DataFrame
-from tqsdk import TqAccount, TqApi, TqAuth, TqCtp, TqKq, TqRohon, TqJees, TqSim, data_extension
+from tqsdk import TqAccount, TqApi, TqAuth, TqCtp, TqJees, TqKq, TqRohon, TqSim, data_extension
 from tqsdk.objs import Account, Order, Position, Quote, Trade
 
 from src.app_context import get_app_context
@@ -37,7 +39,7 @@ from src.models.object import (
 )
 from src.trader.gateway.base_gateway import BaseGateway
 from src.utils.async_event_engine import AsyncEventEngine
-from src.utils.config_loader import GatewayConfig,TraderConfig
+from src.utils.config_loader import GatewayConfig, TraderConfig
 from src.utils.logger import get_logger
 
 ctx = get_app_context()
@@ -60,32 +62,32 @@ class TqGateway(BaseGateway):
 
     def __init__(self, acct_config: TraderConfig):
         super().__init__()
-        self._tq_running = False
+        self._running = False
         self.config = acct_config.gateway
         self.account_id = self.config.account_id
         logger.info(f"TqGateway初始化, account_id: {self.account_id}, id: {id(self)}")
 
         # TqSdk API实例
-        self.api: Optional[TqApi] = None
-        self.auth: Optional[TqAuth] = None
+        self.api: TqApi | None = None
+        self.auth: TqAuth | None = None
 
         # TqSdk原始数据缓存(用于is_changing检查)
-        self._account: Optional[Account] = None
-        self._positions: Dict[str, Position] = {}
-        self._orders: Dict[str, Order] = {}
-        self._trades: Dict[str, Trade] = {}
-        self._quotes: Dict[str, Quote] = {}
+        self._account: Account | None = None
+        self._positions: dict[str, Position] = {}
+        self._orders: dict[str, Order] = {}
+        self._trades: dict[str, Trade] = {}
+        self._quotes: dict[str, Quote] = {}
         # 自定义换仓
-        self._klines: Dict[str, DataFrame] = {}
-        self._pending_orders: Dict[str, Order] = {}
+        self._klines: dict[str, DataFrame] = {}
+        self._pending_orders: dict[str, Order] = {}
         # 大写合约，key为原始symbol，value为exchange
-        self._upper_symbols: Dict[str, str] = {}
+        self._upper_symbols: dict[str, str] = {}
         # 合约信息，key为标准化后的symbol，value为ContractData
-        # self.contracts: Dict[str, ContractData] = {}
+        # self.contracts: dict[str, ContractData] = {}
 
         # 历史订阅的合约符号列表
         self.hist_subs: set[str] = set()
-        self.kline_subs: List[tuple[str, str]] = []
+        self.kline_subs: list[tuple[str, str]] = []
 
         # 订阅配置（来自全局config.yaml）
         self.subs_config = acct_config.subs
@@ -93,24 +95,12 @@ class TqGateway(BaseGateway):
         # 订单引用计数
         self._order_ref = 0
 
-        # 线程优化相关变量
-        # 线程同步队列（线程安全）
-        self._sync_queue: queue.Queue = queue.Queue(maxsize=1000)
-        # tq主线程
-        self._tq_thead: Optional[threading.Thread] = None
-        # 事件分发协程
-        self._dispatcher_task: Optional[asyncio.Task] = asyncio.create_task(self._event_dispatcher())
-
-        # AsyncEventEngine引用（直接发送事件）
-        self._event_engine: Optional[AsyncEventEngine] = ctx.get_event_engine()
-
         # 先尝试从数据库加载合约信息
         self.load_contracts()
 
         # 从全局订阅配置加载合约列表
         if self.subs_config.subscribe_symbols:
             self.hist_subs.update(self.subs_config.subscribe_symbols)
-
 
     # ==================== 连接管理 ====================
     async def connect(self) -> bool:
@@ -121,11 +111,13 @@ class TqGateway(BaseGateway):
             if self.connected:
                 logger.warning("TqSdk已连接，无需重复连接")
                 return True
-            
-            # 先停止tq轮询
-            if self._tq_running:
-                await self.disconnect()
-            self._tq_running = True
+
+            if self._running:
+                logger.warning("TqSdk运行中，先断开连接")
+                self.disconnect()
+
+
+            self._running = True
             # 启动tq主线程
             self._tq_thead = threading.Thread(
                 target=self._tq_run, name=f"TqSdk_Thread", daemon=True
@@ -146,12 +138,12 @@ class TqGateway(BaseGateway):
         try:
             logger.info("正在断开TqSdk连接...")
             # 停止轮询
-            self._tq_running = False
+            self._running = False
             self.md_connected = False
             self.td_connected = False
 
             # 推送最新账户信息
-            self._push_account(self._convert_account(self._account))                   
+            self._push_account(self._convert_account(self._account))
             logger.info("TqSdk已断开连接")
             return True
 
@@ -220,7 +212,7 @@ class TqGateway(BaseGateway):
                 account = TqSim()
 
             # 创建TqApi
-            self.api = TqApi(account, auth=self.auth, web_gui=False)
+            self.api = TqApi(account, auth=self.auth, web_gui=False,debug=False)
             assert self.api is not None  # 确保类型检查器知道 api 不是 None
 
             # 获取账户和持仓、成交、委托单初始数据
@@ -263,7 +255,7 @@ class TqGateway(BaseGateway):
             self._push_ready()
 
             logger.info("TqSdk开始轮询...")
-            while self._tq_running:
+            while self._running:
                 if self.api is None:
                     break
                 try:
@@ -286,7 +278,7 @@ class TqGateway(BaseGateway):
                 self.api.close()
                 self.api = None
 
-    def get_trading_day(self) -> Optional[str]:
+    def get_trading_day(self) -> str | None:
         """获取当前交易日"""
         now = datetime.now()
         # 如果当前时间晚于20点，则交易日切换到下一天
@@ -304,7 +296,7 @@ class TqGateway(BaseGateway):
                 trading_day += timedelta(days=1)
         return trading_day.strftime("%Y%m%d")
 
-    def subscribe(self, symbols: List[str]) -> bool:
+    def subscribe(self, symbols: list[str]) -> bool:
         """订阅行情"""
         try:
             # 添加到订阅列表中
@@ -363,7 +355,7 @@ class TqGateway(BaseGateway):
         logger.info(f"订阅K线数据: {std_symbol} {interval}")
         return True
 
-    def send_order(self, req: OrderRequest) -> Optional[OrderData]:
+    def send_order(self, req: OrderRequest) -> OrderData | None:
         """下单"""
         try:
             if not self.connected:
@@ -484,7 +476,7 @@ class TqGateway(BaseGateway):
         except Exception as e:
             logger.error(f"从API查询合约信息失败: {e}", exc_info=True)
 
-    def get_contracts(self) -> Dict[str, ContractData]:
+    def get_contracts(self) -> dict[str, ContractData]:
         """查询合约（兼容）"""
         return self.contracts or {}
 
@@ -514,30 +506,30 @@ class TqGateway(BaseGateway):
             logger.exception(f"强制刷新合约信息失败: {e}")
             return False
 
-    def get_account(self) -> Optional[AccountData]:
+    def get_account(self) -> AccountData | None:
         """获取账户数据(兼容)"""
         if self._account is None:
             return AccountData.model_construct(account_id=self.account_id or "", balance=0)
         return self._convert_account(self._account)
 
-    def get_positions(self) -> Dict[str, PositionData]:
+    def get_positions(self) -> dict[str, PositionData]:
         """获取持仓数据(兼容,返回原始格式)"""
-        data={}
+        data = {}
         for item in self._positions.values():
             position = self._convert_position(item)
             if len(position.symbol) <= 6:
                 data[position.symbol] = position
         return data
 
-    def get_orders(self) -> Dict[str, OrderData]:
+    def get_orders(self) -> dict[str, OrderData]:
         """获取订单数据(兼容,返回原始格式)"""
         return {order_id: self._convert_order(order) for order_id, order in self._orders.items()}
 
-    def get_trades(self) -> Dict[str, TradeData]:
+    def get_trades(self) -> dict[str, TradeData]:
         """获取成交数据(兼容,返回原始格式)"""
         return {trade_id: self._convert_trade(trade) for trade_id, trade in self._trades.items()}
 
-    def get_quotes(self) -> Dict[str, TickData]:
+    def get_quotes(self) -> dict[str, TickData]:
         """获取行情数据(兼容,返回原始格式)"""
         return {
             symbol: self._convert_tick(quote)
@@ -545,7 +537,7 @@ class TqGateway(BaseGateway):
             if quote.instrument_id
         }
 
-    def get_kline(self, symbol: str, interval: str) -> Optional[DataFrame]:
+    def get_kline(self, symbol: str, interval: str) -> DataFrame | None:
         """获取K线数据"""
         try:
             if not self.connected or not self.api:
@@ -596,7 +588,7 @@ class TqGateway(BaseGateway):
     def _convert_position(self, pos: Position) -> PositionData:
         """转换持仓数据"""
         contract = self.contracts.get(pos.instrument_id)
-        position =  PositionData(
+        position = PositionData(
             symbol=pos.instrument_id,
             exchange=self._parse_exchange(pos.exchange_id),
             multiple=contract.multiple if contract else 0,
@@ -612,7 +604,7 @@ class TqGateway(BaseGateway):
             close_profit_short=0,
             margin_long=float(pos.margin_long) or 0,
             margin_short=float(pos.margin_short) or 0,
-            auto_updated=True
+            auto_updated=True,
         )
         if position.symbol in self._quotes:
             position.last_price = self._quotes[position.symbol].last_price or 0
@@ -723,7 +715,7 @@ class TqGateway(BaseGateway):
             limit_down=float(quote.get("lower_limit", 0)),
         )  # type: ignore[call-arg]
 
-    def _convert_bar(self, symbol: str, interval: str, data, update: Union[int, float]) -> BarData:
+    def _convert_bar(self, symbol: str, interval: str, data, update: int | float) -> BarData:
         """
         转换K线数据
 
@@ -799,20 +791,14 @@ class TqGateway(BaseGateway):
         except Exception as e:
             logger.exception(f"收集数据变化异常: {e}")
 
-    def _push_to_queue(self, event_type: str, data: Any):
-        """推送数据到同步队列（非阻塞）"""
-        try:
-            self._sync_queue.put_nowait((event_type, data))
-        except queue.Full:
-            logger.warning(f"事件队列已满，丢弃事件: {event_type}")
 
     def _push_tick(self, tick_data: TickData):
         """推送Tick数据到同步队列（非阻塞）"""
-        self._push_to_queue("tick", tick_data)
+        self.emit_event(EventTypes.TICK_UPDATE, tick_data)
 
     def _push_bar(self, bar_data: BarData):
         """推送Bar数据到同步队列（非阻塞）"""
-        self._push_to_queue("bar", bar_data)
+        self.emit_event(EventTypes.KLINE_UPDATE, bar_data)
 
     def _push_trade(self, trade_data: TradeData):
         """推送Trade数据到同步队列（非阻塞）"""
@@ -821,7 +807,7 @@ class TqGateway(BaseGateway):
         if order:
             # TqSdk的Order对象有limit_price字段
             trade_data.order_price = order.limit_price if hasattr(order, "limit_price") else None
-        self._push_to_queue("trade", trade_data)
+        self.emit_event(EventTypes.TRADE_UPDATE, trade_data)
         logger.info(f"成交回报: {trade_data}")
 
     def _push_position(self, position_data: PositionData, source: str = "trade"):
@@ -834,78 +820,26 @@ class TqGateway(BaseGateway):
         # 将source标记添加到数据中
         data_dict = position_data.model_dump()
         data_dict["_source"] = source
-        self._push_to_queue("position", data_dict)
+        self.emit_event(EventTypes.POSITION_UPDATE, data_dict)
 
     def _push_account(self, account_data: AccountData):
         """推送Account数据到同步队列（非阻塞）"""
-        self._push_to_queue("account", account_data)
+        self.emit_event(EventTypes.ACCOUNT_UPDATE, account_data)
 
     def _push_order(self, order_data: OrderData):
         """推送Order数据到同步队列（非阻塞）"""
-        self._push_to_queue("order", order_data)
+        self.emit_event(EventTypes.ORDER_UPDATE, order_data)
         logger.info(f"报单回报: {order_data}")
 
     def _push_ready(self):
         """推送就绪通知到同步队列（非阻塞）"""
-        self._push_to_queue("ready", None)
+        self.emit_event(EventTypes.ACCOUNT_READY, None)
         logger.info("TqSdk就绪通知已发送")
 
     def _push_contract(self, contract_data: ContractData):
         """推送Contract数据到同步队列（非阻塞）"""
-        self._push_to_queue("contract", contract_data)
+        self.emit_event(EventTypes.CONTRACT_UPDATE, contract_data)
 
-    async def _event_dispatcher(self):
-        """
-        事件分发协程（在主线程事件循环中运行）
-
-        职责：
-        1. 从同步队列获取数据
-        2. 转换为AsyncEventEngine事件类型
-        3. 直接推送到AsyncEventEngine
-        """
-        try:
-            logger.info("事件分发协程已启动")
-            while self.running:
-                try:
-                    # 从同步队列获取数据（使用get_nowait避免阻塞）
-                    if self._sync_queue.empty():
-                        await asyncio.sleep(0.01)
-                        continue
-                    event_type, data = self._sync_queue.get_nowait()
-                    # 映射到AsyncEventEngine事件类型
-                    engine_event_type = self._map_event_type(event_type)
-                    # 直接推送到AsyncEventEngine
-                    if self._event_engine and engine_event_type:
-                        self._event_engine.put(engine_event_type, data)
-
-                except queue.Empty:
-                    # 队列已空，继续循环
-                    await asyncio.sleep(0.01)
-                    continue
-                except Exception as e:
-                    logger.exception(f"事件分发异常: {e}")
-            logger.info("事件分发协程已退出")
-
-        except asyncio.CancelledError:
-            logger.info("事件分发协程已取消")
-        except Exception as e:
-            logger.exception(f"事件分发协程致命错误: {e}")
-
-    def _map_event_type(self, gateway_event: str) -> Optional[str]:
-        """映射Gateway事件类型到AsyncEventEngine事件类型"""
-        from src.utils.event_engine import EventTypes
-
-        mapping = {
-            "tick": EventTypes.TICK_UPDATE,
-            "bar": EventTypes.KLINE_UPDATE,
-            "order": EventTypes.ORDER_UPDATE,
-            "trade": EventTypes.TRADE_UPDATE,
-            "position": EventTypes.POSITION_UPDATE,
-            "account": EventTypes.ACCOUNT_UPDATE,
-            "contract": EventTypes.CONTRACT_UPDATE,
-            "ready": EventTypes.ACCOUNT_READY,
-        }
-        return mapping.get(gateway_event)
 
     def _parse_exchange(self, exchange_code: str) -> Exchange:
         """解析交易所代码"""
