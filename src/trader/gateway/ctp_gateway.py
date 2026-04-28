@@ -77,6 +77,8 @@ class CtpGateway(BaseGateway):
 
         # K线订阅列表: [(symbol, interval), ...]
         self._bar_subs: list[tuple[str, str]] = []
+        # 订阅合约列表
+        self._sub_symbols: set[str] = set()
 
         # K线生成器（使用 utils.bar_generator）
         self._bar_generator = MultiSymbolBarGenerator()
@@ -141,7 +143,10 @@ class CtpGateway(BaseGateway):
         self.md_connected = False
         self.td_connected = False
         self._running = False
-        self.emit_event(EventTypes.ACCOUNT_UPDATE, self._account)
+        if self._account:
+            self._account.td_connected = False
+            self._account.md_connected = False
+            self.emit_event(EventTypes.ACCOUNT_UPDATE, self._account)
         logger.info("CTP Gateway 已断开")
         return True
 
@@ -198,6 +203,8 @@ class CtpGateway(BaseGateway):
                 + self._account.hold_profit
                 + self._account.close_profit
             )
+            self._account.td_connected = self.td_connected
+            self._account.md_connected = self.md_connected
             return self._account
 
         default_account = AccountData(
@@ -303,8 +310,9 @@ class CtpGateway(BaseGateway):
         """订阅行情"""
         if isinstance(symbol, str):
             symbol = [symbol]
-        if self.md_api is None:
-            logger.error("CTP 行情接口未连接")
+        if self.md_api is None or not self.md_connected:
+            logger.warning("CTP 行情接口未连接，延迟订阅")
+            self._sub_symbols.update(symbol)
             return False
         self.md_api.subscribe(symbol)  # type: ignore[arg-type]
         return True
@@ -430,7 +438,7 @@ class CtpGateway(BaseGateway):
             position.close_profit_long + position.close_profit_short
             for position in self._positions.values()
         )
-        self.emit_event(EventTypes.ACCOUNT_UPDATE, account)
+        self.emit_event(EventTypes.ACCOUNT_UPDATE, self._account)
 
     def on_status(self, ready: bool = False) -> None:
         """处理状态回调"""
@@ -451,7 +459,9 @@ class CtpGateway(BaseGateway):
 
         if self.connected:
             # 订阅行情
-            self.md_api.resubscribe()
+            self.md_api.subscribe(self._sub_symbols)
+            self.md_api.subscribe(self.subs_config.subscribe_symbols)
+
             # 订阅持仓
             if len(self._positions) > 0:
                 self.subscribe([pos.symbol for pos in self._positions.values()])

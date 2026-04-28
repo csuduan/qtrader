@@ -143,7 +143,8 @@ class TqGateway(BaseGateway):
             self.td_connected = False
 
             # 推送最新账户信息
-            self._push_account(self._convert_account(self._account))
+            if self._account:
+                self._push_account(self._convert_account(self._account))
             logger.info("TqSdk已断开连接")
             return True
 

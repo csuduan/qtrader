@@ -90,6 +90,7 @@ class TraderProxy:
         self._trade_cache: dict[str, TradeData] = {}
         # 账户内存缓存（常驻，由DB初始化 + Trader推送更新）
         self._account_cache: AccountData | None = None
+        self._account_cache_time: datetime | None = None
         # WebSocket推送限制
         self._ws_push_interval: float = 2.0  # 持仓最小推送间隔2秒
         self._last_position_push_time: dict[str, float] = {}
@@ -569,8 +570,11 @@ class TraderProxy:
                     self._emit_data("tick_batch", {"ticks": ticks, "account_id": self.account_id})
                 # 如果携带账户数据，更新缓存并推送
                 if account_data and isinstance(account_data, dict):
-                    #self._handle_account_update(account_data)
                     self._account_cache = AccountData.model_validate(account_data)
+                    # 限制账户推送推送间隔2秒
+                    if self._account_cache_time is None or (datetime.now() - self._account_cache_time).seconds >= 2:
+                        self._account_cache_time = datetime.now()
+                        self._emit_data("account", self._account_cache.model_dump())
             elif msg_type == "account":
                 # Trader推送完整账户数据（网关状态变化时），直接更新缓存
                 self._handle_account_update(data)

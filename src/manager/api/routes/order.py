@@ -9,6 +9,7 @@ from src.manager.api.responses import error_response, success_response
 from src.manager.api.schemas import ManualOrderReq, OrderRes
 from src.manager.manager import TradingManager
 from src.utils.logger import get_logger
+from datetime import date,datetime, timedelta
 
 logger = get_logger(__name__)
 
@@ -21,8 +22,8 @@ def _query_orders_from_db(
     limit: int,
     offset: int,
 ):
-    """从PG查询历史委托单（已成交/废单）"""
-    from datetime import datetime
+    """从PG查询历史委托单（已成交/废单），默认过滤当前交易日数据"""
+    from sqlalchemy import func
 
     from src.models.po import OrderPo
     from src.utils.database import get_database
@@ -45,6 +46,10 @@ def _query_orders_from_db(
                 (OrderPo.status == "REJECTED")
                 | ((OrderPo.status == "FINISHED") & (OrderPo.volume_left == OrderPo.volume_orign))
             )
+
+        # 默认最近2天的数据
+        last_day= date.today() - timedelta(days=1)
+        query = query.filter(func.date(OrderPo.insert_date_time) >= last_day)
 
         query = query.order_by(OrderPo.insert_date_time.desc())
         order_pos = query.offset(offset).limit(limit).all()
@@ -87,8 +92,8 @@ async def get_orders(
     获取委托单列表
 
     - ALIVE(挂单): 从Manager内存缓存查询（由Trader实时推送维护）
-    - FINISHED(已成交): 从数据库查询
-    - REJECTED(废单): 从数据库查询
+    - FINISHED(已成交): 从数据库查询当前交易日数据
+    - REJECTED(废单): 从数据库查询当前交易日数据
     """
     from datetime import datetime
 
@@ -97,7 +102,7 @@ async def get_orders(
             # 查挂单始终走 RPC 查询 Trader 实时数据
             orders_list = await trading_manager.get_active_orders(account_id)
         elif status in ("FINISHED", "REJECTED"):
-            # 查询已完成和废单只查询数据库
+            # 查询已完成和废单只查询当前交易日数据
             return _query_orders_from_db(status, account_id, limit, offset)
         else:
             # status 为空：优先走 RPC 查询 Trader 所有订单

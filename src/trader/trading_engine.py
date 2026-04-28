@@ -107,8 +107,6 @@ class TradingEngine:
             self._order_cmd_executor.start()
             logger.info("报单指令执行器已启动")
 
-        # 后台连接Gateway
-        await self.connect()
         logger.info(f"交易引擎 [{self.account_id}] 已启动")
 
     @property

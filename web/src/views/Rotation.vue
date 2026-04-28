@@ -10,9 +10,13 @@
               <el-tag v-if="rotationStatus.working" :type="rotationStatus.is_manual ? 'success' : 'warning'" size="large" style="margin-right: 10px">
                 {{ rotationStatus.is_manual ? '手动换仓中' : '自动换仓中' }}
               </el-tag>
-              <el-button @click="handleStartRotation" :loading="rotating" :disabled="rotationStatus.working" type="success">
+              <el-button v-if="!rotationStatus.working" @click="handleStartRotation" :loading="rotating" type="success">
                 <el-icon><VideoPlay /></el-icon>
                 开始换仓
+              </el-button>
+              <el-button v-else @click="handleStopRotation" :loading="stopping" type="danger">
+                <el-icon><CircleClose /></el-icon>
+                停止换仓
               </el-button>
               <el-button @click="handleBatchDelete" :loading="batchDeleting" :disabled="selectedInstructions.length === 0 || rotationStatus.working" type="danger">
                 <el-icon><Delete /></el-icon>
@@ -57,12 +61,15 @@
           </el-table-column>
           <el-table-column prop="offset" label="开平" :width="isMobile ? 70 : 120" />
           <el-table-column prop="volume" label="手数" :width="isMobile ? 50 : 70" />
-          <el-table-column label="进度" :width="isMobile ? 100 : 120">
+          <el-table-column label="进度" :width="isMobile ? 120 : 160">
             <template #default="{ row }">
               <el-progress
                 :percentage="getProgress(row.volume, row.remaining_volume)"
-                :format="() => `${row.volume - row.remaining_volume}/${row.volume}`"
+                :format="() => `${row.filled_volume}/${row.volume}`"
               />
+              <div v-if="row.pending_volume > 0" style="font-size: 11px; color: #e6a23c; margin-top: 2px;">
+                进行中: {{ row.pending_volume }} 手
+              </div>
             </template>
           </el-table-column>
           <el-table-column label="信息" show-overflow-tooltip :min-width="isMobile ? 80 : 120">
@@ -278,7 +285,7 @@
 <script setup lang="ts">
 import { ref, reactive, watch, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox, type UploadInstance, type UploadUserFile } from 'element-plus'
-import { VideoPlay, Refresh, Delete, Upload } from '@element-plus/icons-vue'
+import { VideoPlay, Refresh, Delete, Upload, CircleClose } from '@element-plus/icons-vue'
 import { rotationApi } from '@/api'
 import { useStore } from '@/stores'
 import type { RotationInstruction } from '@/types'
@@ -289,6 +296,7 @@ const store = useStore()
  const creating = ref(false)
  const editing = ref(false)
  const rotating = ref(false)
+ const stopping = ref(false)
  const batchDeleting = ref(false)
  const showCreateDialog = ref(false)
  const showEditDialog = ref(false)
@@ -306,6 +314,7 @@ const store = useStore()
  const csvHeaders = ref<string[]>([])
  const importForm = reactive({ file: null as UploadUserFile | null })
  const isMobile = ref(false)
+ const pollInterval = ref<number | null>(null)
 
  const editForm = reactive({
    id: 0,
@@ -358,12 +367,54 @@ async function handleStartRotation() {
     await rotationApi.startRotation(store.selectedAccountId)
     ElMessage.success('换仓流程已启动，正在执行...')
     await loadData()
+    startPolling()
   } catch (error: any) {
     if (error !== 'cancel') {
       ElMessage.error(`启动换仓失败: ${error.message}`)
     }
   } finally {
     rotating.value = false
+  }
+}
+
+async function handleStopRotation() {
+  if (!store.selectedAccountId) {
+    ElMessage.error('请先选择账户')
+    return
+  }
+  try {
+    await ElMessageBox.confirm('确定要停止换仓吗？当前挂单将被撤单。', '确认停止换仓', {
+      type: 'warning'
+    })
+
+    stopping.value = true
+    await rotationApi.stopRotation(store.selectedAccountId)
+    ElMessage.success('换仓已停止')
+    await loadData()
+    stopPolling()
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      ElMessage.error(`停止换仓失败: ${error.message}`)
+    }
+  } finally {
+    stopping.value = false
+  }
+}
+
+function startPolling() {
+  if (pollInterval.value) return
+  pollInterval.value = window.setInterval(async () => {
+    await loadData()
+    if (!rotationStatus.working) {
+      stopPolling()
+    }
+  }, 2000)
+}
+
+function stopPolling() {
+  if (pollInterval.value) {
+    clearInterval(pollInterval.value)
+    pollInterval.value = null
   }
 }
 
@@ -477,6 +528,12 @@ async function loadData() {
     const result = await rotationApi.getRotationInstructions(store.selectedAccountId || '')
     instructions.value = result.instructions
     Object.assign(rotationStatus, result.rotation_status)
+    // 根据换仓状态自动启停轮询
+    if (rotationStatus.working && !pollInterval.value) {
+      startPolling()
+    } else if (!rotationStatus.working && pollInterval.value) {
+      stopPolling()
+    }
   } catch (error: any) {
     ElMessage.error(`加载换仓指令失败: ${error.message}`)
   } finally {
@@ -621,6 +678,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('resize', updateIsMobile)
+  stopPolling()
 })
 </script>
 

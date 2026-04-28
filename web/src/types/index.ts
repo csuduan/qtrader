@@ -132,6 +132,7 @@ export interface RotationInstruction {
   direction: string
   volume: number
   filled_volume: number
+  pending_volume: number
   price: number
   order_time: string | null
   trading_date: string | null

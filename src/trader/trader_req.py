@@ -1013,8 +1013,16 @@ class TraderReqHandler:
                 "is_manual": self.trader.switchPos_manager.is_manual,
             }
 
-        return {
-            "instructions": [
+        result = []
+        for ins in instructions:
+            # 计算进行中手数（当前挂单中尚未成交的手数）
+            pending_volume = 0
+            if ins.current_order_id and ins.status == "RUNNING":
+                cmd_dict = self.trader.trading_engine.get_order_cmd(ins.current_order_id)
+                if cmd_dict:
+                    pending_volume = cmd_dict.get("pending_volume", 0)
+
+            result.append(
                 {
                     "id": ins.id,
                     "account_id": ins.account_id,
@@ -1024,6 +1032,7 @@ class TraderReqHandler:
                     "direction": ins.direction,
                     "volume": ins.volume,
                     "filled_volume": ins.filled_volume,
+                    "pending_volume": pending_volume,
                     "price": ins.price,
                     "order_time": ins.order_time,
                     "trading_date": ins.trading_date,
@@ -1044,8 +1053,10 @@ class TraderReqHandler:
                     "created_at": ins.created_at.isoformat() if ins.created_at else None,
                     "updated_at": ins.updated_at.isoformat() if ins.updated_at else None,
                 }
-                for ins in instructions
-            ],
+            )
+
+        return {
+            "instructions": result,
             "rotation_status": rotation_status,
         }
 
@@ -1126,6 +1137,14 @@ class TraderReqHandler:
                 logger.error(f"Trader [{self.account_id}] 后台换仓任务执行失败: {e}")
 
         asyncio.create_task(execute())
+        return True
+
+    @request("stop_rotation")
+    async def _req_stop_rotation(self, data: dict) -> bool:
+        """处理停止换仓请求"""
+        if self.trader.switchPos_manager is None:
+            return False
+        self.trader.switchPos_manager.stop_rotation()
         return True
 
     @request("batch_delete_instructions")

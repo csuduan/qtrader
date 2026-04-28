@@ -451,6 +451,11 @@ class OrderCmd:
 
     def to_dict(self) -> dict:
         """转换为字典"""
+        # 计算进行中手数（当前挂单中尚未成交的手数）
+        pending_volume = 0
+        if self._pending_order and self._pending_order.is_active():
+            pending_volume = self._pending_order.volume_left
+
         return {
             "cmd_id": self.cmd_id,
             "status": (
@@ -472,6 +477,7 @@ class OrderCmd:
             "filled_volume": self.filled_volume,
             "filled_price": round(self.filled_price, 2),
             "remaining_volume": self.remaining_volume,
+            "pending_volume": pending_volume,
             "is_active": self.is_active,
             "source": self.source,
             "created_at": self.created_at.isoformat(),

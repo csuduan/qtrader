@@ -1,9 +1,6 @@
 """
 CTP API 封装模块
 
-封装 CTP Market Data API 和 Trader API，提供行情订阅、交易操作等功能。
-需要安装 CTP SDK（如 openctp_ctp 或类似库）才能运行。
-
 参考：
 - CTP API 文档：https://www.simnow.com.cn
 """
@@ -14,21 +11,6 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from xxlimited import Str
-
-from src.app_context import get_app_context
-from src.utils.config_loader import TraderConfig
-
-ctx = get_app_context()
-config: TraderConfig = ctx.get_config()
-
-ctp_type = config.gateway.broker.type
-if ctp_type == "rohon":
-    from pyctp.rohon import mdapi, tdapi
-elif ctp_type == "jees":
-    from pyctp.jees import mdapi, tdapi
-else:
-    from pyctp.ctp import mdapi, tdapi
 
 from src.models.object import (
     AccountData,
@@ -44,16 +26,29 @@ from src.models.object import (
     PosDirection,
     PositionData,
     ProductType,
-    SubscribeRequest,
     TickData,
     TradeData,
 )
 from src.utils.logger import get_logger
+from src.app_context import get_app_context
+from src.utils.config_loader import TraderConfig
+
+ctx = get_app_context()
+config: TraderConfig = ctx.get_config()
+logger = get_logger(__name__)
+
+
+ctp_type = config.gateway.broker.type
+if ctp_type == "rohon":
+    from pyctp.rohon import mdapi, tdapi
+elif ctp_type == "jees":
+    from pyctp.jees import mdapi, tdapi
+else:
+    from pyctp.ctp import mdapi, tdapi
 
 if TYPE_CHECKING:
     from src.trader.gateway.ctp_gateway import CtpGateway
 
-logger = get_logger(__name__)
 
 
 # ==================== CTP 常量映射 ====================
@@ -163,9 +158,6 @@ class CtpMdApi(mdapi.CThostFtdcMdSpi):
 
         # 已订阅合约
         self.subscribed: set = set()
-        # 历史订阅合约（从全局配置加载）
-        self.hist_subscribed: set = set()
-        self.hist_subscribed.update(gateway.subs_config.subscribe_symbols)
 
         # API 实例
         self.api: mdapi.CThostFtdcMdApi | None = None
@@ -239,16 +231,10 @@ class CtpMdApi(mdapi.CThostFtdcMdSpi):
         self.api.ReqUserLogin(req, self.reqid)
         logger.debug("CTP 行情接口发送登录请求")
 
-    def resubscribe(self) -> None:
-        """重新订阅已订阅的合约"""
-        if self.hist_subscribed and len(self.hist_subscribed) > 0:
-            self.subscribe(list(self.hist_subscribed))  # type: ignore[arg-type]
-
-    def subscribe(self, symbols: list[Str]) -> None:
+    def subscribe(self, symbols: list[str]) -> None:
         """订阅行情"""
-        self.hist_subscribed.update(symbols)
         if not self.connected or not self.api:
-            logger.warning("行情接口未登录，无法订阅")
+            logger.warning("行情接口未登录，无法订阅行情")
             return
 
         std_symbols = [self.gateway.std_symbol(s) for s in symbols]
@@ -590,6 +576,8 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
         ctp_req = tdapi.CThostFtdcInputOrderActionField()
         ctp_req.BrokerID = self.broker
         ctp_req.InvestorID = self.user
+        ctp_req.UserID = self.user
+        ctp_req.InstrumentID = order.symbol
         if order.order_sys_id:
             # 优先使用sys_id +exchange
             ctp_req.OrderSysID = order.order_sys_id
@@ -807,6 +795,8 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
         if pOrder.StatusMsg and pOrder.StatusMsg in error_msg:
             status = OrderStatus.REJECTED
 
+        
+        order.order_sys_id = pOrder.OrderSysID
         order.status = status
         order.status_msg = pOrder.StatusMsg
         order.traded = pOrder.VolumeTraded

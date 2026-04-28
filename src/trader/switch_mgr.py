@@ -81,12 +81,21 @@ class SwitchPosManager:
         self.running_instructions: list[RotationInstructionPo] | None = None
         self.is_manual = False
         self.all_instructions = []
+        self._stop_requested = False
 
     def start(self):
         """启动换仓管理器"""
         # 加载所有换仓指令
         self.load_rotation_instructions()
         pass
+
+    def stop_rotation(self) -> None:
+        """请求停止换仓"""
+        if not self.working:
+            logger.info("换仓未在进行中，无需停止")
+            return
+        self._stop_requested = True
+        logger.info("已请求停止换仓")
 
     def get_today_instructions(self) -> list[RotationInstructionPo]:
         """获取今日换仓指令"""
@@ -353,6 +362,7 @@ class SwitchPosManager:
             logger.info("换仓任务已在进行中，跳过")
             return
         self.working = True
+        self._stop_requested = False
         self.is_manual = is_manual
         logger.info(f"开始换仓, 手动: {is_manual}")
 
@@ -440,8 +450,6 @@ class SwitchPosManager:
 
         Args:
             instructions: 所有换仓指令
-            cmd_map: 指令symbol到cmd_id的映射
-            is_manual: 是否手动换仓
         """
         active_instructions = [inst for inst in instructions if inst.status == "RUNNING"]
         if not active_instructions:
@@ -452,12 +460,23 @@ class SwitchPosManager:
         check_interval = 2.0  # 每2秒检查一次
         max_wait_time = 600  # 最大等待时间10分钟
         start_time = time.time()
+        stopped = False
 
         while True:
             # 检查总超时
             if time.time() - start_time > max_wait_time:
                 logger.warning("换仓监控超时，强制退出")
                 break
+
+            # 检查停止请求
+            if self._stop_requested and not stopped:
+                logger.info("收到停止换仓请求，正在取消所有报单指令...")
+                for instruction in active_instructions:
+                    cmd_id = instruction.current_order_id
+                    if cmd_id:
+                        await self.trading_engine.cancel_order_cmd(cmd_id)
+                stopped = True
+                self._stop_requested = False
 
             # 检查所有指令状态
             all_finished = True
@@ -472,16 +491,18 @@ class SwitchPosManager:
                     logger.warning(f"未找到OrderCmd: {cmd_id}")
                     continue
 
+                # 实时更新成交手数
+                # OrderCmd 的 filled_volume 只代表本次执行的成交
+                # 通过 instruction.volume - OrderCmd.remaining_volume 计算累计成交
+                instruction.filled_volume = instruction.volume - cmd["remaining_volume"]
+                instruction.remaining_volume = cmd["remaining_volume"]
+
                 if cmd["is_active"]:
                     # 指令仍在运行
                     all_finished = False
-
                 else:
                     # 指令已结束
                     finish_reason = cmd.get("finish_reason")
-                    filled = cmd["filled_volume"]
-                    instruction.filled_volume += filled
-                    instruction.remaining_volume -= filled
                     if finish_reason == OrderCmdFinishReason.ALL_COMPLETED:
                         instruction.status = "COMPLETED"
                     else:
@@ -489,7 +510,7 @@ class SwitchPosManager:
                         instruction.error_message = finish_reason
                     instruction.current_order_id = None
 
-            # 更新数据库
+            # 每次循环都更新数据库，确保前端能实时看到进度
             self._update_instructions(active_instructions)
 
             # 检查是否全部完成

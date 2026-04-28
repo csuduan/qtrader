@@ -32,6 +32,7 @@ class RotationInstructionResponse(BaseModel):
     direction: str | None = None
     volume: int | None = 0
     filled_volume: int | None = 0
+    pending_volume: int = 0
     price: float | None = 0
     order_time: str | None = None
     trading_date: str | None = None
@@ -131,6 +132,7 @@ def _query_rotation_from_db(
                 direction=inst.direction,
                 volume=inst.volume,
                 filled_volume=inst.filled_volume,
+                pending_volume=0,
                 price=float(inst.price) if inst.price else 0,
                 order_time=inst.order_time,
                 trading_date=inst.trading_date,
@@ -494,6 +496,26 @@ async def start_rotation(
     except Exception as e:
         logger.error(f"启动换仓流程失败: {e}")
         return error_response(code=500, message=f"启动换仓流程失败: {str(e)}")
+
+
+@router.post("/stop")
+async def stop_rotation(
+    account_id: str = Query(..., description="账户ID"),
+    trading_manager: TradingManager = Depends(get_trading_manager),
+):
+    """
+    停止换仓流程
+
+    - **account_id**: 账户ID
+    """
+    try:
+        success = await trading_manager.stop_rotation(account_id)
+        if not success:
+            return error_response(code=500, message="停止换仓流程失败")
+        return success_response(data={}, message="换仓流程已停止")
+    except Exception as e:
+        logger.error(f"停止换仓流程失败: {e}")
+        return error_response(code=500, message=f"停止换仓流程失败: {str(e)}")
 
 
 @router.post("/close-all")

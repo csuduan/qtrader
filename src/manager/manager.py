@@ -692,6 +692,14 @@ class TradingManager:
             return bool(result) if result is not None else False
         return False
 
+    async def stop_rotation(self, account_id: str) -> bool:
+        """停止换仓"""
+        trader = self.traders.get(account_id)
+        if trader:
+            result: Any = await trader.send_request("stop_rotation", {})
+            return bool(result) if result is not None else False
+        return False
+
     async def close_all_positions(self, account_id: str) -> bool:
         """一键平仓"""
         trader = self.traders.get(account_id)

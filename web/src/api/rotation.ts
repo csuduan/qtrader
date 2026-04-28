@@ -82,6 +82,13 @@ export const rotationApi = {
   },
 
   /**
+   * 停止换仓流程
+   */
+  stopRotation: async (accountId: string): Promise<void> => {
+    await api.post('/rotation/stop', undefined, { params: { account_id: accountId } })
+  },
+
+  /**
    * 一键平仓
    */
   closeAllPositions: async (accountId: string): Promise<void> => {

@@ -173,13 +173,14 @@ class Trader:
         self._tick_push_task = asyncio.create_task(self._tick_push_loop())
         logger.info(f"Trader [{self.account_id}] Tick批量推送任务已启动(间隔{self._tick_push_interval}秒)")
 
+        # 连接网关
+        await self.trading_engine.connect()
+
         # 保持运行
         logger.info("=" * 60)
         logger.info(f"Trader [{self.account_id}] 启动成功，持续运行中...")
         logger.info("=" * 60)
 
-        # 注意：不再这里等待服务器任务
-        # 停止控制由 app.py 中的 stop_event 控制
 
     async def _init_database(self) -> None:
         """
