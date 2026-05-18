@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-from src.utils.logger import enable_alarm_handler, get_logger, setup_logger
+from qtrader.utils.logger import enable_alarm_handler, get_logger, setup_logger
 
 
 # ==================== Fixtures ====================

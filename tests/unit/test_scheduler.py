@@ -14,8 +14,8 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
-from src.utils.config_loader import JobConfig, SchedulerConfig
-from src.utils.scheduler import Job, TaskScheduler
+from qtrader.utils.config_loader import JobConfig, SchedulerConfig
+from qtrader.utils.scheduler import Job, TaskScheduler
 
 
 # ==================== Fixtures ====================

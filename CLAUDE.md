@@ -43,7 +43,7 @@ isort src/ --profile black
 - 基础URL：`/api`
 - 响应包装：`{code: 0, message: "", data: {}}`
 - Axios 拦截器在成功时自动解包 `data`
-- 使用 `src.manager.api.responses` 中的 `success_response()` 和 `error_response()`
+- 使用 `qtrader.manager.api.responses` 中的 `success_response()` 和 `error_response()`
 
 **WebSocket** (`/ws`)
 - 消息格式：`{type: "...", data: {...}, timestamp: "..."}`
@@ -80,7 +80,7 @@ isort src/ --profile black
 - `price_type`: 价格类型字符串
 
 **类型同步规则**
-1. 后端在 `src.manager.api.schemas.py` 定义Pydantic模型
+1. 后端在 `qtrader.manager.api.schemas.py` 定义Pydantic模型
 2. 前端在 `web/src/types/index.ts` 定义对应的TypeScript接口
 3. 字段名称、类型、结构必须保持一致
 4. 可选字段使用Optional (Python) / | null (TypeScript)
@@ -88,7 +88,7 @@ isort src/ --profile black
 ### 错误处理规范
 
 **后端错误处理**
-- 全局异常处理器捕获所有未处理异常（`src.manager.api.responses.global_exception_handler`）
+- 全局异常处理器捕获所有未处理异常（`qtrader.manager.api.responses.global_exception_handler`）
 - HTTP异常由 `http_exception_handler` 处理
 - 请求验证错误由 `validation_exception_handler` 处理
 - 所有错误使用 `get_logger(__name__)` 记录日志

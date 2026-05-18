@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from unittest.mock import MagicMock, Mock
 
-from src.models.object import (
+from qtrader.models.object import (
     Direction,
     Exchange,
     Offset,
@@ -18,7 +18,7 @@ from src.models.object import (
     PositionData,
     TradeData,
 )
-from src.trader.order_cmd import (
+from qtrader.trader.order_cmd import (
     ActiveOrderInfo,
     SimpleSplitStrategy,
     OrderCmd,

@@ -13,8 +13,8 @@ import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import MagicMock, AsyncMock, patch
 
-from src.manager.app import create_app
-from src.manager.manager import TradingManager
+from qtrader.manager.app import create_app
+from qtrader.manager.manager import TradingManager
 
 
 @pytest.fixture

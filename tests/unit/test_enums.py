@@ -1,7 +1,7 @@
 import pytest
 from datetime import datetime
 
-from src.models.object import (
+from qtrader.models.object import (
     Direction,
     PosDirection,
     Offset,

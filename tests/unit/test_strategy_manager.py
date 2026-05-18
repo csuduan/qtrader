@@ -13,13 +13,13 @@ from datetime import datetime
 
 import pytest
 
-from src.trader.strategy_manager import (
+from qtrader.trader.strategy_manager import (
     StrategyManager,
     load_csv_file,
     load_strategy_params,
     _csv_cache,
 )
-from src.models.object import (
+from qtrader.models.object import (
     Direction,
     Offset,
     OrderData,
@@ -29,7 +29,7 @@ from src.models.object import (
     Interval,
     Exchange,
 )
-from src.utils.event_engine import EventEngine, EventTypes
+from qtrader.utils.event_engine import EventEngine, EventTypes
 
 
 # ==================== Fixtures ====================

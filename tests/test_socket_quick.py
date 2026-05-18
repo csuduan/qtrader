@@ -10,8 +10,8 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.utils.ipc import SocketServer, SocketClient, request
-from src.utils.logger import get_logger
+from qtrader.utils.ipc import SocketServer, SocketClient, request
+from qtrader.utils.logger import get_logger
 
 logger = get_logger("quick_test")
 

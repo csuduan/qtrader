@@ -55,12 +55,12 @@ Manager 和 Trader 通过 Unix Domain Socket 进行通信：
 * 安装虚拟环境  
 
 ```bash
-# 创建虚拟环境
+# 创建虚拟环境(本项目要求python3.12以上)
 conda create -n qts python=3.12
 conda activate qts
 
-# 安装依赖
-pip install -r requirements.txt
+# 安装项目
+pip install -e .
 
 ```
 
@@ -118,15 +118,15 @@ gateway:
 * 启动管理平台
 ```bash
 # 启动 Manager（会自动启动配置中的 Trader）
-python -m src.run_manager
+python -m run_manager
 
 ```
-* 启动账户
-
+* 启动账户(可选)
+  - WEB平台操作
+略 
+  - 手动启动 
 ```bash
-
-# 终端1：启动 Trader（可选，Manager 会自动启动）
-python -m src.run_trader --account-id DQ
+python -m run_trader --account-id DQ
 ```
 * 启动前端
 ```bash

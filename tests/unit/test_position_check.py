@@ -7,7 +7,7 @@
 import pytest
 from unittest.mock import MagicMock, patch
 
-from src.models.object import PositionData, Exchange
+from qtrader.models.object import PositionData, Exchange
 
 
 class TestUpdateStrategyPositionDetailCheck:

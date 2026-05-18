@@ -17,8 +17,8 @@ import pytest
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import Session, sessionmaker
 
-from src.models.po import Base
-from src.utils.database import Database, close_database, get_database, get_session, init_database, session_scope
+from qtrader.models.po import Base
+from qtrader.utils.database import Database, close_database, get_database, get_session, init_database, session_scope
 
 
 # ==================== Fixtures ====================
@@ -203,7 +203,7 @@ class TestDatabaseGlobalInstance:
     def test_get_database_returns_none_when_not_initialized(self):
         """测试未初始化时返回 None"""
         # 确保全局实例为 None
-        import src.utils.database
+        import qtrader.utils.database
         src.utils.database._db = None
 
         result = get_database()
@@ -212,7 +212,7 @@ class TestDatabaseGlobalInstance:
 
     def test_get_database_returns_initialized_instance(self, temp_db_path):
         """测试返回已初始化的实例"""
-        import src.utils.database
+        import qtrader.utils.database
         src.utils.database._db = Database(db_path=temp_db_path)
 
         result = get_database()
@@ -221,7 +221,7 @@ class TestDatabaseGlobalInstance:
 
     def test_close_database_closes_connection(self, temp_db_path):
         """测试 close_database() 关闭连接"""
-        import src.utils.database
+        import qtrader.utils.database
         db = Database(db_path=temp_db_path)
         src.utils.database._db = db
 
@@ -232,7 +232,7 @@ class TestDatabaseGlobalInstance:
 
     def test_close_database_when_none(self):
         """测试 close_database() 当实例为 None"""
-        import src.utils.database
+        import qtrader.utils.database
         src.utils.database._db = None
 
         # 不应该报错
@@ -247,7 +247,7 @@ class TestGetSessionFunction:
 
     def test_get_session_returns_none_when_no_database(self):
         """测试无数据库时返回 None"""
-        import src.utils.database
+        import qtrader.utils.database
         src.utils.database._db = None
 
         result = get_session()
@@ -256,7 +256,7 @@ class TestGetSessionFunction:
 
     def test_get_session_returns_session_when_database_exists(self, temp_db_path):
         """测试有数据库时返回会话"""
-        import src.utils.database
+        import qtrader.utils.database
         db = Database(db_path=temp_db_path)
         src.utils.database._db = db
 
@@ -277,7 +277,7 @@ class TestSessionScope:
 
     def test_session_scope_provides_session(self, temp_db_path):
         """测试 session_scope 提供会话"""
-        import src.utils.database
+        import qtrader.utils.database
         db = Database(db_path=temp_db_path)
         src.utils.database._db = db
 
@@ -288,7 +288,7 @@ class TestSessionScope:
 
     def test_session_scope_commits_on_success(self, temp_db_path):
         """测试成功时提交"""
-        import src.utils.database
+        import qtrader.utils.database
         db = Database(db_path=temp_db_path)
         src.utils.database._db = db
 
@@ -300,7 +300,7 @@ class TestSessionScope:
 
     def test_session_scope_rolls_back_on_error(self, temp_db_path):
         """测试错误时回滚"""
-        import src.utils.database
+        import qtrader.utils.database
         db = Database(db_path=temp_db_path)
         src.utils.database._db = db
 

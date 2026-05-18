@@ -11,9 +11,9 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch, call
 from datetime import datetime
 from decimal import Decimal
 
-from src.utils.config_loader import TraderConfig, SocketConfig, PathsConfig
-from src.trader.trader import Trader
-from src.models.object import (
+from qtrader.utils.config_loader import TraderConfig, SocketConfig, PathsConfig
+from qtrader.trader.trader import Trader
+from qtrader.models.object import (
     AccountData,
     OrderData,
     TradeData,
@@ -455,7 +455,7 @@ class TestEventRegistration:
             trader_instance._register_event_handlers()
 
             # 检查所有事件类型都已注册
-            from src.utils.event_engine import EventTypes
+            from qtrader.utils.event_engine import EventTypes
 
             expected_calls = [
                 call(EventTypes.ACCOUNT_UPDATE, trader_instance._on_account_update),
@@ -667,7 +667,7 @@ class TestSocketRequestHandlers:
     @pytest.mark.asyncio
     async def test_req_get_active_orders(self, running_trader):
         """测试获取活动订单"""
-        from src.models.object import OrderStatus
+        from qtrader.models.object import OrderStatus
 
         order_active = OrderData(
             order_id="order_active",
@@ -776,7 +776,7 @@ class TestSocketRequestHandlers:
     @pytest.mark.asyncio
     async def test_req_get_positions_with_data(self, running_trader):
         """测试获取所有持仓（有数据）"""
-        from src.models.object import Exchange
+        from qtrader.models.object import Exchange
 
         position1 = PositionData(symbol="SHFE.rb2505", exchange=Exchange.SHFE, pos=1, pos_long=1, pos_short=0)
         position2 = PositionData(symbol="SHFE.rb2505", exchange=Exchange.SHFE, pos=-1, pos_long=0, pos_short=1)
@@ -799,7 +799,7 @@ class TestSocketRequestHandlers:
     @pytest.mark.asyncio
     async def test_req_get_quotes_with_data(self, running_trader):
         """测试获取所有行情（有数据）"""
-        from src.models.object import Exchange
+        from qtrader.models.object import Exchange
 
         quote1 = TickData(symbol="SHFE.rb2505", exchange=Exchange.SHFE, datetime=datetime.now(), last_price=Decimal("3500"))
         quote2 = TickData(symbol="SHFE.rb2505", exchange=Exchange.SHFE, datetime=datetime.now(), last_price=Decimal("3510"))
@@ -1002,7 +1002,7 @@ class TestDatabaseInitialization:
     @pytest.mark.asyncio
     async def test_init_database_creates_new(self, trader_instance, tmp_path):
         """测试创建新数据库"""
-        from src.utils.database import init_database
+        from qtrader.utils.database import init_database
 
         db_file = tmp_path / "new_test.db"
         trader_instance.account_config.paths.database = str(db_file)

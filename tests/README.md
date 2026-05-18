@@ -196,7 +196,7 @@ class TestAccountModel:
 
 ```python
 from fastapi.testclient import TestClient
-from src.manager.app import app
+from qtrader.manager.app import app
 
 @pytest.fixture
 def client():

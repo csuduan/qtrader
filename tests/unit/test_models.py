@@ -6,7 +6,7 @@ import pytest
 from datetime import datetime
 from decimal import Decimal
 
-from src.models.object import (
+from qtrader.models.object import (
     AccountData,
     PositionData,
     OrderData,

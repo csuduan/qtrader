@@ -6,16 +6,16 @@ import time
 from decimal import Decimal
 from unittest.mock import MagicMock
 
-from src.models.object import (
+from qtrader.models.object import (
     Direction,
     Offset,
     OrderData,
     OrderStatus,
     TradeData,
 )
-from src.trader.order_cmd import OrderCmd, OrderCmdStatus, SplitStrategyType
-from src.trader.order_executor import OrderCmdExecutor
-from src.utils.event_engine import EventEngine
+from qtrader.trader.order_cmd import OrderCmd, OrderCmdStatus, SplitStrategyType
+from qtrader.trader.order_executor import OrderCmdExecutor
+from qtrader.utils.event_engine import EventEngine
 
 
 def test_executor_initialization():
@@ -124,7 +124,7 @@ def test_executor_close():
 
 def test_executor_status():
     """测试获取执行器状态"""
-    from src.models.object import PositionData, Exchange
+    from qtrader.models.object import PositionData, Exchange
 
     mock_event_engine = MagicMock(spec=EventEngine)
     mock_trading_engine = MagicMock()

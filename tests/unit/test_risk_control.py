@@ -2,8 +2,8 @@ import pytest
 from datetime import datetime, timedelta
 from unittest.mock import patch, MagicMock
 
-from src.utils.config_loader import RiskControlConfig
-from src.trader.risk_control import RiskControl
+from qtrader.utils.config_loader import RiskControlConfig
+from qtrader.trader.risk_control import RiskControl
 
 
 @pytest.mark.unit

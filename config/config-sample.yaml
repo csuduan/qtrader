@@ -137,7 +137,7 @@ account_scheduler:
       job_name: 盘前连接网关
       job_group: 交易
       job_description: 开盘前自动连接交易
-      cron_expression: "50 8,20 * * *"
+      cron_expression: "50 8,20 * * mon-fri"
       enabled: true
       job_method: pre_market_connect
 
@@ -155,7 +155,7 @@ account_scheduler:
       job_name: 自动换仓
       job_group: 换仓
       job_description: 自动执行换仓
-      cron_expression: "5,8,35,38 9,21 * * *"
+      cron_expression: "5,8,35,38 9,21 * * mon-fri"
       enabled: true
       job_method: auto_rotation
 

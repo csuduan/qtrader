@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
-from src.utils.async_event_engine import AsyncEventEngine, Event, HandlerType
+from qtrader.utils.async_event_engine import AsyncEventEngine, Event, HandlerType
 
 
 # ==================== Fixtures ====================

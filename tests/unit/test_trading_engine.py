@@ -9,8 +9,8 @@ from typing import Any, Dict
 from unittest.mock import MagicMock, Mock, PropertyMock, patch
 import pytest
 
-from src.trader.trading_engine import TradingEngine
-from src.models.object import (
+from qtrader.trader.trading_engine import TradingEngine
+from qtrader.models.object import (
     Direction,
     Offset,
     OrderData,
@@ -22,7 +22,7 @@ from src.models.object import (
     Interval,
     Exchange,
 )
-from src.utils.event_engine import EventEngine, EventTypes
+from qtrader.utils.event_engine import EventEngine, EventTypes
 
 
 # ==================== Fixtures ====================

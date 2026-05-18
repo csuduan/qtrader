@@ -9,8 +9,8 @@ from typing import Optional
 from unittest.mock import MagicMock
 import pytest
 
-from src.trader.gateway.base_gateway import BaseGateway
-from src.models.object import (
+from qtrader.trader.gateway.base_gateway import BaseGateway
+from qtrader.models.object import (
     Direction,
     Offset,
     OrderData,

@@ -12,10 +12,10 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from src.models.po import Base
-from src.models.object import Direction, Exchange, Offset
-from src.trader.order_cmd import OrderCmd
-from src.utils.config_loader import StrategyConfig
+from qtrader.models.po import Base
+from qtrader.models.object import Direction, Exchange, Offset
+from qtrader.trader.order_cmd import OrderCmd
+from qtrader.utils.config_loader import StrategyConfig
 
 
 @pytest.fixture(scope="session")
@@ -203,7 +203,7 @@ def mock_tq_api():
 @pytest.fixture
 def mock_tq_gateway_config():
     """模拟 TqGateway 配置"""
-    from src.utils.config_loader import GatewayConfig, TianqinConfig, BrokerConfig
+    from qtrader.utils.config_loader import GatewayConfig, TianqinConfig, BrokerConfig
 
     return GatewayConfig(
         account_id="test_account_001",

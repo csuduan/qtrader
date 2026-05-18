@@ -1,8 +1,8 @@
 import pytest
 from datetime import datetime
 
-from src.models.object import TickData, BarData, Interval, Exchange
-from src.utils.bar_generator import BarGenerator
+from qtrader.models.object import TickData, BarData, Interval, Exchange
+from qtrader.utils.bar_generator import BarGenerator
 
 
 @pytest.mark.unit

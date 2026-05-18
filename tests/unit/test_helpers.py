@@ -1,7 +1,7 @@
 import pytest
 from datetime import datetime
 
-from src.utils.helpers import (
+from qtrader.utils.helpers import (
     nanos_to_datetime_str,
     nanos_to_datetime,
     datetime_to_nanos,

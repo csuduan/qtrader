@@ -19,7 +19,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from src.utils.config_loader import (
+from qtrader.utils.config_loader import (
     AccountConfig,
     ApiConfig,
     AppConfig,
@@ -671,7 +671,7 @@ class TestConfigLoaderSingleton:
     def test_get_config_loader_creates_new_instance_first_time(self):
         """测试 get_config_loader() 首次创建新实例"""
         # 重置全局变量
-        import src.utils.config_loader
+        import qtrader.utils.config_loader
         src.utils.config_loader._config_loader = None
 
         loader = get_config_loader()
@@ -682,7 +682,7 @@ class TestConfigLoaderSingleton:
     def test_get_config_loader_custom_dir(self, temp_config_dir):
         """测试 get_config_loader() 自定义目录"""
         # 重置全局变量
-        import src.utils.config_loader
+        import qtrader.utils.config_loader
         src.utils.config_loader._config_loader = None
 
         loader = ConfigLoader(config_dir=str(temp_config_dir))

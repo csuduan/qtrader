@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import patch, MagicMock
 from datetime import datetime
 
-from src.utils.event import Event, EventEngine, EventTypes
+from qtrader.utils.event import Event, EventEngine, EventTypes
 
 
 @pytest.mark.unit

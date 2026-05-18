@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 from fastapi.testclient import TestClient
 
-from src.manager.app import create_app
+from qtrader.manager.app import create_app
 
 app = create_app()
 
@@ -21,7 +21,7 @@ def mock_get_trading_manager():
 def client():
     """创建测试客户端"""
     # 覆盖依赖注入
-    from src.manager.api import dependencies
+    from qtrader.manager.api import dependencies
     original_get_tm = dependencies.get_trading_manager
 
     dependencies.get_trading_manager = mock_get_trading_manager

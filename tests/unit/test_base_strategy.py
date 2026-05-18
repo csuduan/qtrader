@@ -19,10 +19,10 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
-from src.models.object import BarData, Direction, Offset, OrderData, PositionData, TickData, TradeData
-from src.trader.order_cmd import OrderCmd
-from src.trader.strategy.base_strategy import BaseParam, BaseStrategy, Signal
-from src.utils.config_loader import StrategyConfig
+from qtrader.models.object import BarData, Direction, Offset, OrderData, PositionData, TickData, TradeData
+from qtrader.trader.order_cmd import OrderCmd
+from qtrader.trader.strategy.base_strategy import BaseParam, BaseStrategy, Signal
+from qtrader.utils.config_loader import StrategyConfig
 
 
 # ==================== Fixtures ====================
@@ -800,7 +800,7 @@ class TestBaseStrategyCallbacks:
     @pytest.mark.asyncio
     async def test_on_order_callback(self, strategy: BaseStrategy):
         """测试 on_order 回调"""
-        from src.models.object import OrderStatus
+        from qtrader.models.object import OrderStatus
         order = OrderData(
             order_id="test_order",
             symbol="SHFE.rb2505",

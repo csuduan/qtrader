@@ -23,9 +23,9 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.trader.socket_server import SocketServer, request
-from src.manager.socket_client import SocketClient
-from src.utils.logger import get_logger
+from qtrader.trader.socket_server import SocketServer, request
+from qtrader.manager.socket_client import SocketClient
+from qtrader.utils.logger import get_logger
 
 logger = get_logger("socket_test")
 
