@@ -29,7 +29,7 @@ from qtrader.trader.trading_engine import TradingEngine
 from qtrader.utils.bar_generator import MultiSymbolBarGenerator, parse_interval
 from qtrader.utils.config_loader import StrategyConfig, get_config_loader
 from qtrader.utils.async_event_engine import AsyncEventEngine
-from qtrader.utils.event_engine import EventTypes
+from qtrader.utils.async_event_engine import EventTypes
 from qtrader.utils.logger import get_logger
 
 ctx = get_app_context()

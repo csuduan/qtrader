@@ -12,6 +12,35 @@ from qtrader.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+class EventTypes:
+    """事件类型常量定义"""
+
+    # 账户更新事件
+    ACCOUNT_UPDATE = "e:account.update"
+    # 账户就绪通知事件
+    ACCOUNT_READY = "e:account.ready"
+    # 持仓事件
+    POSITION_UPDATE = "e:position.update"
+    # 委托单事件
+    ORDER_UPDATE = "e:order.update"
+    # 成交事件
+    TRADE_UPDATE = "e:trade.created"
+    # 行情事件
+    TICK_UPDATE = "e:tick.update"
+    TICK_BATCH_UPDATE = "e:tick.batch_update"
+    KLINE_UPDATE = "e:kline.update"
+    # 合约更新事件
+    CONTRACT_UPDATE = "e:contract.update"
+    # 系统告警
+    SYSTEM_ERROR = "e:system.error"
+    # 告警事件
+    ALARM_UPDATE = "e:alarm.update"
+    # 数据更新事件（通用）
+    DATA_UPDATE = "e:data.update"
+    # 报单指令更新事件
+    ORDER_CMD_UPDATE = "e:order_cmd.update"
+
+
 class Event:
     """
     Event object consists of a type string which is used

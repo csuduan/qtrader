@@ -455,7 +455,7 @@ class TestEventRegistration:
             trader_instance._register_event_handlers()
 
             # 检查所有事件类型都已注册
-            from qtrader.utils.event_engine import EventTypes
+            from qtrader.utils.async_event_engine import EventTypes
 
             expected_calls = [
                 call(EventTypes.ACCOUNT_UPDATE, trader_instance._on_account_update),

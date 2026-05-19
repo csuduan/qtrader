@@ -27,7 +27,7 @@ from qtrader.models.object import (
 )
 from qtrader.trader.order_cmd import OrderCmd, OrderCmdStatus
 from qtrader.utils.async_event_engine import AsyncEventEngine
-from qtrader.utils.event_engine import EventTypes
+from qtrader.utils.async_event_engine import EventTypes
 from qtrader.utils.logger import get_logger
 
 if TYPE_CHECKING:

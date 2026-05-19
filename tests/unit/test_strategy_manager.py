@@ -29,7 +29,7 @@ from qtrader.models.object import (
     Interval,
     Exchange,
 )
-from qtrader.utils.event_engine import EventEngine, EventTypes
+from qtrader.utils.async_event_engine import AsyncEventEngine, EventTypes
 
 
 # ==================== Fixtures ====================

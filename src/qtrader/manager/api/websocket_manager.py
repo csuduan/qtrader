@@ -11,7 +11,7 @@ from fastapi import WebSocket
 
 from qtrader.app_context import AppContext, get_app_context
 from qtrader.utils.async_event_engine import AsyncEventEngine
-from qtrader.utils.event_engine import EventTypes
+from qtrader.utils.async_event_engine import EventTypes
 from qtrader.utils.logger import get_logger
 from qtrader.utils.json_util import datetime_handler
 

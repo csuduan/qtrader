@@ -13,7 +13,7 @@ from qtrader.app_context import get_app_context as ctx
 from qtrader.models.po import AccountPo, PositionPo, TradePo
 from qtrader.utils.async_event_engine import AsyncEventEngine
 from qtrader.utils.database import get_database
-from qtrader.utils.event_engine import EventTypes
+from qtrader.utils.async_event_engine import EventTypes
 from qtrader.utils.logger import get_logger
 
 logger = get_logger(__name__)

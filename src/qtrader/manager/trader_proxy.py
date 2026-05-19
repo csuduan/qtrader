@@ -17,7 +17,7 @@ from qtrader.app_context import AppContext, get_app_context
 from qtrader.manager.service.alarm_service import AlarmService
 from qtrader.models.object import AccountData, OrderData, PositionData, TickData, TradeData, TraderState
 from qtrader.utils.config_loader import AccountConfig, AppConfig, get_config_loader
-from qtrader.utils.event_engine import EventTypes
+from qtrader.utils.async_event_engine import EventTypes
 from qtrader.utils.ipc import SocketClient
 from qtrader.utils.logger import get_logger
 from qtrader.utils.scheduler import Job

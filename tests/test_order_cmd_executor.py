@@ -15,12 +15,12 @@ from qtrader.models.object import (
 )
 from qtrader.trader.order_cmd import OrderCmd, OrderCmdStatus, SplitStrategyType
 from qtrader.trader.order_executor import OrderCmdExecutor
-from qtrader.utils.event_engine import EventEngine
+from qtrader.utils.async_event_engine import AsyncEventEngine
 
 
 def test_executor_initialization():
     """测试执行器初始化"""
-    mock_event_engine = MagicMock(spec=EventEngine)
+    mock_event_engine = MagicMock(spec=AsyncEventEngine)
     mock_trading_engine = MagicMock()
 
     executor = OrderCmdExecutor(mock_event_engine, mock_trading_engine)
@@ -32,7 +32,7 @@ def test_executor_initialization():
 
 def test_executor_start_stop():
     """测试执行器启动和停止"""
-    mock_event_engine = MagicMock(spec=EventEngine)
+    mock_event_engine = MagicMock(spec=AsyncEventEngine)
     mock_trading_engine = MagicMock()
     mock_event_engine.register.return_value = "handler-1"
 
@@ -53,7 +53,7 @@ def test_executor_start_stop():
 
 def test_executor_register_unregister():
     """测试注册和注销"""
-    mock_event_engine = MagicMock(spec=EventEngine)
+    mock_event_engine = MagicMock(spec=AsyncEventEngine)
     mock_trading_engine = MagicMock()
 
     executor = OrderCmdExecutor(mock_event_engine, mock_trading_engine)
@@ -81,7 +81,7 @@ def test_executor_register_unregister():
 
 def test_executor_close():
     """测试关闭命令"""
-    mock_event_engine = MagicMock(spec=EventEngine)
+    mock_event_engine = MagicMock(spec=AsyncEventEngine)
     mock_trading_engine = MagicMock()
     mock_trading_engine.cancel_order.return_value = True
 
@@ -126,7 +126,7 @@ def test_executor_status():
     """测试获取执行器状态"""
     from qtrader.models.object import PositionData, Exchange
 
-    mock_event_engine = MagicMock(spec=EventEngine)
+    mock_event_engine = MagicMock(spec=AsyncEventEngine)
     mock_trading_engine = MagicMock()
 
     # 为平仓指令提供持仓数据
@@ -177,7 +177,7 @@ def test_executor_status():
 
 def test_executor_on_order_update():
     """测试订单更新处理"""
-    mock_event_engine = MagicMock(spec=EventEngine)
+    mock_event_engine = MagicMock(spec=AsyncEventEngine)
     mock_trading_engine = MagicMock()
 
     executor = OrderCmdExecutor(mock_event_engine, mock_trading_engine)
@@ -215,7 +215,7 @@ def test_executor_on_order_update():
 
 def test_executor_on_trade_update():
     """测试成交更新处理"""
-    mock_event_engine = MagicMock(spec=EventEngine)
+    mock_event_engine = MagicMock(spec=AsyncEventEngine)
     mock_trading_engine = MagicMock()
 
     executor = OrderCmdExecutor(mock_event_engine, mock_trading_engine)
@@ -253,7 +253,7 @@ def test_executor_on_trade_update():
 
 def test_executor_process_cmd_trig_with_order_request():
     """测试处理命令 trig 时下单"""
-    mock_event_engine = MagicMock(spec=EventEngine)
+    mock_event_engine = MagicMock(spec=AsyncEventEngine)
     mock_trading_engine = MagicMock()
     mock_trading_engine.insert_order.return_value = MagicMock(order_id="order-123")
 
@@ -283,7 +283,7 @@ def test_executor_process_cmd_trig_with_timeout_orders():
     """测试处理超时订单"""
     from datetime import datetime, timedelta
 
-    mock_event_engine = MagicMock(spec=EventEngine)
+    mock_event_engine = MagicMock(spec=AsyncEventEngine)
     mock_trading_engine = MagicMock()
     mock_trading_engine.cancel_order.return_value = True
 
@@ -324,7 +324,7 @@ def test_executor_process_cmd_trig_with_timeout_orders():
 
 def test_executor_pass_position_to_cmd():
     """测试执行器传递持仓给命令"""
-    mock_event_engine = MagicMock(spec=EventEngine)
+    mock_event_engine = MagicMock(spec=AsyncEventEngine)
     mock_trading_engine = MagicMock()
     mock_trading_engine.insert_order.return_value = MagicMock(order_id="order-123")
     mock_trading_engine.positions.get.return_value = MagicMock(pos_long=100)

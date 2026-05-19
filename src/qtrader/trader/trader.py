@@ -19,7 +19,7 @@ from qtrader.trader.trader_req import TraderReqHandler
 from qtrader.trader.trading_engine import TradingEngine
 from qtrader.utils.async_event_engine import AsyncEventEngine
 from qtrader.utils.config_loader import TraderConfig
-from qtrader.utils.event_engine import EventTypes
+from qtrader.utils.async_event_engine import EventTypes
 from qtrader.utils.ipc import SocketServer
 from qtrader.utils.logger import get_logger, logger
 from qtrader.utils.scheduler import TaskScheduler

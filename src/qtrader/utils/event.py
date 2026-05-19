@@ -1,11 +1,13 @@
 """
-事件类型常量定义（向后兼容）
+事件模块（向后兼容）
 
-已废弃：请使用 src.utils.event_engine 模块中的独立 EventEngine 类。
-本文件仅保留事件类型常量用于向后兼容。
+所有内容从 qtrader.utils.async_event_engine 导出。
 """
 
-from qtrader.utils.event_engine import Event, EventEngine, EventTypes  # noqa: F401
+from qtrader.utils.async_event_engine import (  # noqa: F401
+    AsyncEventEngine,
+    Event,
+    EventTypes,
+)
 
-# 向后兼容：保持导出
-__all__ = ["Event", "EventTypes", "EventEngine"]
+__all__ = ["AsyncEventEngine", "Event", "EventTypes"]

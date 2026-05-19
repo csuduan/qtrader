@@ -33,7 +33,7 @@ from qtrader.trader.risk_control import RiskControl
 from qtrader.utils.async_event_engine import AsyncEventEngine
 from qtrader.utils.config_loader import AccountConfig, AppConfig, RiskControlConfig
 from qtrader.utils.database import get_session
-from qtrader.utils.event_engine import EventTypes
+from qtrader.utils.async_event_engine import EventTypes
 from qtrader.utils.helpers import _get_int_param
 from qtrader.utils.logger import get_logger
 

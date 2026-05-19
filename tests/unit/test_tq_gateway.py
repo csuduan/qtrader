@@ -938,7 +938,7 @@ class TestTqGatewayMapEventType:
 
     def test_map_tick_event(self, gateway: TqGateway):
         """测试映射 tick 事件"""
-        from qtrader.utils.event_engine import EventTypes
+        from qtrader.utils.async_event_engine import EventTypes
 
         result = gateway._map_event_type("tick")
 
@@ -946,7 +946,7 @@ class TestTqGatewayMapEventType:
 
     def test_map_bar_event(self, gateway: TqGateway):
         """测试映射 bar 事件"""
-        from qtrader.utils.event_engine import EventTypes
+        from qtrader.utils.async_event_engine import EventTypes
 
         result = gateway._map_event_type("bar")
 
@@ -954,7 +954,7 @@ class TestTqGatewayMapEventType:
 
     def test_map_order_event(self, gateway: TqGateway):
         """测试映射 order 事件"""
-        from qtrader.utils.event_engine import EventTypes
+        from qtrader.utils.async_event_engine import EventTypes
 
         result = gateway._map_event_type("order")
 
@@ -962,7 +962,7 @@ class TestTqGatewayMapEventType:
 
     def test_map_trade_event(self, gateway: TqGateway):
         """测试映射 trade 事件"""
-        from qtrader.utils.event_engine import EventTypes
+        from qtrader.utils.async_event_engine import EventTypes
 
         result = gateway._map_event_type("trade")
 
@@ -970,7 +970,7 @@ class TestTqGatewayMapEventType:
 
     def test_map_position_event(self, gateway: TqGateway):
         """测试映射 position 事件"""
-        from qtrader.utils.event_engine import EventTypes
+        from qtrader.utils.async_event_engine import EventTypes
 
         result = gateway._map_event_type("position")
 
@@ -978,7 +978,7 @@ class TestTqGatewayMapEventType:
 
     def test_map_account_event(self, gateway: TqGateway):
         """测试映射 account 事件"""
-        from qtrader.utils.event_engine import EventTypes
+        from qtrader.utils.async_event_engine import EventTypes
 
         result = gateway._map_event_type("account")
 

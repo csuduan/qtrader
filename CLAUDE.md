@@ -3,25 +3,71 @@
 本文件为 Claude Code (claude.ai/code) 在此代码库中工作时提供指导。
 项目概况请查看 @README.md 。
 
+## 原则
+### 1. 编码前思考
+**不要假设。不要隐藏困惑。呈现权衡。**
+- **明确说明假设** — 如果不确定，询问而不是猜测
+- **呈现多种解释** — 当存在歧义时，不要默默选择
+- **适时提出异议** — 如果存在更简单的方法，说出来
+- **困惑时停下来** — 指出不清楚的地方并要求澄清
+
+### 2. 简洁优先
+**用最少的代码解决问题。不要过度推测。**
+- 不要添加要求之外的功能
+- 不要为一次性代码创建抽象
+- 不要添加未要求的"灵活性"或"可配置性"
+- 不要为不可能发生的场景做错误处理
+- 如果 200 行代码可以写成 50 行，重写它
+
+**检验标准：** 资深工程师会觉得这过于复杂吗？如果是，简化。
+
+### 3. 精准修改
+**只碰必须碰的。只清理自己造成的混乱。**
+编辑现有代码时：
+- 不要"改进"相邻的代码、注释或格式
+- 不要重构没坏的东西
+- 匹配现有风格，即使你更倾向于不同的写法
+- 如果注意到无关的死代码，提一下 —— 不要删除它
+
+当你的改动产生孤儿代码时：
+- 删除因你的改动而变得无用的导入/变量/函数
+- 不要删除预先存在的死代码，除非被要求
+**检验标准：** 每一行修改都应该能直接追溯到用户的请求。
+
+### 4. 目标驱动执行
+
+**定义成功标准。循环验证直到达成。**
+将指令式任务转化为可验证的目标：
+- 添加验证" -> 为无效输入编写测试，然后让它们通过
+- 修复 bug" -> 编写重现 bug 的测试，然后让它通过
+- 重构 X" -> 确保重构前后测试都能通过，然后让它们通过
+对于多步骤任务，说明一个简短的计划：
+```
+1. [步骤] → 验证: [检查]
+2. [步骤] → 验证: [检查]
+3. [步骤] → 验证: [检查]
+```
+强有力的成功标准让 LLM 能够独立循环执行。弱标准（"让它工作"）需要不断澄清。
+
+
 
 ## 规范与约束
 ### 后端 (Python)
 - **Python版本**: 3.12+，使用 `typing` 模块的类型提示
-- **格式化**: Black 100字符行长度
+- **格式化**: Black 100字符行长度，isort (black profile)
 - **导入顺序**: 标准库 → 第三方库 → 本地模块
 - **命名规范**: 函数/变量使用 snake_case，类使用 CamelCase
 - **文档字符串**: 中文，三引号，描述 Args/Returns
-- **日志记录**: 使用 `src.utils.logger` 的 `get_logger(__name__)`
+- **日志记录**: 使用 `qtrader.utils.logger` 的 `get_logger(__name__)`
 - **错误处理**: Try/except 配合 logger.exception()
-- **数据模型**: SQLAlchemy ORM 使用 `__repr__`，API 模式使用 Pydantic
+- **数据模型**: SQLAlchemy ORM (`qtrader.models.po`) 使用 `__repr__`，API 模式使用 Pydantic (`qtrader.manager.api.schemas`)
 - **API开发**: FastAPI 异步端点，Config 中设置 `from_attributes = True`
 - **注释**: 中文，简洁（除非有特殊要求，否则不写行内注释）
 - **事件系统**: 使用事件引擎进行解耦通信，在 `EventTypes` 类中定义事件类型
-- **强类型约束**: 方法的输出及输出应当明确指明类型
-- **规范工具**: 可以使用black和isort格式化代码
+- **强类型约束**: 方法的输入及输出应当明确指明类型
+- **规范工具**: 使用 black 和 isort 格式化代码
 ```bash
-black src/ --line-length 100 --target py38
-isort src/ --profile black
+make format   # 或: black src/ --line-length 100 --target py312 && isort src/ --profile black
 ```
 
 ### 前端 (Vue + TypeScript)
@@ -29,14 +75,13 @@ isort src/ --profile black
 - **语言**: TypeScript 严格模式
 - **组件命名**: .vue 文件使用 PascalCase
 - **文件命名**: 组件用 PascalCase，工具函数用 camelCase
-- **状态管理**: Pinia stores 位于 `src/stores/`
-- **API调用**: Axios HTTP 客户端位于 `src/api/`
-- **WebSocket**: 自定义管理器位于 `src/ws.ts`
+- **状态管理**: Pinia stores 位于 `web/src/stores/`
+- **API调用**: Axios HTTP 客户端位于 `web/src/api/`
+- **WebSocket**: 自定义管理器位于 `web/src/ws.ts`
 - **UI组件**: Element Plus
 - **图表**: ECharts 数据可视化
 - **lint**：使用ESLint和Prettier格式化代码，保持一致的代码风格
-- **打包验证**：开发完后执行npm run build进行语法验证
-
+- **打包验证**：开发完后执行 `npm run build` 进行语法验证
 
 ### 前后端通信规范
 **HTTP API**
@@ -80,7 +125,7 @@ isort src/ --profile black
 - `price_type`: 价格类型字符串
 
 **类型同步规则**
-1. 后端在 `qtrader.manager.api.schemas.py` 定义Pydantic模型
+1. 后端在 `qtrader.manager.api.schemas` 定义Pydantic模型
 2. 前端在 `web/src/types/index.ts` 定义对应的TypeScript接口
 3. 字段名称、类型、结构必须保持一致
 4. 可选字段使用Optional (Python) / | null (TypeScript)
@@ -98,10 +143,6 @@ isort src/ --profile black
 - 网络错误统一处理并提示"网络请求失败"
 - 具体业务错误由错误消息显示
 
-### CORS配置
-- 默认允许所有源：`allow_origins=["*"]`
-- 支持自定义源列表：`config.api.cors_origins`
-- 允许所有方法和请求头
 
 ### 安全规范
 - 敏感信息（密码、API密钥）禁止在日志中输出
@@ -110,70 +151,59 @@ isort src/ --profile black
 - 错误响应避免暴露内部实现细节
 
 ### 测试规范
-测试规范及方法参见 @TESTING.md
+测试规范及方法参见 @tests/TESTING.md
 
 ## 架构概览
-### 多进程架构 (Manager-Trader 分离)
 
-**Manager 进程** (`src/run_manager.py`)
-- Web 服务、API 路由、WebSocket 连接管理
-- 通过 TraderProxy 与 Trader 进程通信 (Unix Socket)
-- 管理多个 Trader 进程的生命周期
-- 数据持久化（Manager 本地数据库）
-
-**Trader 进程** (`src/run_trader.py`)
-- 独立进程执行交易逻辑
-- 每个账户一个独立 Trader 进程
-- 通过 Unix Socket 与 Manager 通信
-- 独立数据库、独立进程、互不干扰
-
-### 核心组件
-
-**TradingEngine** (`src/trader/trading_engine.py`)
-- Trader 进程内的中央协调器
-- 管理 Gateway 抽象层 (TqSdk, CTP)
-- 属性委托给 Gateway：`account`, `positions`, `orders`, `trades`, `quotes`
-- 事件驱动：通过 `src.utils.event.event_engine` 触发事件
-- 不包含业务逻辑 - 委托给 Gateway
-
-**Gateway 模式** (`src/trader/gateway/`)
-- `BaseGateway`：所有交易适配器的抽象接口
-- `TqGateway`：TqSdk 实现
-- `CtpGateway`：CTP 实现
-- 方法：`connect()`, `disconnect()`, `insert_order()`, `cancel_order()`, `subscribe_symbol()`
-- 返回类型来自 `src.models.object`：`AccountData`, `PositionData`, `OrderData`, `TradeData`, `TickData`
-
-**策略系统** (`src/trader/strategy/`)
-- `BaseStrategy`：基类，持有 `strategy_manager` 引用（不直接访问 `trading_engine`）
-- `StrategyManager`：管理策略生命周期、路由事件、处理交易
-- **关键**：策略调用 `strategy_manager.buy/sell/cancel_order()`，而非直接调用 `trading_engine`
-- `order_strategy_map: Dict[str, str]` 映射 `order_id -> strategy_id`
-- 事件根据订单所有权分发给策略
-- 策略配置在 `config/strategies.yaml`，CSV参数在 `data/params/`
-
-**数据模型** (`src/models/object.py`)
-- Pydantic 模型：`TickData`, `BarData`, `OrderData`, `TradeData`, `PositionData`, `AccountData`
-- 使用**属性访问** (`order.order_id`)，而非 `.get()` 方法
-- `OrderData.volume` 是委托数量，`OrderData.traded` 是已成交数量，`volume_left` 是计算属性
-
-### 事件流
 ```
-Gateway -> TradingEngine.emit() -> EventTypes -> StrategyManager._dispatch_event() -> Strategy.on_*()
+Manager 进程 (run_manager.py)          Trader 进程 (run_trader.py --account-id xxx)
+┌─────────────────────────┐            ┌──────────────────────────────────────┐
+│ FastAPI + WebSocket     │            │ Trader (主类，协调所有子组件)          │
+│ TradingManager          │◄─Unix──►  │   ├── TradingEngine (→ Gateway)      │
+│ TraderProxy (进程管理)   │  Socket   │   ├── StrategyManager → Strategy     │
+│ 数据持久化 (PostgreSQL)   │            │   ├── SwitchPosManager (换仓)        │
+└─────────────────────────┘            │   ├── JobManager (定时任务)           │
+                                       │   ├── RiskControl (风控)             │
+                                       │   └── TraderReqHandler (IPC请求)     │
+                                       └──────────────────────────────────────┘
 ```
 
-- 事件类型在 `src.utils.event.EventTypes` 中定义
-- 行情事件分发给所有活跃策略
-- 订单/成交事件只分发给拥有该订单的策略（通过 `order_strategy_map`）
+**关键调用链**:
+```
+Gateway → TradingEngine.emit() → EventTypes → StrategyManager._dispatch_event() → Strategy.on_*()
+策略下单: Strategy → strategy_manager.buy/sell() → TradingEngine → Gateway.insert_order()
+IPC请求: Manager → TraderProxy → SocketClient → SocketServer → TraderReqHandler → TradingEngine
+```
 
-### Manager-Trader 通信
+**Gateway** (`qtrader.trader.gateway`): `BaseGateway`(抽象) → `TqGateway`(TqSdk) / `CtpGateway`(CTP)
+**数据模型**: Pydantic (`qtrader.models.object`) + SQLAlchemy PO (`qtrader.models.po`)，属性访问，禁止 `.get()`
+**DAO层** (`qtrader.trader.dao`): Pydantic ↔ PO 转换和持久化
+**事件引擎**: `qtrader.utils.async_event_engine.EventTypes`，行情分发给所有策略，订单/成交按 `order_strategy_map` 分发
+**IPC协议**: `qtrader.utils.ipc.protocol`，simplejson 序列化，消息类型: `HEARTBEAT/REQUEST/RESPONSE/PUSH/ERROR`
+**数据库**: PostgreSQL (`psycopg` 同步 / `asyncpg` 异步)，`session_scope()` context manager
+**配置**: `config/config.yaml`(全局) + `config/account-{ID}.yaml`(含 `strategies` 字段)
 
-**Unix Socket 通信**
-- Manager 通过 `TraderProxy` 与 Trader 进程通信
-- Socket 文件位于 `config.socket.socket_dir`
-- 消息类型：状态查询、报单、撤单、订阅等
+## 常用命令
 
-**数据同步**
-- Trader 进程推送实时数据到 Manager
-- Manager 缓存数据并通过 WebSocket 推送给前端
-- 账户信息每3秒批量推送（缓存机制）
+```bash
+# 格式化
+make format
 
+# 代码检查
+make lint
+
+# 单元测试
+make test-unit
+
+# API 集成测试（需先启动后端）
+make test-api
+
+# 全部测试
+make test-all
+
+# 测试覆盖率
+make test-coverage
+
+# 安装依赖
+make install
+```
