@@ -10,6 +10,7 @@ Socket服务器 - V2版本，使用标准协议
 """
 
 import asyncio
+import time
 import uuid
 from collections import deque
 from functools import wraps
@@ -89,8 +90,8 @@ class SocketClientConnection:
         self.connected = True
         self.protocol = MessageProtocol()
         self.lock = asyncio.Lock()  # 用于发送时的线程安全
-        self._created_at = asyncio.get_event_loop().time()
-        self._last_heartbeat_time = asyncio.get_event_loop().time()  # 上次心跳时间
+        self._created_at = time.monotonic()
+        self._last_heartbeat_time = time.monotonic()  # 上次心跳时间
 
     async def close(self) -> None:
         """关闭连接"""
@@ -115,15 +116,15 @@ class SocketClientConnection:
 
     def get_uptime(self) -> float:
         """获取连接存活时间（秒）"""
-        return asyncio.get_event_loop().time() - self._created_at
+        return time.monotonic() - self._created_at
 
     def update_heartbeat(self) -> None:
         """更新心跳时间"""
-        self._last_heartbeat_time = asyncio.get_event_loop().time()
+        self._last_heartbeat_time = time.monotonic()
 
     def get_time_since_last_heartbeat(self) -> float:
         """获取距离上次心跳的时间（秒）"""
-        return asyncio.get_event_loop().time() - self._last_heartbeat_time
+        return time.monotonic() - self._last_heartbeat_time
 
     async def send_message(self, message: MessageBody) -> bool:
         """
@@ -449,7 +450,7 @@ class SocketServer:
 
                 # 检查所有连接的心跳状态
                 dead_connections: list[str] = []
-                current_time = asyncio.get_event_loop().time()
+                current_time = time.monotonic()
 
                 async with self._clients_lock:
                     for conn_id, conn in list(self._clients.items()):

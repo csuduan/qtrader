@@ -8,6 +8,7 @@ import asyncio
 import os
 import signal
 import sys
+import time
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -799,7 +800,7 @@ class TraderProxy:
             logger.exception(f"更新持仓盈亏失败: {tick.symbol} {e}")
         try:
             # 推送判断
-            now = asyncio.get_event_loop().time()
+            now = time.monotonic()
             last_time = self._last_position_push_time.get(symbol)
             if last_time is not None and (now - last_time) < self._ws_push_interval:
                 return

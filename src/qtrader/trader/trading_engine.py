@@ -69,11 +69,11 @@ class TradingEngine:
         # 风控模块（使用配置文件中的默认值，启动后会从数据库加载）
         risk_config = config.trading.risk_control if config.trading else None
         if risk_config:
-            self.risk_control = RiskControl(risk_config)
+            self.risk_control = RiskControl(risk_config, account_id=self.account_id)
         else:
             from qtrader.utils.config_loader import RiskControlConfig
 
-            self.risk_control = RiskControl(RiskControlConfig())
+            self.risk_control = RiskControl(RiskControlConfig(), account_id=self.account_id)
 
         # 异步事件引擎
         self.event_engine: AsyncEventEngine | None = None

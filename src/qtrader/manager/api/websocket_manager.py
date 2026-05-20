@@ -3,7 +3,6 @@ WebSocket管理模块
 """
 
 import asyncio
-import json
 from datetime import datetime, date
 
 import simplejson as json

@@ -299,7 +299,7 @@ class Trader:
         if self._public_data_initialized:
             return True
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         self._init_data_future = loop.create_future()
         logger.info(f"Trader [{self.account_id}] 等待 Manager 推送公共数据（最多 {timeout}s）...")
 

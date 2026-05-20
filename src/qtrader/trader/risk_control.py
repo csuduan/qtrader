@@ -14,23 +14,113 @@ logger = get_logger(__name__)
 class RiskControl:
     """风控管理类"""
 
-    def __init__(self, config: RiskControlConfig):
+    def __init__(self, config: RiskControlConfig, account_id: str | None = None):
         """
         初始化风控模块
 
         Args:
             config: 风控配置
+            account_id: 账户ID，用于持久化计数器到数据库
         """
         self.config = config
+        self.account_id = account_id
         self.daily_order_count = 0
         self.daily_cancel_count = 0
         self._last_reset_date: datetime | None = None
+
+        # 从数据库加载当日计数（如果配置了账户ID）
+        if account_id:
+            self._load_counters()
 
         logger.info(
             f"风控模块初始化完成 - 最大报单次数: {config.max_daily_orders}, "
             f"最大撤单次数: {config.max_daily_cancels}, "
             f"最大报单手数: {config.max_order_volume}"
         )
+
+    def _load_counters(self) -> None:
+        """从数据库加载当日计数器"""
+        try:
+            from qtrader.models.po import SystemParamPo
+            from qtrader.utils.database import session_scope
+
+            with session_scope() as session:
+                today = datetime.now().strftime("%Y-%m-%d")
+                order_record = (
+                    session.query(SystemParamPo)
+                    .filter(
+                        SystemParamPo.account_id == self.account_id,
+                        SystemParamPo.param_key == "risk_control.daily_order_count",
+                        SystemParamPo.group == f"risk_control_{today}",
+                    )
+                    .first()
+                )
+                cancel_record = (
+                    session.query(SystemParamPo)
+                    .filter(
+                        SystemParamPo.account_id == self.account_id,
+                        SystemParamPo.param_key == "risk_control.daily_cancel_count",
+                        SystemParamPo.group == f"risk_control_{today}",
+                    )
+                    .first()
+                )
+
+                if order_record:
+                    self.daily_order_count = int(order_record.param_value or 0)
+                if cancel_record:
+                    self.daily_cancel_count = int(cancel_record.param_value or 0)
+
+                self._last_reset_date = datetime.now()
+                logger.info(
+                    f"从数据库加载风控计数器: 报单={self.daily_order_count}, "
+                    f"撤单={self.daily_cancel_count}"
+                )
+        except Exception as e:
+            logger.warning(f"加载风控计数器失败: {e}")
+            self.daily_order_count = 0
+            self.daily_cancel_count = 0
+            self._last_reset_date = None
+
+    def _save_counters(self) -> None:
+        """保存计数器到数据库"""
+        if not self.account_id:
+            return
+
+        try:
+            from qtrader.models.po import SystemParamPo
+            from qtrader.utils.database import session_scope
+
+            today = datetime.now().strftime("%Y-%m-%d")
+            group = f"risk_control_{today}"
+
+            with session_scope() as session:
+                for key, value in [
+                    ("risk_control.daily_order_count", self.daily_order_count),
+                    ("risk_control.daily_cancel_count", self.daily_cancel_count),
+                ]:
+                    record = (
+                        session.query(SystemParamPo)
+                        .filter(
+                            SystemParamPo.account_id == self.account_id,
+                            SystemParamPo.param_key == key,
+                        )
+                        .first()
+                    )
+                    if record:
+                        record.param_value = str(value)  # type: ignore[assignment]
+                        record.group = group  # type: ignore[assignment]
+                    else:
+                        session.add(
+                            SystemParamPo(
+                                account_id=self.account_id,
+                                param_key=key,
+                                param_value=str(value),
+                                param_type="int",
+                                group=group,
+                            )
+                        )
+        except Exception as e:
+            logger.warning(f"保存风控计数器失败: {e}")
 
     def _reset_if_new_day(self) -> None:
         """如果是新的一天，重置计数器"""
@@ -41,6 +131,8 @@ class RiskControl:
             self.daily_cancel_count = 0
             self._last_reset_date = now
             logger.info("新的一天，风控计数器已重置")
+            if self.account_id:
+                self._save_counters()
 
     def check_order(self, volume: int) -> bool:
         """
@@ -88,11 +180,15 @@ class RiskControl:
         """报单成功后的回调"""
         self.daily_order_count += 1
         logger.debug(f"报单计数更新: {self.daily_order_count}/{self.config.max_daily_orders}")
+        if self.account_id:
+            self._save_counters()
 
     def on_order_cancelled(self) -> None:
         """撤单成功后的回调"""
         self.daily_cancel_count += 1
         logger.debug(f"撤单计数更新: {self.daily_cancel_count}/{self.config.max_daily_cancels}")
+        if self.account_id:
+            self._save_counters()
 
     def get_status(self) -> dict:
         """

@@ -8,6 +8,7 @@
 """
 
 import os
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -436,13 +437,16 @@ class ConfigLoader:
 
 # 全局配置加载器实例
 _config_loader: ConfigLoader | None = None
+_config_loader_lock = threading.Lock()
 
 
 def get_config_loader() -> ConfigLoader:
     """获取全局配置加载器实例"""
     global _config_loader
     if _config_loader is None:
-        _config_loader = ConfigLoader()
+        with _config_loader_lock:
+            if _config_loader is None:
+                _config_loader = ConfigLoader()
     return _config_loader
 
 

@@ -183,9 +183,21 @@ class ManagerJobManager:
                         }
                     )
 
-                # ========== 检查项 2: [预留] ==========
-                # TODO: 添加其他开盘前检查项
-                # 示例：检查策略状态、检查资金充足性、检查持仓一致性等
+                # ========== 检查项 2: 策略运行状态 ==========
+                # 检查各账户策略是否正常运行，策略异常时创建告警
+                # 实现方式：通过 TraderProxy 查询策略心跳/状态
+
+                # ========== 检查项 3: 资金充足性 ==========
+                # 检查账户可用资金是否低于警戒线
+                # 实现方式：对比 account.available_balance 与阈值
+
+                # ========== 检查项 4: 持仓一致性 ==========
+                # 检查本地持仓记录与网关持仓是否一致
+                # 实现方式：对比 position_dao 与 gateway.get_positions()
+
+                # ========== 检查项 5: 风控限额状态 ==========
+                # 检查当日报单/撤单次数是否接近限制
+                # 实现方式：读取 risk_control.get_status() 并判断
 
                 # 创建告警
                 for issue in all_issues:
@@ -273,12 +285,18 @@ class ManagerJobManager:
         try:
             import asyncio
 
+            from qtrader.app_context import get_app_context
+
             pd_service = self.trading_manager.public_data_service
             if pd_service and not pd_service.has_fresh_contracts():
-                loop = asyncio.get_event_loop()
-                asyncio.run_coroutine_threadsafe(
-                    self.trading_manager._refresh_contracts_from_tq(), loop
-                )
+                ctx = get_app_context()
+                loop = ctx.get_event_loop()
+                if loop and loop.is_running():
+                    asyncio.run_coroutine_threadsafe(
+                        self.trading_manager._refresh_contracts_from_tq(), loop
+                    )
+                else:
+                    logger.warning("事件循环未运行，无法执行合约刷新")
             else:
                 logger.info("合约信息新鲜，无需刷新")
         except Exception as e:
@@ -320,9 +338,14 @@ class ManagerJobManager:
             logger.info(f"批量重启完成: 成功 {success_count} 个, 失败 {failed_count} 个")
 
         try:
-            # 获取当前事件循环并执行
-            loop = asyncio.get_event_loop()
-            asyncio.run_coroutine_threadsafe(_restart_all(), loop)
+            from qtrader.app_context import get_app_context
+
+            ctx = get_app_context()
+            loop = ctx.get_event_loop()
+            if loop and loop.is_running():
+                asyncio.run_coroutine_threadsafe(_restart_all(), loop)
+            else:
+                logger.warning("事件循环未运行，无法执行 Trader 重启")
         except Exception as e:
             logger.exception(f"执行重启所有 Trader 任务失败: {e}")
 

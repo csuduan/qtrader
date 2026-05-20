@@ -51,6 +51,9 @@ if TYPE_CHECKING:
 
 
 
+# CTP 订单引用号上限（int32 最大值）
+ORDER_REF_MAX = 0x7FFFFFFF
+
 # ==================== CTP 常量映射 ====================
 
 # 订单状态映射: CTP -> 系统内部
@@ -412,6 +415,15 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
 
         logger.info(f"CTP 交易接口初始化，地址: {self.address}")
 
+    def _safe_release_semaphore(self) -> None:
+        """安全释放信号量（避免重复释放导致异常）"""
+        sem = self.semaphore
+        try:
+            sem.release()
+        except ValueError:
+            # 信号量已被释放，忽略
+            pass
+
     def connect(self) -> bool:
         """连接交易服务器"""
         if self._running:
@@ -498,8 +510,12 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
             logger.error("CTP 交易接口未连接或未登录")
             return None
 
-        # 生成订单引用
+        # 生成订单引用（溢出检查）
         self.order_ref += 1
+        if self.order_ref > ORDER_REF_MAX:
+            unsigned_sessionid = self.sessionid & 0xFFFF
+            self.order_ref = (unsigned_sessionid << 16) + 1
+            logger.warning(f"CTP 订单引用号溢出，已回绕到起始值: {self.order_ref}")
         order_ref = str(self.order_ref)
 
         # 创建 CTP 请求
@@ -602,19 +618,19 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
     def query_account(self) -> None:
         """查询资金"""
         if not self.api or not self.connected:
-            self.semaphore.release()
+            self._safe_release_semaphore()
             return
         req = tdapi.CThostFtdcQryTradingAccountField()
         self.reqid += 1
         ret = self.api.ReqQryTradingAccount(req, self.reqid)
         if ret != 0:
             logger.error(f"查询资金失败，错误代码：{ret}")
-            self.semaphore.release()
+            self._safe_release_semaphore()
 
     def query_position(self) -> None:
         """查询持仓"""
         if not self.api or not self.connected:
-            self.semaphore.release()
+            self._safe_release_semaphore()
             return
 
         req = tdapi.CThostFtdcQryInvestorPositionField()
@@ -624,7 +640,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
         ret = self.api.ReqQryInvestorPosition(req, self.reqid)
         if ret != 0:
             logger.error(f"查询持仓失败，错误代码：{ret}")
-            self.semaphore.release()
+            self._safe_release_semaphore()
 
     def query_instrument(self) -> None:
         """查询合约"""
@@ -633,23 +649,23 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
         if len(self.gateway.contracts) > 0:
             logger.info(f"合约信息已缓存 ({len(self.gateway.contracts)} 个)，跳过查询")
             self.contract_inited = True
-            self.semaphore.release()
+            self._safe_release_semaphore()
             return
 
         if not self.api or not self.connected:
-            self.semaphore.release()
+            self._safe_release_semaphore()
             return
         req = tdapi.CThostFtdcQryInstrumentField()
         self.reqid += 1
         ret = self.api.ReqQryInstrument(req, self.reqid)
         if ret != 0:
             logger.error(f"查询合约失败，错误代码：{ret}")
-            self.semaphore.release()
+            self._safe_release_semaphore()
 
     def query_trades(self):
         """查询成交"""
         if not self.api or not self.connected:
-            self.semaphore.release()
+            self._safe_release_semaphore()
             return
         logger.info("开始查询成交...")
         req = tdapi.CThostFtdcQryTradeField()
@@ -659,12 +675,12 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
         ret = self.api.ReqQryTrade(req, self.reqid)
         if ret != 0:
             logger.error(f"查询成交失败，错误代码：{ret}")
-            self.semaphore.release()
+            self._safe_release_semaphore()
 
     def query_orders(self):
         """查询订单"""
         if not self.api or not self.connected:
-            self.semaphore.release()
+            self._safe_release_semaphore()
             return
         logger.info("开始查询订单...")
         req = tdapi.CThostFtdcQryOrderField()
@@ -674,7 +690,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
         ret = self.api.ReqQryOrder(req, self.reqid)
         if ret != 0:
             logger.error(f"查询订单失败，错误代码：{ret}")
-            self.semaphore.release()
+            self._safe_release_semaphore()
 
     # ==================== CTP 回调方法 ====================
 
@@ -728,7 +744,13 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
         # 更新订单引用
         max_order_ref = int(pRspUserLogin.MaxOrderRef) if pRspUserLogin.MaxOrderRef else 0
         unsigned_sessionid = self.sessionid & 0xFFFF
-        self.order_ref = (unsigned_sessionid << 16) + max_order_ref + 1
+        base_ref = (unsigned_sessionid << 16) + 1
+        self.order_ref = base_ref + max_order_ref
+
+        # 订单引用号溢出检查
+        if self.order_ref > ORDER_REF_MAX:
+            self.order_ref = base_ref
+            logger.warning(f"CTP 订单引用号溢出，已回绕到起始值: {self.order_ref}")
 
         logger.info(
             f"CTP 交易服务器登录成功，交易日: {trading_day}, "
@@ -841,7 +863,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
     ) -> None:
         """确认结算单回报"""
         logger.info("结算信息确认成功")
-        self.semaphore.release()
+        self._safe_release_semaphore()
 
     def OnRspQryTradingAccount(
         self,
@@ -853,7 +875,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
         """资金查询回报"""
         if pRspInfo and pRspInfo.ErrorID != 0:
             logger.error(f"CTP 查询资金失败: {pRspInfo.ErrorID} {pRspInfo.ErrorMsg}")
-            self.semaphore.release()
+            self._safe_release_semaphore()
             return
 
         if pTradingAccount:
@@ -883,7 +905,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
             )
 
             self.gateway.on_account(account)
-            self.semaphore.release()
+            self._safe_release_semaphore()
             logger.info(f"CTP 资金查询成功，余额: {account.balance}")
 
     def OnRspQryInvestorPosition(
@@ -896,7 +918,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
         """持仓查询回报"""
         if pRspInfo and pRspInfo.ErrorID != 0:
             logger.error(f"CTP 查询持仓失败: {pRspInfo.ErrorID}-{pRspInfo.ErrorMsg}")
-            self.semaphore.release()
+            self._safe_release_semaphore()
             return
 
         if pInvestorPosition:
@@ -983,7 +1005,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
             for position in self.position_map.values():
                 self.gateway.add_position(position)
 
-            self.semaphore.release()
+            self._safe_release_semaphore()
             logger.info(f"CTP 持仓查询成功，共 {len(self.position_map)} 条")
             self.position_map.clear()
 
@@ -997,7 +1019,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
         """合约查询回报"""
         if pRspInfo and pRspInfo.ErrorID != 0:
             logger.error(f"CTP 查询合约失败: {pRspInfo.ErrorID} {pRspInfo.ErrorMsg}")
-            self.semaphore.release()
+            self._safe_release_semaphore()
             return
 
         if pInstrument:
@@ -1024,7 +1046,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
             self.contract_inited = True
             # 更新合约缓存日期
             self.gateway._contracts_update_date = datetime.now().strftime("%Y-%m-%d")
-            self.semaphore.release()
+            self._safe_release_semaphore()
             self._save_contracts()
             logger.info(f"CTP 合约查询成功，共 {len(self.gateway.contracts)} 条")
 
@@ -1038,7 +1060,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
         """请求查询成交响应"""
         if pRspInfo is not None and pRspInfo.ErrorID != 0:
             logger.error(f"查询成交失败,{pRspInfo.ErrorMsg}")
-            self.semaphore.release()
+            self._safe_release_semaphore()
             return
 
         if pTrade:
@@ -1065,7 +1087,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
 
         if bIsLast:
             logger.info(f"成交信息查询成功")
-            self.semaphore.release()
+            self._safe_release_semaphore()
 
     def OnRspQryOrder(
         self, pOrder: tdapi.CThostFtdcOrderField, pRspInfo: Any, nRequestID: int, bIsLast: bool
@@ -1073,7 +1095,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
         """请求查询订单响应"""
         if pRspInfo is not None and pRspInfo.ErrorID != 0:
             logger.error(f"查询订单失败,{pRspInfo.ErrorMsg}")
-            self.semaphore.release()
+            self._safe_release_semaphore()
             return
 
         if pOrder:
@@ -1105,7 +1127,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
 
         if bIsLast:
             logger.info(f"订单信息查询成功")
-            self.semaphore.release()
+            self._safe_release_semaphore()
 
     def _run_query(self) -> None:
         """运行查询序列"""
@@ -1121,21 +1143,27 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
         ]
 
         for i, (name, func) in enumerate(query_functions, 1):
-            self.semaphore.acquire()
+            acquired = self.semaphore.acquire(timeout=30)
+            if not acquired:
+                logger.error(f"CTP 查询超时: [{i}/{len(query_functions)}] {name}")
+                continue
             logger.info(f"CTP 查询进度: [{i}/{len(query_functions)}] {name}")
             func()
             time.sleep(1)
 
-        self.semaphore.acquire()
-        logger.info("CTP 查询完成！")
-        self.semaphore.release()
+        acquired = self.semaphore.acquire(timeout=30)
+        if acquired:
+            logger.info("CTP 查询完成！")
+            self._safe_release_semaphore()
+        else:
+            logger.error("CTP 最终查询信号量获取超时")
         self.connected = True
         self.gateway.on_status(True)
 
     def query_settlement(self) -> None:
         """查询结算单确认"""
         if not self.api or not self.connected:
-            self.semaphore.release()
+            self._safe_release_semaphore()
             return
         req = tdapi.CThostFtdcSettlementInfoConfirmField()
         req.BrokerID = self.broker
@@ -1144,7 +1172,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
         ret = self.api.ReqSettlementInfoConfirm(req, self.reqid)
         if ret != 0:
             logger.error(f"查询结算单失败，错误代码：{ret}")
-            self.semaphore.release()
+            self._safe_release_semaphore()
 
     def _get_temp_path(self, subdir: str) -> Path:
         """获取临时文件路径"""
