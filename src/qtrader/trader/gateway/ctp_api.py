@@ -40,11 +40,11 @@ logger = get_logger(__name__)
 
 ctp_type = config.gateway.broker.type
 if ctp_type == "rohon":
-    from pyctp.rohon import mdapi, tdapi
+    from ctpx.rohon import mdapi, tdapi
 elif ctp_type == "jees":
-    from pyctp.jees import mdapi, tdapi
+    from ctpx.jees import mdapi, tdapi
 else:
-    from pyctp.ctp import mdapi, tdapi
+    from ctpx.ctp import mdapi, tdapi
 
 if TYPE_CHECKING:
     from qtrader.trader.gateway.ctp_gateway import CtpGateway
