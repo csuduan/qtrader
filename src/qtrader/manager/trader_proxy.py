@@ -158,13 +158,10 @@ class TraderProxy:
         conda_env = os.environ.get("CONDA_ENV_NAME", "qts")
 
         cmd: list[str] = [
-            "conda",
+            "uv",
             "run",
-            "-n",
-            conda_env,
             "python",
-            "-m",
-            "src.run_trader",
+            "run_trader.py",
             "--account-id",
             self.account_id,
         ]

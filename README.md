@@ -52,17 +52,14 @@ Manager 和 Trader 通过 Unix Domain Socket 进行通信：
 ## 快速开始
 
 ### 1. 安装依赖
-* 安装虚拟环境  
-
+* 安装依赖包
 ```bash
-# 创建虚拟环境(本项目要求python3.12以上)
-conda create -n qts python=3.12
-conda activate qts
-
-# 安装项目
-pip install -e .
-
+#同步依赖
+uv sync
+#如果同步慢，则需要添加UV镜像  
+export UV_DEFAULT_INDEX="https://pypi.tuna.tsinghua.edu.cn/simple"
 ```
+
 
 * 安装数据库(可选)
 ```bash
@@ -118,7 +115,7 @@ gateway:
 * 启动管理平台
 ```bash
 # 启动 Manager（会自动启动配置中的 Trader）
-python -m run_manager
+uv run python run_manager.py
 
 ```
 * 启动账户(可选)
@@ -126,7 +123,7 @@ python -m run_manager
 略 
   - 手动启动 
 ```bash
-python -m run_trader --account-id DQ
+uv run python run_trader.py --account-id DQ
 ```
 * 启动前端
 ```bash
