@@ -357,6 +357,7 @@ class ManagerJobManager:
         如果达到阈值则发送阈值告警通知。
         """
         from datetime import datetime, timedelta
+
         from qtrader.utils.database import session_scope
 
         logger.info("开始检查阈值告警")
@@ -520,3 +521,111 @@ class ManagerJobManager:
                     )
         except Exception as e:
             logger.exception(f"执行所有账户换仓任务失败: {e}")
+
+    def send_weekly_settlement_report(self) -> None:
+        """
+        发送本周结算权益周报邮件（每周五执行）
+
+        汇总本周一至今日所有账户的每日结算权益快照，
+        以 HTML 表格邮件发送给配置的收件人
+        """
+        from qtrader.trader.dao.settlement_dao import SettlementDao
+        from qtrader.utils.config_loader import get_config_loader
+        from qtrader.utils.email_sender import send_email
+
+        logger.info("开始执行结算权益周报任务")
+        try:
+            email_config = get_config_loader()._load_app_config().email
+            if not email_config.enabled:
+                logger.info("邮件功能未启用，跳过结算权益周报任务")
+                return
+
+            today = datetime.now().date()
+            monday = today - timedelta(days=today.weekday())
+
+            records = SettlementDao().query_settlements(None, monday, today)
+            if not records:
+                logger.warning(f"本周({monday} ~ {today})无结算权益数据，跳过周报发送")
+                return
+
+            html_body = _build_settlement_report_html(records, monday, today)
+            subject = f"Q-Trader 结算权益周报 ({monday:%m-%d} ~ {today:%m-%d})"
+
+            send_email(
+                subject=subject,
+                html_body=html_body,
+                recipients=email_config.recipients,
+                smtp_host=email_config.smtp_host,
+                smtp_port=email_config.smtp_port,
+                username=email_config.username,
+                password=email_config.password,
+                from_addr=email_config.from_addr,
+            )
+            logger.info(f"结算权益周报发送完成: {subject}")
+        except Exception as e:
+            logger.exception(f"结算权益周报任务执行失败: {e}")
+
+
+def _fmt_money(value) -> str:
+    """格式化金额，None 显示为 -"""
+    return f"{float(value):,.2f}" if value is not None else "-"
+
+
+def _build_settlement_report_html(records, start_date, end_date) -> str:
+    """
+    拼接结算权益周报 HTML 正文（按账户分组，每账户一张表）
+
+    Args:
+        records: AccountHistoryPo 列表（已按账户、日期排序）
+        start_date: 周报开始日期
+        end_date: 周报结束日期
+
+    Returns:
+        HTML 字符串
+    """
+    header_style = "background-color:#4472C4;color:#ffffff;padding:6px 10px;border:1px solid #ddd;"
+    cell_style = "padding:6px 10px;border:1px solid #ddd;text-align:right;"
+
+    parts = [
+        f"<h3>Q-Trader 结算权益周报（{start_date} ~ {end_date}）</h3>",
+    ]
+
+    current_account = None
+    for record in records:
+        if record.account_id != current_account:
+            if current_account is not None:
+                parts.append("</table>")
+            current_account = record.account_id
+            parts.append(f"<h4>账户：{current_account}</h4>")
+            parts.append('<table style="border-collapse:collapse;font-size:13px;">')
+            parts.append(
+                "<tr>"
+                f'<th style="{header_style}">日期</th>'
+                f'<th style="{header_style}">结算权益</th>'
+                f'<th style="{header_style}">入金</th>'
+                f'<th style="{header_style}">出金</th>'
+                f'<th style="{header_style}">平仓盈亏</th>'
+                f'<th style="{header_style}">持仓盈亏</th>'
+                f'<th style="{header_style}">保证金</th>'
+                f'<th style="{header_style}">风险度</th>'
+                "</tr>"
+            )
+
+        risk_ratio = f"{float(record.risk_ratio):.2%}" if record.risk_ratio is not None else "-"
+        parts.append(
+            "<tr>"
+            f'<td style="{cell_style}">{record.settle_date}</td>'
+            f'<td style="{cell_style}">{_fmt_money(record.balance)}</td>'
+            f'<td style="{cell_style}">{_fmt_money(record.deposit)}</td>'
+            f'<td style="{cell_style}">{_fmt_money(record.withdraw)}</td>'
+            f'<td style="{cell_style}">{_fmt_money(record.close_profit)}</td>'
+            f'<td style="{cell_style}">{_fmt_money(record.hold_profit)}</td>'
+            f'<td style="{cell_style}">{_fmt_money(record.margin)}</td>'
+            f'<td style="{cell_style}">{risk_ratio}</td>'
+            "</tr>"
+        )
+
+    if current_account is not None:
+        parts.append("</table>")
+
+    return "".join(parts)

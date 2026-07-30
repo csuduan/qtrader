@@ -888,6 +888,8 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
                     pTradingAccount.PreBalance + pTradingAccount.Deposit - pTradingAccount.Withdraw,
                     2,
                 ),
+                deposit=round(pTradingAccount.Deposit, 2),
+                withdraw=round(pTradingAccount.Withdraw, 2),
                 margin=round(pTradingAccount.CurrMargin, 2),
                 risk_ratio=(
                     round(pTradingAccount.CurrMargin / pTradingAccount.Balance, 4)

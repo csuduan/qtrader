@@ -574,6 +574,8 @@ class TqGateway(BaseGateway):
             margin=account.margin or 0,
             pre_balance=account.static_balance or 0,
             static_balance=account.static_balance or 0,
+            deposit=None,
+            withdraw=None,
             hold_profit=account.position_profit or 0,
             close_profit=account.close_profit or 0,
             risk_ratio=account.risk_ratio or 0,

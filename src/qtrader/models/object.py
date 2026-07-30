@@ -490,6 +490,8 @@ class AccountData(BaseModel):
     available: float = Field(0, description="可用资金")
     pre_balance: float | None = Field(None, description="昨日权益")
     static_balance: float | None = Field(None, description="静态权益(昨日权益+出入金)")
+    deposit: float | None = Field(None, description="入金")
+    withdraw: float | None = Field(None, description="出金")
 
     # 可选字段
     frozen: float | None = Field(None, description="冻结资金")

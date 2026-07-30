@@ -458,6 +458,40 @@ class JobManager:
         except Exception as e:
             logger.exception(f"发送开盘检查告警失败: {e}")
 
+    async def save_daily_settlement(self) -> None:
+        """
+        保存每日结算快照任务
+
+        夜盘开盘前执行，此时网关已完成结算单确认，账户数据为结算后数据
+        保存内容：
+        1. 账户结算权益快照（account_history）
+        2. 账户级持仓快照（positions_history）
+        """
+        from qtrader.trader.dao.settlement_dao import SettlementDao
+
+        logger.info("开始执行每日结算快照任务")
+        try:
+            if not self.trading_engine.connected:
+                logger.error("交易引擎未连接，跳过每日结算快照任务")
+                return
+
+            account = self.trading_engine.account
+            if account is None:
+                logger.error("账户数据不可用，跳过每日结算快照任务")
+                return
+
+            settle_date = datetime.now().date()
+            positions = self.trading_engine.positions
+            account_id = account.account_id
+
+            dao = SettlementDao()
+            await asyncio.to_thread(dao.save_settlement, account_id, settle_date, account)
+            await asyncio.to_thread(dao.save_positions, account_id, settle_date, positions)
+
+            logger.info(f"每日结算快照任务完成: {account_id} {settle_date}")
+        except Exception as e:
+            logger.exception(f"每日结算快照任务执行失败: {e}")
+
     async def closing_process(self) -> None:
         """
         收盘处理任务

@@ -97,6 +97,18 @@ class SchedulerConfig(BaseModel):
     jobs: list[JobConfig] = Field(default_factory=list)
 
 
+class EmailConfig(BaseModel):
+    """邮件发送配置"""
+
+    enabled: bool = False
+    smtp_host: str = "smtp.qq.com"
+    smtp_port: int = 465
+    username: str = ""
+    password: str = ""  # SMTP授权码
+    from_addr: str = ""
+    recipients: list[str] = Field(default_factory=list)
+
+
 class TradingConfig(BaseModel):
     """交易控制配置"""
 
@@ -303,6 +315,8 @@ class AppConfig(BaseModel):
     alert: AlertConfig = Field(default_factory=AlertConfig)
     # 管理员账户配置
     admin: AdminConfig = Field(default_factory=AdminConfig)
+    # 邮件发送配置
+    email: EmailConfig = Field(default_factory=EmailConfig)
 
     class Config:
         extra = "allow"  # 允许额外字段

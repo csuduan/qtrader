@@ -8,6 +8,7 @@ from datetime import datetime
 from sqlalchemy import (
     Boolean,
     Column,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -356,3 +357,70 @@ class UserPo(Base):
 
     def __repr__(self):
         return f"<UserPo(user_id={self.user_id}, role={self.role}, is_active={self.is_active})>"
+
+
+class AccountHistoryPo(Base):
+    """账户每日结算权益历史表"""
+
+    __tablename__ = "account_history"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_id = Column(String(50), nullable=False, index=True)
+    settle_date = Column(Date, nullable=False, index=True)  # 结算日期
+
+    balance = Column(Numeric(20, 2), nullable=False, default=0)  # 结算权益
+    available = Column(Numeric(20, 2), nullable=False, default=0)  # 可用资金
+    pre_balance = Column(Numeric(20, 2), nullable=True)  # 昨日权益
+    static_balance = Column(Numeric(20, 2), nullable=True)  # 静态权益
+    deposit = Column(Numeric(20, 2), nullable=True)  # 入金
+    withdraw = Column(Numeric(20, 2), nullable=True)  # 出金
+    close_profit = Column(Numeric(20, 2), nullable=True)  # 平仓盈亏
+    hold_profit = Column(Numeric(20, 2), nullable=True)  # 持仓盈亏
+    margin = Column(Numeric(20, 2), nullable=True)  # 保证金占用
+    risk_ratio = Column(Numeric(10, 4), nullable=True)  # 风险度
+
+    created_at = Column(DateTime, default=datetime.now)
+
+    __table_args__ = (
+        UniqueConstraint("account_id", "settle_date", name="uq_account_history_account_date"),
+    )
+
+    def __repr__(self):
+        return f"<AccountHistoryPo(account_id={self.account_id}, settle_date={self.settle_date}, balance={self.balance})>"
+
+
+class PositionHistoryPo(Base):
+    """账户每日结算持仓历史表"""
+
+    __tablename__ = "positions_history"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_id = Column(String(50), nullable=False, index=True)
+    settle_date = Column(Date, nullable=False, index=True)  # 结算日期
+    symbol = Column(String(80), nullable=False)
+    exchange = Column(String(20), nullable=False)
+
+    pos_long = Column(Integer, nullable=False, default=0)  # 多头持仓(今+昨)
+    pos_short = Column(Integer, nullable=False, default=0)  # 空头持仓(今+昨)
+
+    hold_price_long = Column(Numeric(20, 4), default=0)  # 多头持仓均价
+    hold_price_short = Column(Numeric(20, 4), default=0)  # 空头持仓均价
+
+    hold_profit_long = Column(Numeric(20, 2), default=0)  # 多头持仓盈亏
+    hold_profit_short = Column(Numeric(20, 2), default=0)  # 空头持仓盈亏
+
+    margin_long = Column(Numeric(20, 2), default=0)  # 多头保证金
+    margin_short = Column(Numeric(20, 2), default=0)  # 空头保证金
+
+    last_price = Column(Numeric(20, 4), nullable=True)  # 结算价
+
+    created_at = Column(DateTime, default=datetime.now)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "account_id", "settle_date", "symbol", name="uq_positions_history_account_date_symbol"
+        ),
+    )
+
+    def __repr__(self):
+        return f"<PositionHistoryPo(account_id={self.account_id}, settle_date={self.settle_date}, symbol={self.symbol}, long={self.pos_long}, short={self.pos_short})>"
