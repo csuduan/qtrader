@@ -513,7 +513,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
         # 生成订单引用（溢出检查）
         self.order_ref += 1
         if self.order_ref > ORDER_REF_MAX:
-            unsigned_sessionid = self.sessionid & 0xFFFF
+            unsigned_sessionid = self.sessionid & 0x7FFF
             self.order_ref = (unsigned_sessionid << 16) + 1
             logger.warning(f"CTP 订单引用号溢出，已回绕到起始值: {self.order_ref}")
         order_ref = str(self.order_ref)
@@ -743,7 +743,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
 
         # 更新订单引用
         max_order_ref = int(pRspUserLogin.MaxOrderRef) if pRspUserLogin.MaxOrderRef else 0
-        unsigned_sessionid = self.sessionid & 0xFFFF
+        unsigned_sessionid = self.sessionid & 0x7FFF
         base_ref = (unsigned_sessionid << 16) + 1
         self.order_ref = base_ref + max_order_ref
 
@@ -754,7 +754,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
 
         logger.info(
             f"CTP 交易服务器登录成功，交易日: {trading_day}, "
-            f"FrontID: {self.frontid}, SessionID: {self.sessionid}"
+            f"FrontID: {self.frontid}, SessionID: {self.sessionid} MaxOrderRef:{pRspUserLogin.MaxOrderRef} CurOrderRef:{self.order_ref}"
         )
 
         # 设置交易日期
