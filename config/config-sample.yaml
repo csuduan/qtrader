@@ -79,6 +79,16 @@ admin:
   user: "duanqing"
   password: "duanqing123"
 
+email:
+  enabled: false
+  smtp_host: smtp.qq.com
+  smtp_port: 465
+  username: ""
+  password: ""        # QQ邮箱SMTP授权码
+  from_addr: ""
+  recipients:
+    - xxxx@qq.com
+
 # Manager 定时任务配置
 scheduler:
   jobs:
@@ -126,7 +136,15 @@ scheduler:
       cron_expression: "0 0 3 * * *"  # 每天凌晨 3:00
       job_method: "cleanup_logs"
       enabled: true
-
+      
+    # 发送结算权益周报
+    - job_id: weekly_settlement_report
+      job_name: 结算权益周报
+      job_group: 运维
+      job_description: 每周五发送本周每日结算权益周报邮件
+      cron_expression: 10 21 * * fri
+      job_method: send_weekly_settlement_report
+      enabled: true
 
 
 # 账户定时任务配置（所有Trader进程共享）
@@ -194,3 +212,12 @@ account_scheduler:
       cron_expression: "0 55 20 * * *"
       job_method: reset_strategies
       enabled: true
+
+    # 保存每日结算快照
+    - job_id: save_daily_settlement
+      job_name: 保存每日结算快照
+      job_group: 交易
+      job_description: 夜盘开盘前保存当日结算权益与持仓快照
+      cron_expression: 58 20 * * mon-fri
+      enabled: true
+      job_method: save_daily_settlement
