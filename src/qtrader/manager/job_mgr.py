@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from qtrader.manager.service.alarm_service import AlarmService
-from qtrader.models.po import AlarmPo
+from qtrader.models.po import AccountHistoryPo, AlarmPo
 from qtrader.utils.database import get_session
 from qtrader.utils.logger import get_logger
 
@@ -526,8 +526,8 @@ class ManagerJobManager:
         """
         发送本周结算权益周报邮件（每周五执行）
 
-        汇总本周一至今日所有账户的每日结算权益快照，
-        以 HTML 表格邮件发送给配置的收件人
+        汇总本周一至今日所有账户的结算权益快照，
+        每账户取最新一日数据，合并为一张表格以 HTML 邮件发送给配置的收件人
         """
         from qtrader.trader.dao.settlement_dao import SettlementDao
         from qtrader.utils.config_loader import get_config_loader
@@ -548,8 +548,17 @@ class ManagerJobManager:
                 logger.warning(f"本周({monday} ~ {today})无结算权益数据，跳过周报发送")
                 return
 
-            html_body = _build_settlement_report_html(records, monday, today)
-            subject = f"Q-Trader 结算权益周报 ({monday:%m-%d} ~ {today:%m-%d})"
+            # 过滤黑名单账户
+            blacklist = set(email_config.exclude_accounts)
+            if blacklist:
+                records = [r for r in records if r.account_id not in blacklist]
+                logger.info(f"周报已过滤黑名单账户: {sorted(blacklist)}")
+                if not records:
+                    logger.info("过滤黑名单账户后无结算权益数据，跳过周报发送")
+                    return
+
+            html_body = _build_settlement_report_html(records, today)
+            subject = f"Q-Trader 结算权益周报 ({today:%m-%d})"
 
             send_email(
                 subject=subject,
@@ -571,61 +580,56 @@ def _fmt_money(value) -> str:
     return f"{float(value):,.2f}" if value is not None else "-"
 
 
-def _build_settlement_report_html(records, start_date, end_date) -> str:
+def _build_settlement_report_html(records, end_date) -> str:
     """
-    拼接结算权益周报 HTML 正文（按账户分组，每账户一张表）
+    拼接结算权益周报 HTML 正文（全部账户合并一张表，每账户取最新一日数据）
 
     Args:
         records: AccountHistoryPo 列表（已按账户、日期排序）
-        start_date: 周报开始日期
         end_date: 周报结束日期
 
     Returns:
         HTML 字符串
     """
     header_style = "background-color:#4472C4;color:#ffffff;padding:6px 10px;border:1px solid #ddd;"
+    name_style = "padding:6px 10px;border:1px solid #ddd;text-align:left;"
     cell_style = "padding:6px 10px;border:1px solid #ddd;text-align:right;"
 
+    # 每账户取最新一日数据
+    latest_by_account: dict[str, AccountHistoryPo] = {}
+    for record in records:
+        current = latest_by_account.get(record.account_id)
+        if current is None or record.settle_date > current.settle_date:
+            latest_by_account[record.account_id] = record
+
     parts = [
-        f"<h3>Q-Trader 结算权益周报（{start_date} ~ {end_date}）</h3>",
+        f"<h3>Q-Trader 结算权益周报（{end_date}）</h3>",
+        '<table style="border-collapse:collapse;font-size:13px;">',
+        "<tr>"
+        f'<th style="{header_style}">账户</th>'
+        f'<th style="{header_style}">日期</th>'
+        f'<th style="{header_style}">结算权益</th>'
+        f'<th style="{header_style}">入金</th>'
+        f'<th style="{header_style}">出金</th>'
+        f'<th style="{header_style}">保证金</th>'
+        f'<th style="{header_style}">风险度</th>'
+        "</tr>",
     ]
 
-    current_account = None
-    for record in records:
-        if record.account_id != current_account:
-            if current_account is not None:
-                parts.append("</table>")
-            current_account = record.account_id
-            parts.append(f"<h4>账户：{current_account}</h4>")
-            parts.append('<table style="border-collapse:collapse;font-size:13px;">')
-            parts.append(
-                "<tr>"
-                f'<th style="{header_style}">日期</th>'
-                f'<th style="{header_style}">结算权益</th>'
-                f'<th style="{header_style}">入金</th>'
-                f'<th style="{header_style}">出金</th>'
-                f'<th style="{header_style}">平仓盈亏</th>'
-                f'<th style="{header_style}">持仓盈亏</th>'
-                f'<th style="{header_style}">保证金</th>'
-                f'<th style="{header_style}">风险度</th>'
-                "</tr>"
-            )
-
+    for account_id in sorted(latest_by_account):
+        record = latest_by_account[account_id]
         risk_ratio = f"{float(record.risk_ratio):.2%}" if record.risk_ratio is not None else "-"
         parts.append(
             "<tr>"
+            f'<td style="{name_style}">{account_id}</td>'
             f'<td style="{cell_style}">{record.settle_date}</td>'
             f'<td style="{cell_style}">{_fmt_money(record.balance)}</td>'
             f'<td style="{cell_style}">{_fmt_money(record.deposit)}</td>'
             f'<td style="{cell_style}">{_fmt_money(record.withdraw)}</td>'
-            f'<td style="{cell_style}">{_fmt_money(record.close_profit)}</td>'
-            f'<td style="{cell_style}">{_fmt_money(record.hold_profit)}</td>'
             f'<td style="{cell_style}">{_fmt_money(record.margin)}</td>'
             f'<td style="{cell_style}">{risk_ratio}</td>'
             "</tr>"
         )
 
-    if current_account is not None:
-        parts.append("</table>")
-
+    parts.append("</table>")
     return "".join(parts)

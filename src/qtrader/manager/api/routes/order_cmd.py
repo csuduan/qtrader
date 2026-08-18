@@ -2,7 +2,7 @@
 报单指令相关API路由
 """
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Body, Depends, Query
 
 from qtrader.manager.api.dependencies import get_trading_manager
 from qtrader.manager.api.responses import error_response, success_response
@@ -61,6 +61,82 @@ async def get_order_cmds_status(
     except Exception as e:
         logger.exception(f"获取报单指令失败: {e}", exc_info=True)
         return error_response(code=500, message=f"获取报单指令失败: {str(e)}")
+
+
+@router.post("")
+async def send_order_cmd(
+    request: dict = Body(..., description="订单指令数据"),
+    account_id: str = Query(..., description="账户ID"),
+    trading_manager: TradingManager = Depends(get_trading_manager),
+):
+    """
+    发送账户级报单指令（手动平仓等）
+
+    Args:
+        request: {
+            "symbol": "合约代码",
+            "direction": "BUY/SELL",
+            "offset": "OPEN/CLOSE/CLOSETODAY",
+            "volume": 手数,
+            "price": 目标价格 (0表示市价)
+        }
+        account_id: 账户ID
+    """
+    try:
+        trader = trading_manager.get_trader(account_id)
+        if not trader:
+            return error_response(code=404, message=f"账户 [{account_id}] 不存在")
+
+        symbol = request.get("symbol")
+        direction = request.get("direction")
+        offset = request.get("offset")
+        volume = request.get("volume")
+        price = request.get("price", 0)
+
+        if not all([symbol, direction, offset, volume is not None]):
+            return error_response(message="缺少必要参数: symbol, direction, offset, volume")
+
+        if direction not in ["BUY", "SELL"]:
+            return error_response(message="direction 必须是 BUY 或 SELL")
+
+        if offset not in ["OPEN", "CLOSE", "CLOSETODAY"]:
+            return error_response(message="offset 必须是 OPEN, CLOSE 或 CLOSETODAY")
+
+        try:
+            volume = int(volume)
+            if volume <= 0:
+                return error_response(message="volume 必须大于0")
+        except (ValueError, TypeError):
+            return error_response(message="volume 必须是整数")
+
+        try:
+            price = float(price) if price is not None else 0
+        except (ValueError, TypeError):
+            return error_response(message="price 必须是数字")
+
+        result = await trader.send_request(
+            "send_order_cmd",
+            {
+                "order_cmd": {
+                    "symbol": symbol,
+                    "direction": direction,
+                    "offset": offset,
+                    "volume": volume,
+                    "price": price,
+                }
+            },
+            timeout=10.0,
+        )
+
+        if result and result.get("success"):
+            return success_response(message="报单指令已发送", data={"cmd_id": result.get("cmd_id")})
+        else:
+            return error_response(
+                message=result.get("message", "发送报单指令失败") if result else "发送报单指令失败"
+            )
+    except Exception as e:
+        logger.exception(f"发送报单指令失败: {e}")
+        return error_response(message=f"发送报单指令失败: {str(e)}")
 
 
 @router.post("/{cmd_id}/cancel")

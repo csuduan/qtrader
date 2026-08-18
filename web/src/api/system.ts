@@ -51,6 +51,14 @@ export interface LegacyAlertConfig {
 }
 
 /**
+ * 换仓开关配置
+ */
+export interface RotationConfig {
+  enable_instruction_rotation: boolean
+  enable_target_pos_rotation: boolean
+}
+
+/**
  * 系统控制 API
  */
 export const systemApi = {
@@ -104,6 +112,23 @@ export const systemApi = {
    */
   getManagerAlertConfig: async (): Promise<AlertConfig> => {
     return api.get<AlertConfig>('/system/manager/alert-config')
+  },
+
+  /**
+   * 获取换仓开关配置
+   */
+  getRotationConfig: async (accountId?: string): Promise<RotationConfig> => {
+    return api.get<RotationConfig>('/system/rotation-config', { params: { account_id: accountId } })
+  },
+
+  /**
+   * 更新换仓开关配置
+   */
+  updateRotationConfig: async (
+    config: Partial<Pick<RotationConfig, 'enable_instruction_rotation' | 'enable_target_pos_rotation'>>,
+    accountId?: string
+  ): Promise<RotationConfig> => {
+    return api.put<RotationConfig>('/system/rotation-config', { ...config, account_id: accountId })
   },
 
   /**

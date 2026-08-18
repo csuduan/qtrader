@@ -17,9 +17,8 @@ from qtrader.trader.strategy_manager import StrategyManager
 from qtrader.trader.switch_mgr import SwitchPosManager
 from qtrader.trader.trader_req import TraderReqHandler
 from qtrader.trader.trading_engine import TradingEngine
-from qtrader.utils.async_event_engine import AsyncEventEngine
+from qtrader.utils.async_event_engine import AsyncEventEngine, EventTypes
 from qtrader.utils.config_loader import TraderConfig
-from qtrader.utils.async_event_engine import EventTypes
 from qtrader.utils.ipc import SocketServer
 from qtrader.utils.logger import get_logger, logger
 from qtrader.utils.scheduler import TaskScheduler
@@ -56,6 +55,9 @@ class Trader:
 
         # 换仓管理器
         self.switchPos_manager: SwitchPosManager | None = None
+
+        # 目标仓位换仓管理器
+        self.targetPos_manager: "TargetPosManager | None" = None
 
         # 作业管理器
         self.job_manager: JobManager | None = None
@@ -135,9 +137,21 @@ class Trader:
         self.switchPos_manager = SwitchPosManager(self.account_config, self.trading_engine)
         ctx.register(AppContext.KEY_SWITCH_POS_MANAGER, self.switchPos_manager)
         self.switchPos_manager.start()
+
+        # 启动目标仓位换仓管理器
+        from qtrader.trader.target_pos_mgr import TargetPosManager
+
+        self.targetPos_manager = TargetPosManager(self.account_config, self.trading_engine)
+        ctx.register(AppContext.KEY_TARGET_POS_MANAGER, self.targetPos_manager)
+        self.targetPos_manager.start()
+
         # 启动任务调度器及作业管理器
         self.job_manager = JobManager(
-            self.account_config, self.trading_engine, self.switchPos_manager, self.socket_server
+            self.account_config,
+            self.trading_engine,
+            self.switchPos_manager,
+            self.socket_server,
+            self.targetPos_manager,
         )
 
         # 从全局配置获取账户定时任务
@@ -171,7 +185,9 @@ class Trader:
 
         # 启动Tick批量推送任务
         self._tick_push_task = asyncio.create_task(self._tick_push_loop())
-        logger.info(f"Trader [{self.account_id}] Tick批量推送任务已启动(间隔{self._tick_push_interval}秒)")
+        logger.info(
+            f"Trader [{self.account_id}] Tick批量推送任务已启动(间隔{self._tick_push_interval}秒)"
+        )
 
         # 连接网关
         await self.trading_engine.connect()
@@ -180,7 +196,6 @@ class Trader:
         logger.info("=" * 60)
         logger.info(f"Trader [{self.account_id}] 启动成功，持续运行中...")
         logger.info("=" * 60)
-
 
     async def _init_database(self) -> None:
         """
@@ -456,7 +471,9 @@ class Trader:
                 account_dict = None
                 if self.trading_engine and self.trading_engine.account:
                     account = self.trading_engine.account
-                    account_dict = account.model_dump() if hasattr(account, "model_dump") else account
+                    account_dict = (
+                        account.model_dump() if hasattr(account, "model_dump") else account
+                    )
 
                 payload = {"ticks": ticks}
                 if account_dict:
@@ -841,8 +858,6 @@ class Trader:
         position_po.updated_at = datetime.now()
 
         session.add(position_po)
-
-
 
     def _register_event_handlers(self) -> None:
         """

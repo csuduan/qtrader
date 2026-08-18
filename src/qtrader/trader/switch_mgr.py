@@ -6,6 +6,7 @@
 
 import asyncio
 import csv
+import hashlib
 import os
 import shutil
 import time
@@ -170,9 +171,16 @@ class SwitchPosManager:
         """
         导入换仓指令文件
 
+        账户配置 enable_instruction_rotation=false 时拦截导入。
+
         Args:
             file_path: 换仓指令文件路径
         """
+        if not self.config.enable_instruction_rotation:
+            raise ValueError(
+                "交易指令换仓未开启，已拦截导入（账户配置 enable_instruction_rotation=false）"
+            )
+
         lines = csv_text.strip().split("\n")
         if len(lines) < 2:
             raise ValueError("CSV文件为空或格式错误")
@@ -297,7 +305,10 @@ class SwitchPosManager:
         return data
 
     def scan_and_process_orders(self) -> None:
-        """扫描并处理交易指令文件"""
+        """扫描并处理交易指令文件（账户配置 enable_instruction_rotation=false 时跳过）"""
+        if not self.config.enable_instruction_rotation:
+            logger.debug("交易指令换仓未开启，跳过扫描换仓文件")
+            return
         try:
             today_dir = Path(self.switchPos_files_dir) / datetime.now().strftime("%Y%m%d")
             today_str = datetime.now().strftime("%Y%m%d")
@@ -325,11 +336,16 @@ class SwitchPosManager:
                     if existing:
                         continue
 
+                    # 读取一次内容，用于导入与计算文件指纹
+                    try:
+                        content = csv_file.read_text(encoding="gbk")
+                    except Exception as e:
+                        logger.error(f"读取文件 {csv_file.name} 失败: {e}")
+                        continue
+
                     # 导入文件
                     try:
-                        self.import_csv(
-                            csv_file.read_text(encoding="gbk"), csv_file.name, mode="replace"
-                        )
+                        self.import_csv(content, csv_file.name, mode="replace")
                     except Exception as e:
                         logger.error(f"导入文件 {csv_file.name} 时出错: {e}")
 
@@ -338,6 +354,7 @@ class SwitchPosManager:
                         account_id=self.config.account_id,
                         file_name=csv_file.name,
                         file_path=str(csv_file.parent),
+                        file_hash=hashlib.md5(content.encode("utf-8")).hexdigest(),
                         created_at=datetime.now(),
                     )
                     session.add(record)

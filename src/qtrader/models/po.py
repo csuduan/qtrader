@@ -172,7 +172,7 @@ class OrderPo(Base):
 
 
 class SwitchPosImportPo(Base):
-    """换仓文件导入记录表"""
+    """换仓文件导入记录表（指令换仓与目标仓位换仓共用，仅记录导入审计信息）"""
 
     __tablename__ = "switchPos_import"
 
@@ -180,6 +180,7 @@ class SwitchPosImportPo(Base):
     account_id = Column(String(50), nullable=False, index=True)
     file_name = Column(String(255), nullable=False)
     file_path = Column(String(500), nullable=False)
+    file_hash = Column(String(64), nullable=True)
     created_at = Column(DateTime, default=datetime.now)
 
     __table_args__ = (
@@ -187,7 +188,7 @@ class SwitchPosImportPo(Base):
     )
 
     def __repr__(self):
-        return f"<OrderFilePo(file_name={self.file_name})>"
+        return f"<SwitchPosImportPo(account_id={self.account_id}, file_name={self.file_name})>"
 
 
 class RotationInstructionPo(Base):
@@ -224,6 +225,49 @@ class RotationInstructionPo(Base):
 
     def __repr__(self):
         return f"<RotationInstructionPo(account_id={self.account_id}, strategy_id={self.strategy_id}, symbol={self.symbol}, direction={self.direction}, volume={self.volume}, filled={self.filled_volume}, enabled={self.enabled})>"
+
+
+class TargetPosInstructionPo(Base):
+    """目标仓位差值指令表（按侧独立计算的待执行指令）"""
+
+    __tablename__ = "target_pos_instructions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_id = Column(String(50), nullable=False, index=True)
+    strategy_id = Column(String(100), nullable=False)
+    symbol = Column(String(50), nullable=False, index=True)
+    side = Column(String(10), nullable=False)  # LONG / SHORT
+    target_volume = Column(Integer, nullable=False, default=0)  # 该侧目标手数
+    direction = Column(String(10), nullable=False)  # BUY / SELL
+    offset = Column(String(20), nullable=False)  # OPEN / CLOSE
+    volume = Column(Integer, nullable=False)  # 待成交手数（差值绝对值）
+    filled_volume = Column(Integer, nullable=False, default=0)
+    remaining_volume = Column(Integer, nullable=False, default=0)
+    price = Column(Numeric(20, 4), nullable=False, default=0)
+    trading_date = Column(String(8), nullable=True, index=True)
+    plan_id = Column(String(64), nullable=False, index=True)
+    instruction_key = Column(String(200), nullable=False)
+    enabled = Column(Boolean, nullable=False, default=True)
+    status = Column(
+        String(20), nullable=False, default="PENDING"
+    )  # PENDING/RUNNING/COMPLETED/FAILED
+    current_order_id = Column(String(50), nullable=True)
+    order_placed_time = Column(DateTime, nullable=True)
+    error_message = Column(Text, nullable=True)
+    source = Column(String(255), nullable=True)
+    is_deleted = Column(Boolean, nullable=False, default=False, index=True)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    __table_args__ = (UniqueConstraint("instruction_key", name="uq_target_pos_instruction_key"),)
+
+    def __repr__(self):
+        return (
+            f"<TargetPosInstructionPo(account_id={self.account_id}, "
+            f"strategy_id={self.strategy_id}, symbol={self.symbol}, side={self.side}, "
+            f"target={self.target_volume}, volume={self.volume}, filled={self.filled_volume}, "
+            f"status={self.status})>"
+        )
 
 
 class JobPo(Base):

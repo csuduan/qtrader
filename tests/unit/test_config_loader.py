@@ -34,11 +34,10 @@ from qtrader.utils.config_loader import (
     SocketConfig,
     StrategyConfig,
     TianqinConfig,
-    TradingConfig,
     TraderConfig,
+    TradingConfig,
     get_config_loader,
 )
-
 
 # ==================== Fixtures ====================
 
@@ -491,7 +490,9 @@ class TestConfigLoader:
 
         assert config1 is config2
 
-    def test_load_config_scans_account_files(self, temp_config_dir, sample_config_yaml, sample_account_yaml):
+    def test_load_config_scans_account_files(
+        self, temp_config_dir, sample_config_yaml, sample_account_yaml
+    ):
         """测试动态扫描账户配置文件"""
         # 创建 config.yaml
         config_file = temp_config_dir / "config.yaml"
@@ -511,7 +512,9 @@ class TestConfigLoader:
 
         assert len(config.accounts) == 3
 
-    def test_load_config_skips_duplicate_accounts(self, temp_config_dir, sample_config_yaml, sample_account_yaml):
+    def test_load_config_skips_duplicate_accounts(
+        self, temp_config_dir, sample_config_yaml, sample_account_yaml
+    ):
         """测试避免重复加载账户"""
         # 注意：当前实现会从 accounts 列表加载，也会扫描文件
         # 所以可能会有重复。这个测试验证去重逻辑
@@ -532,7 +535,9 @@ class TestConfigLoader:
         # 可能有多个（accounts 列表 + 文件扫描）
         assert len(test_accounts) >= 1
 
-    def test_load_config_orders_by_account_ids(self, temp_config_dir, sample_config_yaml, sample_account_yaml):
+    def test_load_config_orders_by_account_ids(
+        self, temp_config_dir, sample_config_yaml, sample_account_yaml
+    ):
         """测试按照 account_ids 字段排序"""
         config_file = temp_config_dir / "config.yaml"
         sample_config_yaml["account_ids"] = ["account_003", "account_001", "account_002"]
@@ -655,6 +660,104 @@ class TestConfigLoader:
         loader._ensure_directories(paths)
 
 
+# ==================== TestUpdateAccountConfigField ====================
+
+
+class TestUpdateAccountConfigField:
+    """update_account_config_field 字段持久化测试"""
+
+    ACCOUNT_YAML = """\
+# 账户配置
+account_id: DQ
+account_type: kq
+enabled: true
+# 换仓开关
+enable_instruction_rotation: true
+
+gateway:
+  type: TQSDK
+  tianqin:
+    username: "user"  # 用户名
+    password: "pass"
+"""
+
+    def _write_account(self, temp_config_dir, text=None):
+        account_file = temp_config_dir / "account-DQ.yaml"
+        account_file.write_text(text if text is not None else self.ACCOUNT_YAML, encoding="utf-8")
+        return account_file
+
+    def test_update_existing_bool_field(self, temp_config_dir):
+        """更新已存在的布尔字段（小写 true/false）"""
+        account_file = self._write_account(temp_config_dir)
+        loader = ConfigLoader(config_dir=str(temp_config_dir))
+
+        loader.update_account_config_field("DQ", "enable_instruction_rotation", False)
+
+        content = account_file.read_text(encoding="utf-8")
+        assert "enable_instruction_rotation: false" in content
+        # 重新加载验证生效
+        assert loader._load_account_config("DQ").enable_instruction_rotation is False
+
+    def test_preserves_comments_and_other_lines(self, temp_config_dir):
+        """保留注释、空行及嵌套结构"""
+        account_file = self._write_account(temp_config_dir)
+        loader = ConfigLoader(config_dir=str(temp_config_dir))
+
+        loader.update_account_config_field("DQ", "enable_instruction_rotation", False)
+
+        content = account_file.read_text(encoding="utf-8")
+        assert "# 账户配置" in content
+        assert "# 换仓开关" in content
+        assert 'username: "user"  # 用户名' in content
+        assert 'password: "pass"' in content
+        assert "gateway:" in content
+        assert "account_type: kq" in content
+
+    def test_append_missing_field(self, temp_config_dir):
+        """键不存在时追加到文件末尾"""
+        account_file = self._write_account(temp_config_dir)
+        loader = ConfigLoader(config_dir=str(temp_config_dir))
+
+        loader.update_account_config_field("DQ", "enable_target_pos_rotation", False)
+
+        content = account_file.read_text(encoding="utf-8")
+        assert content.rstrip().endswith("enable_target_pos_rotation: false")
+        assert loader._load_account_config("DQ").enable_target_pos_rotation is False
+
+    def test_append_field_without_trailing_newline(self, temp_config_dir):
+        """文件末尾无换行时也能正确追加"""
+        self._write_account(temp_config_dir, "account_id: DQ\nenabled: true")
+        loader = ConfigLoader(config_dir=str(temp_config_dir))
+
+        loader.update_account_config_field("DQ", "enable_target_pos_rotation", True)
+
+        content = (temp_config_dir / "account-DQ.yaml").read_text(encoding="utf-8")
+        assert content == "account_id: DQ\nenabled: true\nenable_target_pos_rotation: true\n"
+
+    def test_update_string_field(self, temp_config_dir):
+        """更新字符串字段"""
+        self._write_account(temp_config_dir, "account_id: DQ\nname: 旧名称\n")
+        loader = ConfigLoader(config_dir=str(temp_config_dir))
+
+        loader.update_account_config_field("DQ", "name", "新名称")
+
+        content = (temp_config_dir / "account-DQ.yaml").read_text(encoding="utf-8")
+        assert content == "account_id: DQ\nname: 新名称\n"
+
+    def test_not_match_nested_key(self, temp_config_dir):
+        """只匹配顶层键，不误改嵌套同名键"""
+        text = "account_id: DQ\nstrategies:\n  enabled: true\n"
+        self._write_account(temp_config_dir, text)
+        loader = ConfigLoader(config_dir=str(temp_config_dir))
+
+        loader.update_account_config_field("DQ", "enabled", False)
+
+        content = (temp_config_dir / "account-DQ.yaml").read_text(encoding="utf-8")
+        # 顶层的 enabled 被追加为 false（顶层原本没有），嵌套的保持不变
+        assert "  enabled: true" in content
+        assert content.rstrip().endswith("enabled: false")
+
+
 # ==================== TestConfigLoaderSingleton ====================
 
 
@@ -672,6 +775,7 @@ class TestConfigLoaderSingleton:
         """测试 get_config_loader() 首次创建新实例"""
         # 重置全局变量
         import qtrader.utils.config_loader
+
         src.utils.config_loader._config_loader = None
 
         loader = get_config_loader()
@@ -683,6 +787,7 @@ class TestConfigLoaderSingleton:
         """测试 get_config_loader() 自定义目录"""
         # 重置全局变量
         import qtrader.utils.config_loader
+
         src.utils.config_loader._config_loader = None
 
         loader = ConfigLoader(config_dir=str(temp_config_dir))
@@ -789,7 +894,9 @@ class TestConfigLoaderEdgeCases:
         assert hasattr(config, "custom_field")
         assert config.custom_field == "custom_value"
 
-    def test_load_trader_config_includes_socket(self, temp_config_dir, sample_config_yaml, sample_account_yaml):
+    def test_load_trader_config_includes_socket(
+        self, temp_config_dir, sample_config_yaml, sample_account_yaml
+    ):
         """测试 TraderConfig 包含 socket 配置"""
         config_file = temp_config_dir / "config.yaml"
         sample_config_yaml["socket"]["socket_dir"] = "./custom/socks"

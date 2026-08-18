@@ -376,14 +376,9 @@ function formatNumber(num: number): string {
   return num.toFixed(2)
 }
 
-// 排序后的账户列表：已连接的在前
+// 账户列表：剔除已停止的账户，顺序与总览页账户卡片一致（API 返回的原始顺序）
 const sortedAccounts = computed(() => {
-  return [...store.accounts].sort((a, b) => {
-    const aConnected = a.status === 'connected'
-    const bConnected = b.status === 'connected'
-    if (aConnected === bConnected) return 0
-    return aConnected ? -1 : 1
-  })
+  return store.accounts.filter((acc) => !isAccountStopped(acc))
 })
 
 // 当前账户名称

@@ -54,10 +54,19 @@
       <template #header>
         <div class="card-header">
           <span>持仓列表</span>
-          <el-button @click="emit('refreshPositions')" :loading="loading">
-            <el-icon><Refresh /></el-icon>
-            刷新
-          </el-button>
+          <div>
+            <el-button
+              type="danger"
+              @click="emit('closePositions', selectedPositions)"
+              :disabled="selectedPositions.length === 0"
+            >
+              平仓
+            </el-button>
+            <el-button @click="emit('refreshPositions')" :loading="loading">
+              <el-icon><Refresh /></el-icon>
+              刷新
+            </el-button>
+          </div>
         </div>
       </template>
 
@@ -68,10 +77,12 @@
           v-loading="loading"
           table-layout="fixed"
           :size="isMobile ? 'small' : 'default'"
+          @selection-change="handleSelectionChange"
         >
           <template #empty>
             <el-empty description="暂无持仓" />
           </template>
+          <el-table-column type="selection" width="45" />
           <el-table-column prop="symbol" label="合约" width="80">
             <template #default="{ row }">
               {{ row.symbol }}
@@ -118,29 +129,9 @@
               </span>
             </template>
           </el-table-column>
-          <el-table-column v-if="!isMobile" prop="updated_at" label="更新时间" width="180">
+          <el-table-column v-if="!isMobile" prop="updated_at" label="更新时间">
             <template #default="{ row }">
               {{ formatDateTime(row.updated_at) }}
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" :width="isMobile ? 110 : undefined">
-            <template #default="{ row }">
-              <el-button
-                type="danger"
-                :size="isMobile ? 'small' : 'default'"
-                :disabled="row.pos_long <= 0"
-                @click="emit('closePosition', row, 'SELL')"
-              >
-                平多
-              </el-button>
-              <el-button
-                type="primary"
-                :size="isMobile ? 'small' : 'default'"
-                :disabled="row.pos_short <= 0"
-                @click="emit('closePosition', row, 'BUY')"
-              >
-                平空
-              </el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -164,8 +155,14 @@ const props = defineProps<{
 const emit = defineEmits<{
   refresh: []
   refreshPositions: []
-  closePosition: [position: Position, direction: 'BUY' | 'SELL']
+  closePositions: [positions: Position[]]
 }>()
+
+const selectedPositions = ref<Position[]>([])
+
+function handleSelectionChange(selection: Position[]) {
+  selectedPositions.value = selection
+}
 
 const isMobile = ref(false)
 const updateIsMobile = () => {

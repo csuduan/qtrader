@@ -32,6 +32,22 @@
             <el-descriptions-item label="今日撤单">
               {{ currentRiskStatus.daily_cancel_count }} 次
             </el-descriptions-item>
+            <el-descriptions-item label="交易指令换仓">
+              <el-switch
+                v-model="rotationConfig.enable_instruction_rotation"
+                :loading="rotationUpdating === 'enable_instruction_rotation'"
+                :disabled="rotationLoading"
+                @change="onRotationChange('enable_instruction_rotation')"
+              />
+            </el-descriptions-item>
+            <el-descriptions-item label="目标仓位换仓">
+              <el-switch
+                v-model="rotationConfig.enable_target_pos_rotation"
+                :loading="rotationUpdating === 'enable_target_pos_rotation'"
+                :disabled="rotationLoading"
+                @change="onRotationChange('enable_target_pos_rotation')"
+              />
+            </el-descriptions-item>
           </el-descriptions>
         </el-card>
       </el-col>
@@ -191,8 +207,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
+import { ElMessage } from 'element-plus'
 import { useStore } from '@/stores'
+import { systemApi, type RotationConfig } from '@/api/system'
 import type { Job, RiskControlStatus, Account } from '@/types'
 
 const store = useStore()
@@ -245,6 +263,43 @@ const currentRiskStatus = computed<RiskControlStatus>(() => {
   }
 })
 
+// 换仓开关配置
+const rotationConfig = ref<RotationConfig>({
+  enable_instruction_rotation: true,
+  enable_target_pos_rotation: true
+})
+const rotationLoading = ref(false)
+const rotationUpdating = ref<string | null>(null)
+
+async function loadRotationConfig() {
+  const accountId = store.selectedAccountId
+  if (!accountId) return
+  rotationLoading.value = true
+  try {
+    rotationConfig.value = await systemApi.getRotationConfig(accountId)
+  } catch {
+    // 加载失败保持默认值，开关禁用防止误操作
+  } finally {
+    rotationLoading.value = false
+  }
+}
+
+async function onRotationChange(key: 'enable_instruction_rotation' | 'enable_target_pos_rotation') {
+  rotationUpdating.value = key
+  try {
+    rotationConfig.value = await systemApi.updateRotationConfig(
+      { [key]: rotationConfig.value[key] },
+      store.selectedAccountId || undefined
+    )
+    ElMessage.success('换仓开关已更新')
+  } catch {
+    ElMessage.error('换仓开关更新失败')
+    await loadRotationConfig()
+  } finally {
+    rotationUpdating.value = null
+  }
+}
+
 function updateDescColumn() {
   descColumn.value = window.innerWidth <= 768 ? 1 : 2
 }
@@ -286,9 +341,12 @@ function formatDateTime(datetime: string | number | null | undefined): string {
 onMounted(() => {
   updateDescColumn()
   updateIsMobile()
+  loadRotationConfig()
   window.addEventListener('resize', updateDescColumn)
   window.addEventListener('resize', updateIsMobile)
 })
+
+watch(() => store.selectedAccountId, loadRotationConfig)
 
 onUnmounted(() => {
   window.removeEventListener('resize', updateDescColumn)

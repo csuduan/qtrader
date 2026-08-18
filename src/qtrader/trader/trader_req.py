@@ -968,6 +968,45 @@ class TraderReqHandler:
             logger.exception(f"发送策略报单指令失败: {e}")
             return {"success": False, "message": f"发送失败: {str(e)}"}
 
+    @request("send_order_cmd")
+    async def _req_send_order_cmd(self, data: dict) -> dict:
+        """处理发送账户级报单指令请求（手动平仓等，不依赖策略）"""
+        engine = self.trader.trading_engine
+        if engine is None:
+            return {"success": False, "message": "交易引擎未初始化"}
+
+        order_cmd_data = data.get("order_cmd")
+        if not order_cmd_data:
+            return {"success": False, "message": "缺少 order_cmd"}
+
+        try:
+            from qtrader.models.object import Direction, Offset
+            from qtrader.trader.order_cmd import OrderCmd
+
+            max_split_volume = 5
+            if engine.risk_control and engine.risk_control.config:
+                max_split_volume = engine.risk_control.config.max_split_volume
+
+            order_cmd = OrderCmd(
+                symbol=order_cmd_data["symbol"],
+                direction=Direction(order_cmd_data["direction"]),
+                offset=Offset(order_cmd_data["offset"]),
+                volume=order_cmd_data["volume"],
+                price=order_cmd_data.get("price", 0),
+                max_volume_per_order=max_split_volume,
+                source="手动平仓",
+            )
+
+            engine.insert_order_cmd(order_cmd)
+            logger.info(
+                f"账户 [{self.trader.account_id}] 已发送报单指令: "
+                f"{order_cmd.symbol} {order_cmd.direction} {order_cmd.offset} {order_cmd.volume}手"
+            )
+            return {"success": True, "cmd_id": order_cmd.cmd_id}
+        except Exception as e:
+            logger.exception(f"发送报单指令失败: {e}")
+            return {"success": False, "message": f"发送失败: {str(e)}"}
+
     def _build_strategy_config(self, strategy) -> dict:
         """构建策略配置对象"""
         from qtrader.manager.api.schemas import StrategyConfig
@@ -1153,6 +1192,85 @@ class TraderReqHandler:
         ids = data.get("ids", [])
         self.trader.switchPos_manager.delete_instruction(ids)
         return {"deleted": len(ids)}
+
+    # ========== 目标仓位换仓请求处理 ==========
+
+    @request("get_target_instructions")
+    async def _req_get_target_instructions(self, data: dict) -> dict:
+        """处理获取目标仓位指令列表请求"""
+        if self.trader.targetPos_manager is None:
+            return {"instructions": [], "rotation_status": {"working": False, "is_manual": False}}
+        instructions = self.trader.targetPos_manager.get_today_instructions()
+        return {
+            "instructions": instructions,
+            "rotation_status": {
+                "working": self.trader.targetPos_manager.working,
+                "is_manual": self.trader.targetPos_manager.is_manual,
+            },
+        }
+
+    @request("import_target_instructions")
+    async def _req_import_target_instructions(self, data: dict) -> dict:
+        """处理导入目标仓位文件请求"""
+        if self.trader.targetPos_manager is None:
+            return {"imported": 0, "skipped": False, "errors": []}
+        csv_text = data.get("csv_text", "")
+        filename = data.get("filename", "")
+        if not csv_text or not filename:
+            return {"imported": 0, "skipped": False, "errors": ["缺少 csv_text 或 filename"]}
+        try:
+            return self.trader.targetPos_manager.import_target_file(csv_text, filename)
+        except Exception as e:
+            logger.exception(f"Trader [{self.account_id}] 导入目标仓位文件失败: {e}")
+            return {"imported": 0, "skipped": False, "errors": [str(e)]}
+
+    @request("execute_target_position")
+    async def _req_execute_target_position(self, data: dict) -> bool:
+        """处理执行目标仓位换仓请求"""
+        if self.trader.targetPos_manager is None:
+            return False
+
+        async def execute():
+            try:
+                logger.info(f"Trader [{self.account_id}] 目标仓位换仓开始")
+                await self.trader.targetPos_manager.execute_target_position(is_manual=True)
+                logger.info(f"Trader [{self.account_id}] 目标仓位换仓完成")
+            except Exception as e:
+                logger.error(f"Trader [{self.account_id}] 目标仓位换仓失败: {e}")
+
+        asyncio.create_task(execute())
+        return True
+
+    @request("stop_target_position")
+    async def _req_stop_target_position(self, data: dict) -> bool:
+        """处理停止目标仓位换仓请求"""
+        if self.trader.targetPos_manager is None:
+            return False
+        self.trader.targetPos_manager.stop_target_position()
+        return True
+
+    @request("batch_delete_target_instructions")
+    async def _req_batch_delete_target_instructions(self, data: dict) -> dict:
+        """处理批量删除目标仓位指令请求"""
+        if self.trader.targetPos_manager is None:
+            return {"deleted": 0}
+        ids = data.get("ids", []) or []
+        deleted = self.trader.targetPos_manager.delete_instructions(ids)
+        return {"deleted": deleted}
+
+    @request("update_target_instruction")
+    async def _req_update_target_instruction(self, data: dict) -> dict | None:
+        """处理更新目标仓位指令请求（启用/禁用、目标手数）"""
+        if self.trader.targetPos_manager is None:
+            return None
+        try:
+            return self.trader.targetPos_manager.update_instruction(data)
+        except ValueError as e:
+            # 业务校验失败（如执行中禁止修改）需将错误信息带回页面，不触发 DB 回退
+            return {"error": str(e)}
+        except Exception as e:
+            logger.exception(f"Trader [{self.account_id}] 更新目标仓位指令失败: {e}")
+            return None
 
     # ========== 系统参数请求处理 ==========
 
@@ -1375,6 +1493,39 @@ class TraderReqHandler:
             "threshold_window": self.trader.account_config.alert.threshold_window,
             "dnd_start": self.trader.account_config.alert.dnd_start,
             "dnd_end": self.trader.account_config.alert.dnd_end,
+        }
+
+    @request("get_rotation_config")
+    async def _req_get_rotation_config(self, data: dict) -> dict:
+        """处理获取换仓开关配置请求"""
+        cfg = self.trader.account_config
+        return {
+            "enable_instruction_rotation": cfg.enable_instruction_rotation,
+            "enable_target_pos_rotation": cfg.enable_target_pos_rotation,
+        }
+
+    @request("update_rotation_config")
+    async def _req_update_rotation_config(self, data: dict) -> dict:
+        """处理更新换仓开关请求（内存即时生效，并持久化到账户配置文件）"""
+        from qtrader.utils.config_loader import get_config_loader
+
+        cfg = self.trader.account_config
+        fields: dict[str, bool] = {}
+        if data.get("enable_instruction_rotation") is not None:
+            cfg.enable_instruction_rotation = bool(data["enable_instruction_rotation"])
+            fields["enable_instruction_rotation"] = cfg.enable_instruction_rotation
+        if data.get("enable_target_pos_rotation") is not None:
+            cfg.enable_target_pos_rotation = bool(data["enable_target_pos_rotation"])
+            fields["enable_target_pos_rotation"] = cfg.enable_target_pos_rotation
+
+        if fields and self.account_id:
+            for key, value in fields.items():
+                get_config_loader().update_account_config_field(self.account_id, key, value)
+            logger.info(f"Trader [{self.account_id}] 换仓开关已更新: {fields}")
+
+        return {
+            "enable_instruction_rotation": cfg.enable_instruction_rotation,
+            "enable_target_pos_rotation": cfg.enable_target_pos_rotation,
         }
 
     @request("export_positions")

@@ -73,6 +73,7 @@ class PathsConfig(BaseModel):
 
     socket_dir: str = "./data/socks"
     switch_pos: str = "./data/switch_pos"
+    target_pos: str = "./data/target_pos"
     logs: str = "./data/logs"
     database: str = "./data/db"
     export: str = "./data/export"
@@ -107,6 +108,8 @@ class EmailConfig(BaseModel):
     password: str = ""  # SMTP授权码
     from_addr: str = ""
     recipients: list[str] = Field(default_factory=list)
+    # 结算权益周报黑名单账户，名单内账户不出现在周报中
+    exclude_accounts: list[str] = Field(default_factory=list)
 
 
 class TradingConfig(BaseModel):
@@ -210,6 +213,9 @@ class AccountConfig(BaseModel):
     name: str | None = None
     account_type: str | None = "kq"
     enabled: bool | None = True
+    # 换仓开关（默认开启；设为 False 时拦截对应换仓文件导入，防止误操作）
+    enable_instruction_rotation: bool = True
+    enable_target_pos_rotation: bool = True
     # 告警配置
     alert: AlertConfig = Field(default_factory=AlertConfig)
 
@@ -447,6 +453,32 @@ class ConfigLoader:
 
         account = AccountConfig(**config_data)
         return account
+
+    def update_account_config_field(self, account_id: str, key: str, value: Any) -> None:
+        """
+        更新账户配置文件顶层字段（保留注释与格式，键不存在则追加到文件末尾）
+
+        Args:
+            account_id: 账户ID
+            key: 顶层字段名
+            value: 字段值（标量）
+        """
+        import re
+
+        config_path = self.config_dir / f"account-{account_id}.yaml"
+        text = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
+
+        value_text = str(value).lower() if isinstance(value, bool) else str(value)
+        new_line = f"{key}: {value_text}"
+        pattern = re.compile(rf"^{re.escape(key)}\s*:.*$", re.MULTILINE)
+        if pattern.search(text):
+            text = pattern.sub(new_line, text, count=1)
+        else:
+            if text and not text.endswith("\n"):
+                text += "\n"
+            text += f"{new_line}\n"
+
+        config_path.write_text(text, encoding="utf-8")
 
 
 # 全局配置加载器实例

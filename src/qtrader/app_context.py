@@ -16,6 +16,7 @@ class AppContext:
     KEY_STRATEGY_MANAGER = "strategy_manager"
     KEY_TASK_SCHEDULER = "task_scheduler"
     KEY_SWITCH_POS_MANAGER = "switch_pos_manager"
+    KEY_TARGET_POS_MANAGER = "target_pos_manager"
     KEY_TRADING_MANAGER = "trading_manager"
     KEY_ALARM_SERVICE = "alarm_service"
     KEY_WS_MANAGER = "ws_manager"
@@ -92,6 +93,10 @@ class AppContext:
     def get_switch_pos_manager(self) -> Any | None:
         """获取换仓管理器"""
         return self.get(self.KEY_SWITCH_POS_MANAGER)
+
+    def get_target_pos_manager(self) -> Any | None:
+        """获取目标仓位换仓管理器"""
+        return self.get(self.KEY_TARGET_POS_MANAGER)
 
     def get_trading_manager(self) -> Any | None:
         """获取交易管理器"""

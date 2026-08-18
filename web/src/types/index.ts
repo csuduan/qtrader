@@ -44,6 +44,18 @@ export interface Position {
   symbol: string
   pos_long: number
   pos_short: number
+  pos_long_yd?: number | null
+  pos_short_yd?: number | null
+  pos_long_td?: number | null
+  pos_short_td?: number | null
+  hold_price_long?: number | null
+  hold_price_short?: number | null
+  hold_profit_long?: number | null
+  hold_profit_short?: number | null
+  close_profit_long?: number | null
+  close_profit_short?: number | null
+  margin_long?: number | null
+  margin_short?: number | null
   open_price_long: number
   open_price_short: number
   float_profit: number
@@ -146,6 +158,36 @@ export interface RotationInstruction {
   error_message: string | null
   source: string | null
   is_deleted: boolean
+  created_at: string
+  updated_at: string
+}
+
+/** 目标仓位差值指令 */
+export interface TargetPosInstruction {
+  id: number
+  account_id: string
+  strategy_id: string
+  symbol: string
+  side: string // LONG / SHORT
+  target_volume: number
+  current_volume: number | null
+  initial_deviation: number | null
+  current_deviation: number | null
+  direction: string
+  offset: string
+  volume: number
+  filled_volume: number
+  remaining_volume: number
+  pending_volume: number
+  price: number
+  trading_date: string | null
+  plan_id: string
+  enabled: boolean
+  status: string
+  current_order_id: string | null
+  order_placed_time: string | null
+  error_message: string | null
+  source: string | null
   created_at: string
   updated_at: string
 }

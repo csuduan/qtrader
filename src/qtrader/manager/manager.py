@@ -742,6 +742,88 @@ class TradingManager:
             return result if isinstance(result, dict) else None
         return None
 
+    # ==================== 目标仓位换仓接口 ====================
+
+    async def get_target_instructions(self, account_id: str) -> dict | None:
+        """获取目标仓位指令列表"""
+        trader = self.traders.get(account_id)
+        if trader:
+            result: Any = await trader.send_request("get_target_instructions", {})
+            return result if isinstance(result, dict) else None
+        return None
+
+    async def import_target_instructions(
+        self, account_id: str, csv_text: str, filename: str
+    ) -> dict | None:
+        """导入目标仓位文件"""
+        trader = self.traders.get(account_id)
+        if trader:
+            result: Any = await trader.send_request(
+                "import_target_instructions",
+                {"csv_text": csv_text, "filename": filename},
+            )
+            return result if isinstance(result, dict) else None
+        return None
+
+    async def execute_target_position(self, account_id: str) -> bool:
+        """执行目标仓位换仓"""
+        trader = self.traders.get(account_id)
+        if trader:
+            result: Any = await trader.send_request("execute_target_position", {})
+            return bool(result) if result is not None else False
+        return False
+
+    async def stop_target_position(self, account_id: str) -> bool:
+        """停止目标仓位换仓"""
+        trader = self.traders.get(account_id)
+        if trader:
+            result: Any = await trader.send_request("stop_target_position", {})
+            return bool(result) if result is not None else False
+        return False
+
+    async def batch_delete_target_instructions(
+        self, account_id: str, ids: list[int]
+    ) -> dict | None:
+        """批量删除目标仓位指令"""
+        trader = self.traders.get(account_id)
+        if trader:
+            result: Any = await trader.send_request(
+                "batch_delete_target_instructions", {"ids": ids}
+            )
+            return result if isinstance(result, dict) else None
+        return None
+
+    async def update_target_instruction(
+        self, account_id: str, instruction_id: int, update_data: dict
+    ) -> dict | None:
+        """更新目标仓位指令（启用/禁用）"""
+        trader = self.traders.get(account_id)
+        if trader:
+            result: Any = await trader.send_request(
+                "update_target_instruction",
+                {"instruction_id": instruction_id, **update_data},
+            )
+            return result if isinstance(result, dict) else None
+        return None
+
+    # ==================== 换仓开关配置接口 ====================
+
+    async def get_rotation_config(self, account_id: str) -> dict | None:
+        """获取换仓开关配置"""
+        trader = self.traders.get(account_id)
+        if trader:
+            result: Any = await trader.send_request("get_rotation_config", {})
+            return result if isinstance(result, dict) else None
+        return None
+
+    async def update_rotation_config(self, account_id: str, config: dict) -> dict | None:
+        """更新换仓开关配置（Trader 内存即时生效并持久化）"""
+        trader = self.traders.get(account_id)
+        if trader:
+            result: Any = await trader.send_request("update_rotation_config", config)
+            return result if isinstance(result, dict) else None
+        return None
+
     # ==================== 系统参数接口 ====================
 
     async def list_system_params(self, account_id: str, group: str | None = None) -> list:

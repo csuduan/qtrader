@@ -7,7 +7,7 @@
           :loading="loading"
           @refresh="loadAccountData"
           @refresh-positions="loadPositionData"
-          @close-position="handleClosePosition"
+          @close-positions="handleClosePositions"
         />
       </el-tab-pane>
 
@@ -77,50 +77,56 @@
       </el-tab-pane>
     </el-tabs>
 
-    <!-- 平仓对话框 -->
-    <el-dialog v-model="showCloseDialog" title="确认平仓" width="90%" style="max-width: 500px">
-      <el-form label-width="100px">
-        <el-form-item label="合约">
-          {{ closeForm.symbol }}
-        </el-form-item>
-        <el-form-item label="方向">
-          <el-tag :type="closeForm.direction === 'BUY' ? 'success' : 'danger'" size="small">
-            {{ closeForm.direction === 'BUY' ? '卖出' : '买入' }}
-          </el-tag>
-        </el-form-item>
-        <el-form-item label="开平">
-          <el-select v-if="closeForm.exchange_id?.toUpperCase() === 'SHFE'" v-model="closeForm.offset" style="width: 100%">
-            <el-option label="平昨" value="CLOSE" />
-            <el-option label="平今" value="CLOSETODAY" />
-          </el-select>
-          <span v-else>{{ closeForm.offset === 'OPEN' ? '开仓' : closeForm.offset === 'CLOSE' ? '平仓' : '平今' }}</span>
-        </el-form-item>
-        <el-form-item label="平仓手数">
-          <el-input-number
-            v-model="closeForm.volume"
-            :min="1"
-            :max="closeForm.maxVolume"
-            controls-position="right"
-            style="width: 100%"
-          />
-          <span class="text-sm text-gray-500 ml-2">最大可用: {{ closeForm.maxVolume }} 手</span>
-        </el-form-item>
-        <el-form-item label="价格">
-          <el-input-number
-            v-model="closeForm.price"
-            :min="0"
-            :precision="2"
-            placeholder="0表示市价"
-            controls-position="right"
-            style="width: 100%"
-          />
-          <span class="ml-2 text-sm text-gray-500">留空或0为市价</span>
-        </el-form-item>
-      </el-form>
+    <!-- 平仓对话框（走报单指令，自动拆分今昨仓） -->
+    <el-dialog v-model="showCloseDialog" title="平仓" width="90%" style="max-width: 700px">
+      <el-table :data="closeRows" size="small" border>
+        <el-table-column prop="symbol" label="合约" min-width="90" />
+        <el-table-column label="多头(今/昨)" width="100">
+          <template #default="{ row }">
+            <span class="long">{{ row.pos_long_td || 0 }} / {{ row.pos_long - (row.pos_long_td || 0) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="空头(今/昨)" width="100">
+          <template #default="{ row }">
+            <span class="short">{{ row.pos_short_td || 0 }} / {{ row.pos_short - (row.pos_short_td || 0) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="平仓手数" width="140">
+          <template #default="{ row }">
+            <el-input-number
+              v-model="row.volume"
+              :min="1"
+              :max="Math.max(row.pos_long, row.pos_short)"
+              size="small"
+              controls-position="right"
+              style="width: 120px"
+            />
+          </template>
+        </el-table-column>
+        <el-table-column label="价格" width="150">
+          <template #default="{ row }">
+            <el-input-number
+              v-model="row.price"
+              :min="0"
+              :precision="2"
+              size="small"
+              controls-position="right"
+              placeholder="0表示市价"
+              style="width: 130px"
+            />
+          </template>
+        </el-table-column>
+      </el-table>
+      <div class="text-sm text-gray-500" style="margin-top: 8px">
+        价格留空或0为市价；平多/平空通过报单指令执行，自动按今昨仓拆分
+      </div>
       <template #footer>
         <el-button @click="showCloseDialog = false">取消</el-button>
-        <el-button type="danger" @click="handleClosePositionConfirm" :loading="false">
-          确认平仓
+        <el-button type="danger" @click="handleClosePositionConfirm('SELL')" :loading="closing">
+          平多
+        </el-button>
+        <el-button type="primary" @click="handleClosePositionConfirm('BUY')" :loading="closing">
+          平空
         </el-button>
       </template>
     </el-dialog>
@@ -229,7 +235,7 @@
 import { ref, reactive, watch, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useStore } from '@/stores'
-import { positionApi, orderApi, quoteApi, orderCmdApi, contractApi, systemApi, jobsApi } from '@/api'
+import { orderApi, quoteApi, orderCmdApi, contractApi, systemApi, jobsApi } from '@/api'
 import wsManager from '@/ws'
 import AccountDetailTab from './account/AccountDetailTab.vue'
 import AccountTradingTab from './account/AccountTradingTab.vue'
@@ -251,15 +257,17 @@ const orderTab = ref<'PENDING' | 'FINISHED' | 'ERROR'>('PENDING')
 
 // 账户详情相关
 const showCloseDialog = ref(false)
-const closeForm = reactive({
-  symbol: '',
-  exchange_id: '',
-  direction: 'BUY' as 'BUY' | 'SELL',
-  offset: 'CLOSE',
-  volume: 0,
-  maxVolume: 0,
-  price: 0
-})
+const closing = ref(false)
+interface CloseRow {
+  symbol: string
+  pos_long: number
+  pos_short: number
+  pos_long_td: number
+  pos_short_td: number
+  volume: number
+  price: number
+}
+const closeRows = ref<CloseRow[]>([])
 
 // 交易相关
 const showOrderInputDialog = ref(false)
@@ -347,41 +355,69 @@ async function loadPositionData() {
   }
 }
 
-function handleClosePosition(position: Position, direction: 'BUY' | 'SELL') {
-  const volume = direction === 'SELL' ? position.pos_long : position.pos_short
-  if (volume <= 0) return
+function handleClosePositions(positions: Position[]) {
+  if (positions.length === 0) return
 
-  closeForm.symbol = position.symbol
-  closeForm.exchange_id = position.exchange_id
-  closeForm.direction = direction
-  closeForm.offset = 'CLOSE'
-  closeForm.volume = volume
-  closeForm.maxVolume = volume
-  closeForm.price = 0
+  closeRows.value = positions.map(p => ({
+    symbol: p.symbol,
+    pos_long: p.pos_long,
+    pos_short: p.pos_short,
+    pos_long_td: p.pos_long_td || 0,
+    pos_short_td: p.pos_short_td || 0,
+    volume: Math.max(p.pos_long, p.pos_short),
+    price: 0
+  }))
 
   showCloseDialog.value = true
 }
 
-async function handleClosePositionConfirm() {
+async function handleClosePositionConfirm(direction: 'BUY' | 'SELL') {
   if (!store.selectedAccountId) {
     ElMessage.error('请先选择账户')
     return
   }
+
+  // 平多发SELL，平空发BUY；手数按对应方向的持仓封顶
+  const side = direction === 'SELL' ? 'long' : 'short'
+  const valid = closeRows.value
+    .map(row => ({
+      ...row,
+      volume: Math.min(row.volume, side === 'long' ? row.pos_long : row.pos_short)
+    }))
+    .filter(row => (side === 'long' ? row.pos_long : row.pos_short) > 0 && row.volume > 0)
+  if (valid.length === 0) {
+    ElMessage.warning(side === 'long' ? '没有可平的多头持仓' : '没有可平的空头持仓')
+    return
+  }
+
+  closing.value = true
+  const failed: string[] = []
   try {
-    await positionApi.closePosition({
-      symbol: closeForm.symbol,
-      direction: closeForm.direction,
-      offset: closeForm.offset,
-      volume: closeForm.volume,
-      price: closeForm.price,
-      account_id: store.selectedAccountId
-    })
-    ElMessage.success('平仓成功')
-    showCloseDialog.value = false
-    await loadPositionData()
-  } catch (error: any) {
-    ElMessage.error(`平仓失败: ${error.message}`)
-    showCloseDialog.value = false
+    for (const row of valid) {
+      try {
+        await orderCmdApi.sendOrderCmd(
+          {
+            symbol: row.symbol,
+            direction,
+            offset: 'CLOSE',
+            volume: row.volume,
+            price: row.price || 0
+          },
+          store.selectedAccountId
+        )
+      } catch (error: any) {
+        failed.push(`${row.symbol}: ${error.message}`)
+      }
+    }
+
+    if (failed.length > 0) {
+      ElMessage.error(`部分平仓指令发送失败: ${failed.join('; ')}`)
+    } else {
+      ElMessage.success(`平仓指令已发送 (${valid.length} 个合约)`)
+      showCloseDialog.value = false
+    }
+  } finally {
+    closing.value = false
   }
 }
 
@@ -758,5 +794,15 @@ onUnmounted(() => {
 
 .account-tabs :deep(.el-tabs__content) {
   overflow-x: auto;
+}
+
+.long {
+  color: #67c23a;
+  font-weight: 600;
+}
+
+.short {
+  color: #f56c6c;
+  font-weight: 600;
 }
 </style>
