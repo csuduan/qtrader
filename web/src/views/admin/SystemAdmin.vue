@@ -79,6 +79,30 @@
                     </el-button>
                     <el-divider direction="vertical" />
                   </template>
+                  <el-dropdown
+                    trigger="click"
+                    @command="handleAddAccount"
+                    @visible-change="loadAvailableAccounts"
+                  >
+                    <el-button type="primary" :loading="loadingAvailable">
+                      <el-icon><Plus /></el-icon>
+                      添加账户
+                    </el-button>
+                    <template #dropdown>
+                      <el-dropdown-menu>
+                        <el-dropdown-item v-if="availableAccounts.length === 0" disabled>
+                          无可添加的账户（config目录中未添加的账户）
+                        </el-dropdown-item>
+                        <el-dropdown-item
+                          v-for="acc in availableAccounts"
+                          :key="acc"
+                          :command="acc"
+                        >
+                          {{ acc }}
+                        </el-dropdown-item>
+                      </el-dropdown-menu>
+                    </template>
+                  </el-dropdown>
                   <el-button type="primary" @click="loadTradersStatus" :loading="loadingTraders">
                     <el-icon><Refresh /></el-icon>
                     刷新
@@ -116,7 +140,7 @@
                   <span>{{ formatDateTime(row.start_time) }}</span>
                 </template>
               </el-table-column>
-              <el-table-column label="操作" :width="isMobile ? 100 : 220">
+              <el-table-column label="操作" :width="isMobile ? 150 : 280">
                 <template #default="{ row }">
                   <el-button
                     v-if="!row.running"
@@ -135,6 +159,16 @@
                     :loading="actionLoading[row.account_id]"
                   >
                     停止
+                  </el-button>
+                  <el-button
+                    type="danger"
+                    plain
+                    :size="isMobile ? 'small' : 'default'"
+                    :disabled="row.running"
+                    @click="handleRemoveAccount(row.account_id)"
+                    :loading="actionLoading[row.account_id]"
+                  >
+                    删除
                   </el-button>
                 </template>
               </el-table-column>
@@ -565,6 +599,56 @@ async function handleStop(accountId: string) {
     await loadTradersStatus()
   } catch (error: any) {
     ElMessage.error(`停止失败: ${error.message}`)
+  } finally {
+    actionLoading[accountId] = false
+  }
+}
+
+// ==================== 添加/删除账户 ====================
+const loadingAvailable = ref(false)
+const availableAccounts = ref<string[]>([])
+
+async function loadAvailableAccounts(visible: boolean) {
+  if (!visible) return
+  loadingAvailable.value = true
+  try {
+    const result = await accountApi.getAvailableAccounts()
+    availableAccounts.value = result.accounts
+  } catch {
+    // 下拉打开时加载失败保持原列表
+  } finally {
+    loadingAvailable.value = false
+  }
+}
+
+async function handleAddAccount(accountId: string) {
+  try {
+    await accountApi.addAccount(accountId)
+    ElMessage.success(`账户 ${accountId} 已添加`)
+    availableAccounts.value = availableAccounts.value.filter(a => a !== accountId)
+    await loadTradersStatus()
+  } catch (error: any) {
+    ElMessage.error(`添加账户失败: ${error.message}`)
+  }
+}
+
+async function handleRemoveAccount(accountId: string) {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除账户 ${accountId} 吗？将从管理列表移除（配置文件保留，可重新添加）。`,
+      '确认删除',
+      { type: 'warning' }
+    )
+  } catch {
+    return
+  }
+  actionLoading[accountId] = true
+  try {
+    await accountApi.removeAccount(accountId)
+    ElMessage.success(`账户 ${accountId} 已删除`)
+    await loadTradersStatus()
+  } catch (error: any) {
+    ElMessage.error(`删除账户失败: ${error.message}`)
   } finally {
     actionLoading[accountId] = false
   }

@@ -426,6 +426,10 @@ class ConfigLoader:
         with open(config_path, "r", encoding="utf-8") as f:
             config_data = yaml.safe_load(f)
 
+        # 兼容裸 "account_ids:"（空键被 YAML 解析为 None）
+        if config_data is not None and config_data.get("account_ids") is None:
+            config_data["account_ids"] = []
+
         app_config = AppConfig(**config_data)
 
         # 如果 socket.socket_dir 未设置，使用 paths.socket_dir 的值
@@ -479,6 +483,38 @@ class ConfigLoader:
             text += f"{new_line}\n"
 
         config_path.write_text(text, encoding="utf-8")
+
+    def update_account_ids(self, account_ids: list[str]) -> None:
+        """
+        更新全局配置的 account_ids 列表（保留注释与格式，整体重写该块）
+
+        Args:
+            account_ids: 账户ID列表（按此顺序写入）
+        """
+        import re
+
+        config_path = self.config_dir / "config.yaml"
+        text = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
+
+        if account_ids:
+            block = "account_ids:\n" + "".join(f"  - {aid}\n" for aid in account_ids)
+        else:
+            # 空列表必须写成 []（裸的 "account_ids:" 会被 YAML 解析为 None，校验失败）
+            block = "account_ids: []\n"
+        # 匹配 account_ids: 及其后续连续的 "- xxx" 列表项行
+        pattern = re.compile(
+            r"^account_ids:[ \t]*(?:\[\]|[ \t]*(?:#.*)?)$(?:\n[ \t]*-[ \t]*\S.*)*", re.MULTILINE
+        )
+        if pattern.search(text):
+            text = pattern.sub(lambda _: block.rstrip("\n"), text, count=1)
+        else:
+            if text and not text.endswith("\n"):
+                text += "\n"
+            text += block
+
+        config_path.write_text(text, encoding="utf-8")
+        if self.app_config is not None:
+            self.app_config.account_ids = list(account_ids)
 
 
 # 全局配置加载器实例

@@ -243,6 +243,69 @@ async def stop_account_trader(
         return error_response(code=500, message="Trader停止失败")
 
 
+@router.get("/available/list")
+async def get_available_accounts(
+    trading_manager: TradingManager = Depends(get_trading_manager),
+):
+    """
+    获取可添加的账户列表
+
+    扫描config目录中存在账户配置文件（account-{ID}.yaml）但尚未添加的账户
+    """
+    try:
+        accounts = trading_manager.get_available_accounts()
+        return success_response(data={"accounts": accounts}, message="获取成功")
+    except Exception as e:
+        logger.exception(f"获取可添加账户列表失败: {e}")
+        return error_response(code=500, message=f"获取可添加账户列表失败: {str(e)}")
+
+
+@router.post("/{account_id}/add")
+async def add_account(
+    account_id: str,
+    trading_manager: TradingManager = Depends(get_trading_manager),
+):
+    """
+    添加账户
+
+    加载账户配置文件并创建Trader Proxy，同时持久化到 account_ids
+    - **account_id**: 账户ID（需存在 account-{ID}.yaml 配置文件）
+    """
+    try:
+        success = await trading_manager.add_account(account_id)
+        if success:
+            return success_response(data={"account_id": account_id}, message="账户已添加")
+        return error_response(
+            code=400, message=f"账户 [{account_id}] 添加失败（可能已添加或配置文件无效）"
+        )
+    except Exception as e:
+        logger.exception(f"添加账户 [{account_id}] 失败: {e}")
+        return error_response(code=500, message=f"添加账户失败: {str(e)}")
+
+
+@router.post("/{account_id}/remove")
+async def remove_account(
+    account_id: str,
+    trading_manager: TradingManager = Depends(get_trading_manager),
+):
+    """
+    删除账户（仅限已停止的账户）
+
+    停止Proxy并从 account_ids 移除（账户配置文件保留），运行中的账户需先停止
+    - **account_id**: 账户ID
+    """
+    try:
+        success = await trading_manager.remove_account(account_id)
+        if success:
+            return success_response(data={"account_id": account_id}, message="账户已删除")
+        return error_response(code=400, message=f"账户 [{account_id}] 未添加，无法删除")
+    except ValueError as e:
+        return error_response(code=400, message=str(e))
+    except Exception as e:
+        logger.exception(f"删除账户 [{account_id}] 失败: {e}")
+        return error_response(code=500, message=f"删除账户失败: {str(e)}")
+
+
 @router.post("/{account_id}/connect")
 async def connect_account_gateway(
     account_id: str,

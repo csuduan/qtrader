@@ -758,6 +758,102 @@ gateway:
         assert content.rstrip().endswith("enabled: false")
 
 
+# ==================== TestUpdateAccountIds ====================
+
+
+class TestUpdateAccountIds:
+    """update_account_ids 全局账户列表持久化测试"""
+
+    CONFIG_YAML = """\
+# 全局配置
+account_ids:
+  - DQ
+  - RF
+
+paths:
+  logs: /data/logs
+"""
+
+    def _write_config(self, temp_config_dir, text=None):
+        config_file = temp_config_dir / "config.yaml"
+        config_file.write_text(text if text is not None else self.CONFIG_YAML, encoding="utf-8")
+        return config_file
+
+    def test_rewrite_account_ids_block(self, temp_config_dir):
+        """整体重写 account_ids 块，保留其他配置与注释"""
+        config_file = self._write_config(temp_config_dir)
+        loader = ConfigLoader(config_dir=str(temp_config_dir))
+
+        loader.update_account_ids(["DQ", "RF", "WY"])
+
+        content = config_file.read_text(encoding="utf-8")
+        assert content == (
+            "# 全局配置\n"
+            "account_ids:\n"
+            "  - DQ\n"
+            "  - RF\n"
+            "  - WY\n"
+            "\n"
+            "paths:\n"
+            "  logs: /data/logs\n"
+        )
+
+    def test_remove_account_id(self, temp_config_dir):
+        """删除账户后列表正确更新"""
+        config_file = self._write_config(temp_config_dir)
+        loader = ConfigLoader(config_dir=str(temp_config_dir))
+
+        loader.update_account_ids(["DQ"])
+
+        content = config_file.read_text(encoding="utf-8")
+        assert "  - RF" not in content
+        assert content.count("  - DQ") == 1
+        assert "paths:" in content
+
+    def test_empty_list(self, temp_config_dir):
+        """清空列表时写成 []，保证重新加载为空列表而非 None"""
+        config_file = self._write_config(temp_config_dir)
+        loader = ConfigLoader(config_dir=str(temp_config_dir))
+
+        loader.update_account_ids([])
+
+        content = config_file.read_text(encoding="utf-8")
+        assert "account_ids: []" in content
+        assert "  - DQ" not in content
+        assert "paths:" in content
+        assert loader._load_app_config().account_ids == []
+
+    def test_add_back_after_empty(self, temp_config_dir):
+        """清空后再添加：[] 形式可被正确改写回列表"""
+        config_file = self._write_config(temp_config_dir)
+        loader = ConfigLoader(config_dir=str(temp_config_dir))
+        loader.update_account_ids([])
+        assert "account_ids: []" in config_file.read_text(encoding="utf-8")
+
+        loader.update_account_ids(["WY"])
+
+        content = config_file.read_text(encoding="utf-8")
+        assert "account_ids:\n  - WY\n" in content
+        assert loader._load_app_config().account_ids == ["WY"]
+
+    def test_bare_empty_key_healed_on_load(self, temp_config_dir):
+        """裸 account_ids:（解析为None）加载时自愈为空列表"""
+        self._write_config(temp_config_dir, "account_ids:\n\npaths:\n  logs: /data/logs\n")
+        loader = ConfigLoader(config_dir=str(temp_config_dir))
+
+        assert loader._load_app_config().account_ids == []
+
+    def test_append_block_when_missing(self, temp_config_dir):
+        """config.yaml 中无 account_ids 时追加到末尾"""
+        self._write_config(temp_config_dir, "paths:\n  logs: /data/logs\n")
+        loader = ConfigLoader(config_dir=str(temp_config_dir))
+
+        loader.update_account_ids(["DQ"])
+
+        content = (temp_config_dir / "config.yaml").read_text(encoding="utf-8")
+        assert content == "paths:\n  logs: /data/logs\naccount_ids:\n  - DQ\n"
+
+
 # ==================== TestConfigLoaderSingleton ====================
 
 

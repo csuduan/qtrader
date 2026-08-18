@@ -92,5 +92,26 @@ export const accountApi = {
     trades: number
   }> => {
     return api.post(`/account/${accountId}/sync`)
+  },
+
+  /**
+   * 获取可添加的账户列表（config目录中存在配置文件但未添加）
+   */
+  getAvailableAccounts: async (): Promise<{ accounts: string[] }> => {
+    return api.get<{ accounts: string[] }>('/account/available/list')
+  },
+
+  /**
+   * 添加账户
+   */
+  addAccount: async (accountId: string): Promise<{ account_id: string }> => {
+    return api.post<{ account_id: string }>(`/account/${accountId}/add`)
+  },
+
+  /**
+   * 删除账户（仅限已停止账户，从 account_ids 移除，配置文件保留）
+   */
+  removeAccount: async (accountId: string): Promise<{ account_id: string }> => {
+    return api.post<{ account_id: string }>(`/account/${accountId}/remove`)
   }
 }

@@ -121,6 +121,99 @@ class TradingManager:
         logger.info(f"Trader Proxy [{account_id}] 初始化完成（enabled: {account_config.enabled}）")
         return True
 
+    def get_available_accounts(self) -> list[str]:
+        """
+        扫描config目录中存在账户配置文件但尚未添加的账户ID
+
+        Returns:
+            可添加的账户ID列表（按文件名排序）
+        """
+        loader = get_config_loader()
+        existing = set(self.account_configs_map.keys())
+        available: list[str] = []
+        for f in sorted(loader.config_dir.glob("account-*.yaml")):
+            account_id = f.stem[len("account-") :]
+            if not account_id or account_id == "sample":
+                continue
+            if account_id in existing:
+                continue
+            available.append(account_id)
+        return available
+
+    async def add_account(self, account_id: str) -> bool:
+        """
+        添加账户：加载账户配置文件，创建Trader Proxy并持久化到 account_ids
+
+        Args:
+            account_id: 账户ID（对应 account-{ID}.yaml）
+
+        Returns:
+            是否添加成功
+        """
+        if account_id in self.traders or account_id in self.account_configs_map:
+            logger.warning(f"账户 [{account_id}] 已添加，无需重复添加")
+            return False
+
+        loader = get_config_loader()
+        try:
+            account_config = loader._load_account_config(account_id)
+        except FileNotFoundError:
+            logger.error(f"账户 [{account_id}] 配置文件不存在: account-{account_id}.yaml")
+            return False
+        if account_config.account_id != account_id:
+            logger.error(
+                f"账户配置文件 account-{account_id}.yaml 内的 account_id "
+                f"({account_config.account_id}) 与文件名不一致"
+            )
+            return False
+
+        # 加入内存配置并创建 Proxy
+        self.account_configs.append(account_config)
+        self.account_configs_map[account_id] = account_config
+        await self.create_trader_proxy(account_id)
+
+        # 持久化到 config.yaml 的 account_ids
+        app_config = loader._load_app_config()
+        new_ids = [i for i in app_config.account_ids if i != account_id] + [account_id]
+        loader.update_account_ids(new_ids)
+        logger.info(f"账户 [{account_id}] 已添加并写入 account_ids")
+        return True
+
+    async def remove_account(self, account_id: str) -> bool:
+        """
+        删除账户：仅限已停止的账户，停止Proxy后台任务并从 account_ids 移除（配置文件保留）
+
+        Args:
+            account_id: 账户ID
+
+        Returns:
+            是否删除成功
+
+        Raises:
+            ValueError: 账户正在运行，需先停止
+        """
+        trader = self.traders.get(account_id)
+        if trader is None:
+            logger.warning(f"账户 [{account_id}] 未添加，无法删除")
+            return False
+
+        if trader.is_running():
+            raise ValueError(f"账户 [{account_id}] 正在运行，请先停止后再删除")
+
+        # 停止Proxy后台任务并移除
+        await trader.stop_monitoring()
+        del self.traders[account_id]
+        self.account_configs_map.pop(account_id, None)
+        self.account_configs = [a for a in self.account_configs if a.account_id != account_id]
+
+        # 持久化到 config.yaml 的 account_ids
+        loader = get_config_loader()
+        app_config = loader._load_app_config()
+        new_ids = [i for i in app_config.account_ids if i != account_id]
+        loader.update_account_ids(new_ids)
+        logger.info(f"账户 [{account_id}] 已删除（配置文件保留，可重新添加）")
+        return True
+
     async def start_trader(self, account_id: str) -> bool:
         """
         启动指定Trader（独立进程模式）

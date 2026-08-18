@@ -107,11 +107,32 @@ class TraderProxy:
         self._load_account_from_db()
 
         # 启动 连接任务
-        asyncio.create_task(self._connect_async())
+        self._connect_task = asyncio.create_task(self._connect_async())
         # 启动定时全量同步任务
-        asyncio.create_task(self._periodic_sync_loop())
+        self._socket_monitor_task = asyncio.create_task(self._periodic_sync_loop())
 
         logger.info(f"TraderProxy [{self.account_id}] 初始化完成，状态: STOPPED")
+
+    async def stop_monitoring(self) -> None:
+        """
+        停止后台监控任务并断开socket连接（不影响Trader进程本身）
+
+        用于删除账户或替换Proxy实例时清理资源。
+        """
+        self._running = False
+        for task in (self._connect_task, self._socket_monitor_task):
+            if task and not task.done():
+                task.cancel()
+        self._connect_task = None
+        self._socket_monitor_task = None
+
+        if self.socket_client:
+            try:
+                await self.socket_client.disconnect()
+            except Exception as e:
+                logger.warning(f"TraderProxy [{self.account_id}] 断开socket失败: {e}")
+            self.socket_client = None
+        logger.info(f"TraderProxy [{self.account_id}] 后台监控已停止")
 
     # ==================== 状态管理 ====================
 
@@ -135,9 +156,8 @@ class TraderProxy:
                     self._account_cache.status = self._state
                     if new_state != TraderState.CONNECTED:
                         self._account_cache.md_connected = False
-                        self._account_cache.td_connected = False 
+                        self._account_cache.td_connected = False
                     self._emit_data("account", self._account_cache.model_dump())
-
 
     def _is_state(self, state: TraderState) -> bool:
         """检查是否为指定状态"""
@@ -575,7 +595,10 @@ class TraderProxy:
                 if account_data and isinstance(account_data, dict):
                     self._account_cache = AccountData.model_validate(account_data)
                     # 限制账户推送推送间隔2秒
-                    if self._account_cache_time is None or (datetime.now() - self._account_cache_time).seconds >= 2:
+                    if (
+                        self._account_cache_time is None
+                        or (datetime.now() - self._account_cache_time).seconds >= 2
+                    ):
                         self._account_cache_time = datetime.now()
                         self._emit_data("account", self._account_cache.model_dump())
             elif msg_type == "account":
@@ -691,7 +714,7 @@ class TraderProxy:
             event_type = EventTypes.ACCOUNT_UPDATE
             if isinstance(data, dict) and "update_time" in data:
                 data = {**data, "updated_at": data["update_time"]}
-            data['status'] = self._state
+            data["status"] = self._state
         elif data_type == "order":
             event_type = EventTypes.ORDER_UPDATE
         elif data_type == "trade":
@@ -1300,7 +1323,9 @@ class TraderProxy:
             return None
 
         try:
-            response = await self.socket_client.request("update_rotation_config", config, timeout=10.0)
+            response = await self.socket_client.request(
+                "update_rotation_config", config, timeout=10.0
+            )
             if isinstance(response, dict):
                 return response
             return None
