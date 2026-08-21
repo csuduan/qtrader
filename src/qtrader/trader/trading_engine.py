@@ -277,8 +277,8 @@ class TradingEngine:
                 return False
             await self.gateway.connect()
 
-            # 等待连接就绪，最多15秒
-            timeout = 15
+            # 等待连接就绪，最多30秒
+            timeout = 30
             start = time.time()
             while time.time() - start < timeout:
                 if self.connected:

@@ -671,8 +671,8 @@ class TestUpdateAccountConfigField:
 account_id: DQ
 account_type: kq
 enabled: true
-# 换仓开关
-enable_instruction_rotation: true
+# 交易开关
+trade_enabled: true
 
 gateway:
   type: TQSDK
@@ -691,23 +691,23 @@ gateway:
         account_file = self._write_account(temp_config_dir)
         loader = ConfigLoader(config_dir=str(temp_config_dir))
 
-        loader.update_account_config_field("DQ", "enable_instruction_rotation", False)
+        loader.update_account_config_field("DQ", "trade_enabled", False)
 
         content = account_file.read_text(encoding="utf-8")
-        assert "enable_instruction_rotation: false" in content
+        assert "trade_enabled: false" in content
         # 重新加载验证生效
-        assert loader._load_account_config("DQ").enable_instruction_rotation is False
+        assert loader._load_account_config("DQ").trade_enabled is False
 
     def test_preserves_comments_and_other_lines(self, temp_config_dir):
         """保留注释、空行及嵌套结构"""
         account_file = self._write_account(temp_config_dir)
         loader = ConfigLoader(config_dir=str(temp_config_dir))
 
-        loader.update_account_config_field("DQ", "enable_instruction_rotation", False)
+        loader.update_account_config_field("DQ", "trade_enabled", False)
 
         content = account_file.read_text(encoding="utf-8")
         assert "# 账户配置" in content
-        assert "# 换仓开关" in content
+        assert "# 交易开关" in content
         assert 'username: "user"  # 用户名' in content
         assert 'password: "pass"' in content
         assert "gateway:" in content
@@ -718,21 +718,21 @@ gateway:
         account_file = self._write_account(temp_config_dir)
         loader = ConfigLoader(config_dir=str(temp_config_dir))
 
-        loader.update_account_config_field("DQ", "enable_target_pos_rotation", False)
+        loader.update_account_config_field("DQ", "auto_report", False)
 
         content = account_file.read_text(encoding="utf-8")
-        assert content.rstrip().endswith("enable_target_pos_rotation: false")
-        assert loader._load_account_config("DQ").enable_target_pos_rotation is False
+        assert content.rstrip().endswith("auto_report: false")
+        assert loader._load_account_config("DQ").auto_report is False
 
     def test_append_field_without_trailing_newline(self, temp_config_dir):
         """文件末尾无换行时也能正确追加"""
         self._write_account(temp_config_dir, "account_id: DQ\nenabled: true")
         loader = ConfigLoader(config_dir=str(temp_config_dir))
 
-        loader.update_account_config_field("DQ", "enable_target_pos_rotation", True)
+        loader.update_account_config_field("DQ", "auto_report", True)
 
         content = (temp_config_dir / "account-DQ.yaml").read_text(encoding="utf-8")
-        assert content == "account_id: DQ\nenabled: true\nenable_target_pos_rotation: true\n"
+        assert content == "account_id: DQ\nenabled: true\nauto_report: true\n"
 
     def test_update_string_field(self, temp_config_dir):
         """更新字符串字段"""

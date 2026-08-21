@@ -1284,55 +1284,6 @@ class TraderProxy:
             logger.error(f"TraderProxy [{self.account_id}] 获取告警配置请求失败: {e}")
             return None
 
-    async def get_rotation_config(self) -> dict[str, Any] | None:
-        """
-        获取换仓开关配置
-
-        通过socket发送请求到远程Trader
-
-        Returns:
-            换仓开关配置字典，失败返回 None
-        """
-        if not self.socket_client or not self.socket_client.is_connected():
-            logger.error(f"TraderProxy [{self.account_id}] 未连接到Trader，无法发送获取请求")
-            return None
-
-        try:
-            response = await self.socket_client.request("get_rotation_config", {}, timeout=10.0)
-            if isinstance(response, dict):
-                return response
-            return None
-        except Exception as e:
-            logger.error(f"TraderProxy [{self.account_id}] 获取换仓开关请求失败: {e}")
-            return None
-
-    async def update_rotation_config(self, config: dict[str, Any]) -> dict[str, Any] | None:
-        """
-        更新换仓开关配置
-
-        通过socket发送请求到远程Trader（Trader 内存即时生效并持久化到账户配置文件）
-
-        Args:
-            config: 换仓开关配置字典
-
-        Returns:
-            更新后的换仓开关配置字典，失败返回 None
-        """
-        if not self.socket_client or not self.socket_client.is_connected():
-            logger.error(f"TraderProxy [{self.account_id}] 未连接到Trader，无法发送更新请求")
-            return None
-
-        try:
-            response = await self.socket_client.request(
-                "update_rotation_config", config, timeout=10.0
-            )
-            if isinstance(response, dict):
-                return response
-            return None
-        except Exception as e:
-            logger.error(f"TraderProxy [{self.account_id}] 更新换仓开关请求失败: {e}")
-            return None
-
     async def update_strategy_params(self, strategy_id: str, params: dict) -> dict:
         """
         更新策略参数

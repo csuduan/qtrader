@@ -4,7 +4,7 @@
       <template #header>
         <div class="card-header">
           <div>
-            <span>交易指令管理</span>
+            <span>换仓指令</span>
           </div>
           <div class="header-actions">
             <el-tag

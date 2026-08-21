@@ -162,34 +162,19 @@ export interface RotationInstruction {
   updated_at: string
 }
 
-/** 目标仓位差值指令 */
-export interface TargetPosInstruction {
-  id: number
+/** 目标仓位比对行（目标持仓 vs 当前持仓） */
+export interface TargetPositionCompare {
   account_id: string
-  strategy_id: string
   symbol: string
   side: string // LONG / SHORT
-  target_volume: number
-  current_volume: number | null
-  initial_deviation: number | null
-  current_deviation: number | null
-  direction: string
-  offset: string
-  volume: number
-  filled_volume: number
-  remaining_volume: number
-  pending_volume: number
-  price: number
-  trading_date: string | null
-  plan_id: string
-  enabled: boolean
-  status: string
-  current_order_id: string | null
-  order_placed_time: string | null
-  error_message: string | null
+  strategy_id: string | null
+  target_volume: number | null // 无目标仓位时为 null
+  current_volume: number
+  deviation: number | null // 无目标仓位时为 null
+  direction: string | null // 无目标仓位时为 null
+  offset: string | null // 无目标仓位时为 null
+  volume: number | null // 无目标仓位时为 null
   source: string | null
-  created_at: string
-  updated_at: string
 }
 
 /** WebSocket 消息类型 */

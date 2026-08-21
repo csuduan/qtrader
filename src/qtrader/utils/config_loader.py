@@ -213,9 +213,6 @@ class AccountConfig(BaseModel):
     name: str | None = None
     account_type: str | None = "kq"
     enabled: bool | None = True
-    # 换仓开关（默认开启；设为 False 时拦截对应换仓文件导入，防止误操作）
-    enable_instruction_rotation: bool = True
-    enable_target_pos_rotation: bool = True
     # 告警配置
     alert: AlertConfig = Field(default_factory=AlertConfig)
 

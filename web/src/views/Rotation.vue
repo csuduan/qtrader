@@ -1,10 +1,10 @@
 <template>
   <div class="rotation-page">
     <el-tabs v-model="activeTab" class="rotation-tabs">
-      <el-tab-pane name="instruction" :disabled="!rotationConfig.enable_instruction_rotation">
+      <el-tab-pane name="instruction">
         <template #label>
           <span class="tab-label">
-            换仓-按交易指令
+            换仓管理
             <el-badge
               v-if="instructionCount > 0"
               :value="instructionCount"
@@ -17,16 +17,14 @@
           @count-update="instructionCount = $event"
         />
       </el-tab-pane>
-      <el-tab-pane name="target" :disabled="!rotationConfig.enable_target_pos_rotation">
+      <el-tab-pane name="compare">
         <template #label>
           <span class="tab-label">
-            换仓-按目标仓位
-            <el-badge v-if="targetCount > 0" :value="targetCount" :max="99" />
+            仓位比对
           </span>
         </template>
-        <TargetRotationTab
-          v-if="activeTab === 'target'"
-          @count-update="targetCount = $event"
+        <PositionCompareTab
+          v-if="activeTab === 'compare'"
         />
       </el-tab-pane>
     </el-tabs>
@@ -35,68 +33,29 @@
 
 <script setup lang="ts">
 import { ref, watch, onMounted } from "vue";
-import { rotationApi, targetPositionApi } from "@/api";
-import { systemApi, type RotationConfig } from "@/api/system";
+import { rotationApi } from "@/api";
 import { useStore } from "@/stores";
 import InstructionRotationTab from "./rotation/InstructionRotationTab.vue";
-import TargetRotationTab from "./rotation/TargetRotationTab.vue";
+import PositionCompareTab from "./rotation/PositionCompareTab.vue";
 
 const store = useStore();
-const activeTab = ref<"instruction" | "target">("instruction");
+const activeTab = ref<"instruction" | "compare">("instruction");
 const instructionCount = ref(0);
-const targetCount = ref(0);
-// 默认开启，配置加载成功前不置灰，避免页面闪烁
-const rotationConfig = ref<RotationConfig>({
-  enable_instruction_rotation: true,
-  enable_target_pos_rotation: true,
-});
 
-/** 拉取换仓开关配置，未开启的换仓 tab 置灰 */
-async function loadRotationConfig() {
-  const accountId = store.selectedAccountId;
-  if (!accountId) return;
-  try {
-    rotationConfig.value = await systemApi.getRotationConfig(accountId);
-  } catch {
-    // 配置加载失败保持默认开启
-  }
-}
-
-/** 当前激活 tab 被关闭时自动切换到仍开启的 tab */
-watch(
-  () => [rotationConfig.value.enable_instruction_rotation, rotationConfig.value.enable_target_pos_rotation] as const,
-  ([instructionEnabled, targetEnabled]) => {
-    if (activeTab.value === "instruction" && !instructionEnabled && targetEnabled) {
-      activeTab.value = "target";
-    } else if (activeTab.value === "target" && !targetEnabled && instructionEnabled) {
-      activeTab.value = "instruction";
-    }
-  }
-);
-
-/** 拉取两个换仓列表的记录数，用于 tab 标题徽标提示 */
+/** 拉取指令换仓列表记录数，用于 tab 标题徽标提示 */
 async function loadCounts() {
   const accountId = store.selectedAccountId || "";
   if (!accountId) return;
   try {
-    const [rotationResult, targetResult] = await Promise.all([
-      rotationApi.getRotationInstructions(accountId),
-      targetPositionApi.getTargetInstructions(accountId),
-    ]);
+    const rotationResult = await rotationApi.getRotationInstructions(accountId);
     instructionCount.value = rotationResult.instructions.length;
-    targetCount.value = targetResult.instructions.length;
   } catch {
     // 徽标为辅助提示，加载失败静默忽略
   }
 }
 
-function loadAll() {
-  loadCounts();
-  loadRotationConfig();
-}
-
-onMounted(loadAll);
-watch(() => store.selectedAccountId, loadAll);
+onMounted(loadCounts);
+watch(() => store.selectedAccountId, loadCounts);
 </script>
 
 <style scoped>

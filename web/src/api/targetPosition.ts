@@ -1,39 +1,51 @@
 import api from './request'
-import type { TargetPosInstruction } from '@/types'
+import type { TargetPositionCompare } from '@/types'
 
-/** 目标仓位换仓状态 */
-export interface TargetRotationStatus {
-  working: boolean
-  is_manual: boolean
-}
-
-/** 目标仓位换仓列表响应 */
-export interface TargetInstructionResult {
-  instructions: TargetPosInstruction[]
-  rotation_status: TargetRotationStatus
+/** 目标仓位比对列表响应 */
+export interface TargetComparisonResult {
+  trading_date: string
+  comparisons: TargetPositionCompare[]
 }
 
 /** 导入目标仓位文件响应 */
 export interface TargetImportResult {
-  imported: number
-  skipped: boolean
-  plan_id?: string
-  reason?: string
-  errors?: string[]
+  saved?: boolean
+  file_name?: string
+  error?: string
+}
+
+/** 导出换仓指令文件响应 */
+export interface TargetExportResult {
+  exported: number
+  file_name: string | null
+  file_path: string | null
+  content_base64?: string
+  encoding?: string
+  error?: string
+}
+
+/** 导出目标仓位文件响应 */
+export interface TargetExportPositionsResult {
+  exported: number
+  file_name: string | null
+  file_path: string | null
+  content_base64?: string
+  encoding?: string
+  error?: string
 }
 
 /**
- * 目标仓位换仓 API
+ * 目标仓位比对 API
  */
 export const targetPositionApi = {
-  /** 获取目标仓位差值指令列表 */
-  getTargetInstructions: async (accountId: string): Promise<TargetInstructionResult> => {
-    return await api.get<TargetInstructionResult>('/target-position', {
+  /** 获取目标仓位与当前持仓的比对结果 */
+  getComparison: async (accountId: string): Promise<TargetComparisonResult> => {
+    return await api.get<TargetComparisonResult>('/target-position', {
       params: { account_id: accountId }
     })
   },
 
-  /** 导入目标仓位文件（CSV） */
+  /** 导入目标仓位文件（保存到目标仓位目录，供比对扫描读取） */
   importTarget: async (formData: FormData, accountId: string): Promise<TargetImportResult> => {
     formData.append('account_id', accountId)
     return await api.post<TargetImportResult>('/target-position/import', formData, {
@@ -41,30 +53,32 @@ export const targetPositionApi = {
     })
   },
 
-  /** 执行目标仓位换仓 */
-  executeTarget: async (accountId: string): Promise<void> => {
-    await api.post('/target-position/execute', undefined, { params: { account_id: accountId } })
-  },
-
-  /** 停止目标仓位换仓 */
-  stopTarget: async (accountId: string): Promise<void> => {
-    await api.post('/target-position/stop', undefined, { params: { account_id: accountId } })
-  },
-
-  /** 批量删除目标仓位指令（软删除） */
-  batchDeleteInstructions: async (ids: number[], accountId: string): Promise<{ deleted: number }> => {
-    return await api.post<{ deleted: number }>('/target-position/batch/delete', { ids }, {
+  /** 按偏差导出换仓指令文件（由指令换仓流程扫描执行） */
+  exportInstructions: async (accountId: string): Promise<TargetExportResult> => {
+    return await api.post<TargetExportResult>('/target-position/export', undefined, {
       params: { account_id: accountId }
     })
   },
 
-  /** 更新目标仓位指令（启用/禁用、目标手数） */
-  updateInstruction: async (
-    id: number,
-    data: { enabled?: boolean; status?: string; target_volume?: number },
-    accountId: string
-  ): Promise<TargetPosInstruction> => {
-    return await api.put<TargetPosInstruction>(`/target-position/${id}`, data, {
+  /** 按当前持仓导出目标仓位文件（默认导出所有持仓） */
+  exportTargetPositions: async (accountId: string, strategyId: string = 'manual'): Promise<TargetExportPositionsResult> => {
+    return await api.post<TargetExportPositionsResult>('/target-position/export-positions', undefined, {
+      params: { account_id: accountId, strategy_id: strategyId }
+    })
+  },
+
+  /** 手动更新某合约某侧的目标手数（为空表示删除目标） */
+  updateTarget: async (
+    accountId: string,
+    symbol: string,
+    side: string,
+    targetVolume: number | null
+  ): Promise<TargetImportResult> => {
+    return await api.post<TargetImportResult>('/target-position/update', {
+      symbol,
+      side,
+      target_volume: targetVolume
+    }, {
       params: { account_id: accountId }
     })
   }

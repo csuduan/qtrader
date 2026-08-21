@@ -56,7 +56,6 @@ class JobManager:
         trading_engine: TradingEngine,
         position_manager: SwitchPosManager,
         socket_server=None,
-        target_pos_manager=None,
     ):
         """
         初始化任务管理器
@@ -66,13 +65,11 @@ class JobManager:
             trading_engine: 交易引擎实例
             position_manager: 换仓管理器实例
             socket_server: Socket服务器实例（可选）
-            target_pos_manager: 目标仓位换仓管理器实例（可选）
         """
         self.config = config
         self.trading_engine = trading_engine
         self.position_manager = position_manager
         self.socket_server = socket_server
-        self.target_pos_manager = target_pos_manager
 
     async def pre_market_connect(self) -> None:
         """盘前自动连接"""
@@ -188,22 +185,6 @@ class JobManager:
             # logger.info("扫描订单任务完成")
         except Exception as e:
             logger.exception(f"扫描订单任务执行失败: {e}")
-
-    async def scan_target_pos(self) -> None:
-        """扫描并处理目标仓位文件"""
-        try:
-            if self.target_pos_manager:
-                await asyncio.to_thread(self.target_pos_manager.scan_and_process_target_files)
-        except Exception as e:
-            logger.exception(f"扫描目标仓位文件任务执行失败: {e}")
-
-    async def execute_target_pos(self, instruction: str | None = "") -> None:
-        """根据目标仓位执行换仓"""
-        try:
-            if self.target_pos_manager:
-                await self.target_pos_manager.execute_target_position(is_manual=False)
-        except Exception as e:
-            logger.exception(f"目标仓位换仓任务执行失败: {e}")
 
     def cleanup_old_alarms(self) -> None:
         """清理3天前的告警"""

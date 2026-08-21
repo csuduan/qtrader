@@ -171,16 +171,9 @@ class SwitchPosManager:
         """
         导入换仓指令文件
 
-        账户配置 enable_instruction_rotation=false 时拦截导入。
-
         Args:
             file_path: 换仓指令文件路径
         """
-        if not self.config.enable_instruction_rotation:
-            raise ValueError(
-                "交易指令换仓未开启，已拦截导入（账户配置 enable_instruction_rotation=false）"
-            )
-
         lines = csv_text.strip().split("\n")
         if len(lines) < 2:
             raise ValueError("CSV文件为空或格式错误")
@@ -305,10 +298,7 @@ class SwitchPosManager:
         return data
 
     def scan_and_process_orders(self) -> None:
-        """扫描并处理交易指令文件（账户配置 enable_instruction_rotation=false 时跳过）"""
-        if not self.config.enable_instruction_rotation:
-            logger.debug("交易指令换仓未开启，跳过扫描换仓文件")
-            return
+        """扫描并处理交易指令文件"""
         try:
             today_dir = Path(self.switchPos_files_dir) / datetime.now().strftime("%Y%m%d")
             today_str = datetime.now().strftime("%Y%m%d")
@@ -407,6 +397,9 @@ class SwitchPosManager:
                     instruction.current_order_id = None
 
             # 为每个指令创建OrderCmd
+            # 平仓/平今排在前面，优先释放保证金与持仓
+            todo_instructions.sort(key=lambda inst: 0 if inst.offset != "OPEN" else 1)
+
             for instruction in todo_instructions:
                 if instruction.status != "PENDING":
                     continue
@@ -439,7 +432,6 @@ class SwitchPosManager:
                     logger.info(f"为指令 {instruction.symbol} 创建报单指令: {order_cmd.cmd_id}")
 
             # 监控OrderCmd执行状态
-            # self._monitor_order_commands(all_instructions)
             await self._monitor_order_commands(todo_instructions)
 
         except Exception as e:

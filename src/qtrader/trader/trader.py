@@ -138,12 +138,11 @@ class Trader:
         ctx.register(AppContext.KEY_SWITCH_POS_MANAGER, self.switchPos_manager)
         self.switchPos_manager.start()
 
-        # 启动目标仓位换仓管理器
+        # 启动目标仓位比对管理器
         from qtrader.trader.target_pos_mgr import TargetPosManager
 
         self.targetPos_manager = TargetPosManager(self.account_config, self.trading_engine)
         ctx.register(AppContext.KEY_TARGET_POS_MANAGER, self.targetPos_manager)
-        self.targetPos_manager.start()
 
         # 启动任务调度器及作业管理器
         self.job_manager = JobManager(
@@ -151,7 +150,6 @@ class Trader:
             self.trading_engine,
             self.switchPos_manager,
             self.socket_server,
-            self.targetPos_manager,
         )
 
         # 从全局配置获取账户定时任务
