@@ -526,7 +526,7 @@ class ManagerJobManager:
         """
         发送本周结算权益周报邮件（每周五执行）
 
-        汇总本周一至今日所有账户的结算权益快照，
+        汇总本周一至今日、在 config.yaml 中配置且未在黑名单中的账户的结算权益快照，
         每账户取最新一日数据，合并为一张表格以 HTML 邮件发送给配置的收件人
         """
         from qtrader.trader.dao.settlement_dao import SettlementDao
@@ -535,7 +535,8 @@ class ManagerJobManager:
 
         logger.info("开始执行结算权益周报任务")
         try:
-            email_config = get_config_loader()._load_app_config().email
+            app_config = get_config_loader().load_config()
+            email_config = app_config.email
             if not email_config.enabled:
                 logger.info("邮件功能未启用，跳过结算权益周报任务")
                 return
@@ -543,19 +544,19 @@ class ManagerJobManager:
             today = datetime.now().date()
             monday = today - timedelta(days=today.weekday())
 
-            records = SettlementDao().query_settlements(None, monday, today)
+            # 只发送 config.yaml 中配置的账户，并排除黑名单
+            blacklist = set(email_config.exclude_accounts)
+            configured_accounts = [
+                aid for aid in (app_config.account_ids or []) if aid and aid not in blacklist
+            ]
+            if not configured_accounts:
+                logger.info("config.yaml 中无有效账户配置，跳过周报发送")
+                return
+
+            records = SettlementDao().query_settlements(configured_accounts, monday, today)
             if not records:
                 logger.warning(f"本周({monday} ~ {today})无结算权益数据，跳过周报发送")
                 return
-
-            # 过滤黑名单账户
-            blacklist = set(email_config.exclude_accounts)
-            if blacklist:
-                records = [r for r in records if r.account_id not in blacklist]
-                logger.info(f"周报已过滤黑名单账户: {sorted(blacklist)}")
-                if not records:
-                    logger.info("过滤黑名单账户后无结算权益数据，跳过周报发送")
-                    return
 
             html_body = _build_settlement_report_html(records, today)
             subject = f"Q-Trader 结算权益周报 ({today:%m-%d})"
