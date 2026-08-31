@@ -48,10 +48,10 @@ data_base:
 # 外部数据服务
 data_service:
   tq_data:
-    user: "xxx"
+    username: "xxx"
     password: "xxx"
   rice_data:
-    user: "xxx"
+    username: "xxx"
     password: "xxx"
 
 # 订阅配置
@@ -146,6 +146,14 @@ scheduler:
       cron_expression: 10 21 * * fri
       job_method: send_weekly_settlement_report
       enabled: true
+    # 盘后拉取历史K线
+    - job_id: fetch_history_bars
+      job_name: 盘后拉取历史K线
+      job_group: 数据
+      job_description: 盘后通过米筐拉取订阅合约历史分钟K线落库，供CTP账户策略预热
+      cron_expression: 30 16 * * mon-fri
+      job_method: fetch_history_bars
+      enabled: true
 
 
 # 账户定时任务配置（所有Trader进程共享）
@@ -168,6 +176,13 @@ account_scheduler:
       cron_expression: "35 2,15 * * *"
       enabled: true
       job_method: post_market_disconnect
+    - job_id: close_stale_positions
+      job_name: 平遗留持仓
+      job_group: 交易
+      job_description: 开盘后平掉与策略配置合约不一致的遗留持仓(换月场景)
+      cron_expression: 0 32 9 * * mon-fri
+      enabled: true
+      job_method: close_stale_positions
 
     # 换仓任务
     - job_id: auto_rotation

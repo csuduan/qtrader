@@ -59,7 +59,7 @@ class RsiStrategy(BaseStrategy):
         super().__init__(strategy_id, strategy_config)
         logger.info(f"RSI策略 [{strategy_id}] 初始化完成")
 
-    def init(self, trading_day: datetime) -> bool:
+    async def init(self, trading_day: datetime) -> bool:
         """策略初始化，将配置字典转换为RsiParam"""
         logger.info(f"策略 [{self.strategy_id}] 初始化...")
         # 基础变量
@@ -87,7 +87,7 @@ class RsiStrategy(BaseStrategy):
             return False
 
         # 加载上一个交易日的数据
-        hist_bars = self.load_hist_bars(
+        hist_bars = await self.load_hist_bars(
             self.symbol,
             self.trading_day - timedelta(days=3),
             self.trading_day,
@@ -122,13 +122,14 @@ class RsiStrategy(BaseStrategy):
         logger.info(f"策略 [{self.strategy_id}] 参数已更新: {params}")
 
     async def on_tick(self, tick):
-        """Tick行情回调（暂不使用）"""
+        """Tick行情回调"""
+        if tick.symbol != self.symbol:
+            return
         await self.execute_signal()
         pass
 
     async def on_bar(self, bar: BarData):
         """K线行情回调"""
-
         try:
             # 只处理指定合约的K线
             if bar.symbol != self.symbol:

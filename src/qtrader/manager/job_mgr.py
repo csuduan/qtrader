@@ -522,6 +522,35 @@ class ManagerJobManager:
         except Exception as e:
             logger.exception(f"执行所有账户换仓任务失败: {e}")
 
+    def fetch_history_bars(self) -> None:
+        """
+        盘后历史K线固化任务（交易日收盘后执行）
+
+        通过数据服务（ManagerDataFeed）将订阅合约的K线全量写入 bars_history
+        （官方数据覆盖修正当日及历史），并清理过期的 bars_today 数据
+        """
+        from datetime import date
+
+        from qtrader.trader.dao.bar_dao import BarDao
+
+        logger.info("开始执行历史K线固化任务")
+
+        try:
+            data_feed = self.trading_manager.data_feed
+            if not data_feed or not data_feed.connected:
+                logger.warning("数据服务未运行，跳过历史K线固化")
+                return
+
+            # 触发数据服务全量同步（feed线程内执行，覆盖修正 bars_history）
+            message = data_feed.sync_history()
+            logger.info(f"数据服务同步已触发: {message}")
+
+            # 清理过期当日K线
+            BarDao().cleanup_today_bars(date.today())
+            logger.info("历史K线固化任务完成")
+        except Exception as e:
+            logger.exception(f"历史K线固化任务执行失败: {e}")
+
     def send_weekly_settlement_report(self) -> None:
         """
         发送本周结算权益周报邮件（每周五执行）

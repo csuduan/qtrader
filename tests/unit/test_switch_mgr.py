@@ -6,6 +6,8 @@ SwitchPosManager 单元测试
 """
 
 import asyncio
+import os
+import time
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
@@ -93,3 +95,45 @@ async def test_execute_rotation_close_before_open():
     assert inserted_offsets == ["CLOSE", "OPEN"]
     assert close_inst.status == "RUNNING"
     assert open_inst.status == "RUNNING"
+
+
+def _mock_session_scope():
+    """模拟 session_scope，查询结果为空（文件未导入过）"""
+    session = MagicMock()
+    session.query.return_value.filter_by.return_value.first.return_value = None
+    cm = MagicMock()
+    cm.__enter__.return_value = session
+    cm.__exit__.return_value = False
+    return MagicMock(return_value=cm)
+
+
+def test_scan_skips_fresh_files(tmp_path):
+    """扫描时只导入时间戳与系统时间偏差绝对值大于10秒的文件"""
+    mgr = build_manager()
+    today_str = datetime.now().strftime("%Y%m%d")
+    today_dir = tmp_path / today_str
+    today_dir.mkdir()
+    mgr.switchPos_files_dir = str(tmp_path)
+
+    now = time.time()
+    files = {
+        "fresh": now,  # 刚写入 → 跳过
+        "future_fresh": now + 5,  # 未来值但偏差不足10秒 → 跳过
+        "stable": now - 60,  # 偏差超过10秒 → 导入
+        "future": now + 3600,  # 未来值且偏差超过10秒（时区偏差）→ 导入
+    }
+    for name, mtime in files.items():
+        f = today_dir / f"{today_str}_DQ_{name}.csv"
+        f.write_text("header\n", encoding="gbk")
+        os.utime(f, (mtime, mtime))
+
+    imported = []
+    mgr.import_csv = lambda content, filename, mode="replace": imported.append(filename)
+
+    with patch("qtrader.trader.switch_mgr.session_scope", _mock_session_scope()):
+        mgr.scan_and_process_orders()
+
+    assert sorted(imported) == [
+        f"{today_str}_DQ_future.csv",
+        f"{today_str}_DQ_stable.csv",
+    ]

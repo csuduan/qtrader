@@ -82,6 +82,9 @@ class TradingManager:
         # 公共数据服务
         self.public_data_service: PublicDataService | None = None
 
+        # 数据服务（data-only TqApi 订阅K线落库，将在 start() 中初始化）
+        self.data_feed = None
+
         # 告警服务
         self.alarm_service: AlarmService | None = None
 
@@ -981,7 +984,32 @@ class TradingManager:
         self._scheduler.start()
         logger.info("Manager Scheduler 已启动")
 
+        # 启动数据服务（data-only TqApi 订阅K线落库，供CTP账户策略预热）
+        self._start_data_feed()
+
         logger.info("交易管理器启动完成")
+
+    def _start_data_feed(self) -> None:
+        """启动 Manager 数据服务（未配置 tq_data 时跳过）"""
+        try:
+            from qtrader.manager.data_feed import ManagerDataFeed, collect_bar_subscriptions
+
+            tq_config = self._get_data_service_config("tq_data")
+            if not tq_config:
+                logger.warning("未找到天勤数据配置(data_service.tq_data)，数据服务未启动")
+                return
+
+            app_config = self.app_config or get_config_loader().load_config()
+            self.data_feed = ManagerDataFeed(
+                tq_config["username"],
+                tq_config["password"],
+                subscriptions_getter=lambda: collect_bar_subscriptions(
+                    app_config, self.account_configs
+                ),
+            )
+            self.data_feed.start()
+        except Exception as e:
+            logger.exception(f"启动数据服务失败: {e}")
 
     async def _init_public_data(self) -> None:
         """初始化共享数据库和公共数据服务"""
@@ -1134,6 +1162,12 @@ class TradingManager:
         if self._scheduler:
             self._scheduler.shutdown()
             logger.info("ManagerScheduler 已停止")
+
+        # 停止数据服务
+        if self.data_feed:
+            self.data_feed.stop()
+            self.data_feed = None
+            logger.info("数据服务已停止")
 
         # 清理告警服务
         if self.alarm_service:

@@ -177,6 +177,23 @@ class JobManager:
         except Exception as e:
             logger.exception(f"换仓任务执行失败: {e}")
 
+    async def close_stale_positions(self) -> None:
+        """平掉所有策略的遗留持仓（换月后持仓合约与策略配置合约不一致的部分）"""
+        logger.info("开始执行遗留持仓平仓任务")
+        try:
+            ctx = get_app_context()
+            strategy_manager: StrategyManager = ctx.get_strategy_manager()
+            if not strategy_manager:
+                logger.warning("策略管理器未初始化，跳过遗留持仓平仓任务")
+                return
+            for strategy in strategy_manager.strategies.values():
+                if not strategy.enabled:
+                    continue
+                await strategy.close_stale_positions()
+            logger.info("遗留持仓平仓任务完成")
+        except Exception as e:
+            logger.exception(f"遗留持仓平仓任务执行失败: {e}")
+
     async def scan_orders(self) -> None:
         """扫描并处理订单"""
         # logger.info("开始扫描订单任务")
@@ -210,7 +227,7 @@ class JobManager:
         except Exception as e:
             logger.exception(f"清理旧告警失败: {e}")
 
-    def reset_strategies(self) -> None:
+    async def reset_strategies(self) -> None:
         """重置所有策略"""
         from qtrader.app_context import get_app_context
 
@@ -218,7 +235,7 @@ class JobManager:
         strategy_manager: StrategyManager = ctx.get_strategy_manager()
         logger.info("开始重置所有策略")
         try:
-            strategy_manager.reset_strategies()
+            await strategy_manager.reset_strategies()
             logger.info("所有策略已重置")
         except Exception as e:
             logger.exception(f"重置策略失败: {e}")

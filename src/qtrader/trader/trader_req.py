@@ -882,7 +882,7 @@ class TraderReqHandler:
             strategy = self.trader.strategy_manager.strategies.get(strategy_id)
             if not strategy:
                 return {"success": False, "message": f"策略 {strategy_id} 不存在"}
-            self.trader.strategy_manager.init_strategy(strategy)
+            await self.trader.strategy_manager.init_strategy(strategy)
             logger.info(f"策略 [{strategy_id}] 初始化成功")
             return {"success": True, "message": "策略初始化成功"}
         except Exception as e:

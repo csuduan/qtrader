@@ -136,7 +136,7 @@ class BaseStrategy:
         self._pending_cmds: list[OrderCmd] = []
         self._hist_cmds: dict[str, OrderCmd] = {}
 
-    def init(self, trading_day: datetime) -> bool:
+    async def init(self, trading_day: datetime) -> bool:
         """策略初始化"""
         logger.info(f"策略 [{self.strategy_id}] 初始化...")
         self.inited = True
@@ -173,6 +173,20 @@ class BaseStrategy:
                 f"空仓={pos.pos_short}({pos.pos_short_td or 0}/{pos.pos_short_yd or 0})"
             )
 
+        # 订阅遗留合约行情（换月后老合约不在配置中，平仓下单需要其对手价）
+        if self.trading_engine is not None:
+            stale_symbols = [
+                symbol
+                for symbol, pos in self._positions.items()
+                if symbol != self.symbol and pos.total_pos > 0
+            ]
+            if stale_symbols:
+                logger.warning(
+                    f"策略 [{self.strategy_id}] 检测到遗留持仓合约: {stale_symbols}，"
+                    f"当前配置合约: {self.symbol}，将在收到行情后自动平仓"
+                )
+                self.trading_engine.subscribe_symbol(stale_symbols)
+
     def get_params(self) -> list[dict[str, Any]]:
         """获取策略参数（包含元数据）"""
         # 获取基础参数定义
@@ -181,12 +195,12 @@ class BaseStrategy:
         definitions = self.param.get_param_definitions()
         return definitions
 
-    def load_hist_bars(self, symbol: str, start: datetime, end: datetime) -> list[BarData]:
+    async def load_hist_bars(self, symbol: str, start: datetime, end: datetime) -> list[BarData]:
         """加载历史K线数据"""
         if self.strategy_manager is None:
             logger.error(f"策略 [{self.strategy_id}] 的 strategy_manager 未初始化")
             return []
-        return self.strategy_manager.load_hist_bars(symbol, self.bar_type, start, end)
+        return await self.strategy_manager.load_hist_bars(symbol, self.bar_type, start, end)
 
     def get_signal(self) -> (dict[str, Any]) | None:
         """获取当前信号"""
@@ -313,6 +327,48 @@ class BaseStrategy:
                 await self._handle_lock_open(signal)
             else:
                 await self._handle_normal_open(signal)
+
+    async def close_stale_positions(self) -> None:
+        """
+        平掉与当前配置合约不一致的遗留持仓（换月场景）。
+        由定时任务（JobManager.close_stale_positions）每日开盘后触发一次。
+        平仓量以策略持仓记录为准，OrderCmd执行时会按账户实际持仓校验并拆今昨仓。
+        """
+        if self.closing_paused:
+            return
+        for symbol, position in list(self._positions.items()):
+            if symbol == self.symbol or position.total_pos <= 0:
+                continue
+
+            cmds: list[OrderCmd] = []
+            if position.pos_long > 0:
+                cmds.append(
+                    OrderCmd(
+                        symbol=symbol,
+                        offset=Offset.CLOSE,
+                        direction=Direction.SELL,
+                        volume=position.pos_long,
+                        price=0,
+                    )
+                )
+            if position.pos_short > 0:
+                cmds.append(
+                    OrderCmd(
+                        symbol=symbol,
+                        offset=Offset.CLOSE,
+                        direction=Direction.BUY,
+                        volume=position.pos_short,
+                        price=0,
+                    )
+                )
+            if cmds:
+                logger.info(
+                    f"策略 [{self.strategy_id}] 平遗留持仓 {symbol} "
+                    f"(多{position.pos_long}/空{position.pos_short})，"
+                    f"与配置合约 {self.symbol} 不一致"
+                )
+                await self.send_order_cmds(cmds)
+                return
 
     async def _handle_normal_close(self, signal: Signal) -> None:
         """正常模式平仓处理"""

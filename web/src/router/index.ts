@@ -39,6 +39,13 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/Strategy.vue'),
     meta: { title: '策略', showAccountInfo: true }
   },
+  // 一级菜单：行情
+  {
+    path: '/market',
+    name: 'Market',
+    component: () => import('@/views/Market.vue'),
+    meta: { title: '行情' }
+  },
   // 一级菜单：监控
   {
     path: '/alarms',
@@ -117,6 +124,10 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/admin/alarms',
     redirect: '/alarms'
+  },
+  {
+    path: '/bars',
+    redirect: '/market'
   }
 ]
 

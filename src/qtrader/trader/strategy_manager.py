@@ -9,6 +9,7 @@ import os
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Optional
 
+import pandas as pd
 from cachetools import TTLCache
 
 from qtrader.app_context import get_app_context
@@ -26,10 +27,9 @@ from qtrader.trader.dao.position_dao import StrategyPositionService
 from qtrader.trader.order_cmd import OrderCmd
 from qtrader.trader.strategy.base_strategy import BaseStrategy
 from qtrader.trader.trading_engine import TradingEngine
+from qtrader.utils.async_event_engine import AsyncEventEngine, EventTypes
 from qtrader.utils.bar_generator import MultiSymbolBarGenerator, parse_interval
 from qtrader.utils.config_loader import StrategyConfig, get_config_loader
-from qtrader.utils.async_event_engine import AsyncEventEngine
-from qtrader.utils.async_event_engine import EventTypes
 from qtrader.utils.logger import get_logger
 
 ctx = get_app_context()
@@ -135,7 +135,7 @@ class StrategyManager:
         try:
             self.event_engine = ctx.get_event_engine()
             # 加载并实例化策略
-            self._load_strategies()
+            await self._load_strategies()
             # 注册事件到 AsyncEventEngine
             self._register_events()
             # 启动所有策略
@@ -148,7 +148,7 @@ class StrategyManager:
             logger.exception(f"策略管理器初始化失败: {e}")
             return False
 
-    def _load_strategies(self) -> None:
+    async def _load_strategies(self) -> None:
         """从配置加载并实例化策略"""
         from qtrader.trader.strategy import get_strategy_class
 
@@ -171,7 +171,7 @@ class StrategyManager:
                 self.strategies[name] = strategy
 
                 # 初始化策略
-                self.init_strategy(strategy)
+                await self.init_strategy(strategy)
 
                 # 从数据库加载策略持仓
                 positions = self._position_service.load_positions(account_id, name)
@@ -189,12 +189,12 @@ class StrategyManager:
             except Exception as e:
                 logger.exception(f"创建策略 {name} 失败: {e}", exc_info=True)
 
-    def init_strategy(self, strategy: BaseStrategy) -> None:
+    async def init_strategy(self, strategy: BaseStrategy) -> None:
         """初始化策略"""
         if strategy:
             # 重新加载参数
             load_strategy_params(strategy.config, strategy.strategy_id)
-            strategy.init(self.trading_engine.trading_day)
+            await strategy.init(self.trading_engine.trading_day)
 
     def _get_account_id(self) -> str | None:
         """获取当前账户ID"""
@@ -313,11 +313,11 @@ class StrategyManager:
             self.trading_engine.subscribe_bars(symbol, interval)
         return True
 
-    def reset_strategies(self) -> None:
+    async def reset_strategies(self) -> None:
         """重置所有策略状态"""
         trading_day = self.trading_engine.trading_day
         for strategy in self.strategies.values():
-            self.init_strategy(strategy)
+            await self.init_strategy(strategy)
 
     def settle_positions(self) -> None:
         """结算所有持仓"""
@@ -576,7 +576,7 @@ class StrategyManager:
             # 1. 暂停策略
             strategy.enable(False)
             # 2. 执行策略初始化方法
-            strategy.init(trading_date)
+            await strategy.init(trading_date)
             logger.info(f"策略 [{strategy_id}] 初始化完成")
 
             # 3. 从网关获取kline
@@ -586,7 +586,7 @@ class StrategyManager:
                 return False
 
             symbol, interval = strategy.bar_subscriptions[0].split("-")
-            trading_bars = self.load_hist_bars(
+            trading_bars = await self.load_hist_bars(
                 symbol, interval, trading_date, trading_date + timedelta(days=1)
             )
             # 4. 循环调用on_bar()
@@ -624,8 +624,7 @@ class StrategyManager:
 
         gateway = self.trading_engine.gateway
         if not hasattr(gateway, "_klines"):
-            logger.error("网关不支持获取K线数据")
-            return {"success": False, "message": "网关不支持K线数据", "replayed_count": 0}
+            logger.info(f"网关无内存K线（{type(gateway).__name__}），回播使用数据库K线数据")
 
         # 1. 暂停交易
         self.trading_engine.pause()
@@ -648,35 +647,97 @@ class StrategyManager:
             logger.exception(f"回播所有策略失败: {e}")
             return {"success": False, "message": f"回播失败: {str(e)}", "replayed_count": 0}
 
-    def load_hist_bars(self, symbol, interval, start: datetime, end: datetime) -> list[BarData]:
-        # 通过网关获取K线数据
-        kline_df = self.trading_engine.get_kline(symbol, interval)
-        if kline_df is None:
-            logger.warning(f"未找到 {symbol} {interval} 的历史K线数据")
-            return []
+    async def load_hist_bars(
+        self, symbol, interval, start: datetime, end: datetime
+    ) -> list[BarData]:
+        """
+        加载历史K线数据（异步，DB查询在线程池执行避免阻塞事件循环）
 
-        # 筛选当前交易日的bar (K线时间戳是纳秒级)
-        trading_bars = []
-        for _, row in kline_df.iterrows():
-            bar_datetime = row["datetime"]
-            if bar_datetime >= start and bar_datetime <= end:
-                bar = BarData(
+        数据来源（按优先级合并，时间去重）：
+        1. bars_history 历史表（Manager盘后通过米筐统一更新）
+        2. 网关内存K线（TQ含官方历史+当日；CTP仅启动后合成的当日bar）
+        3. bars_today 当日表（各Trader盘中实时写入，兜底补缺）
+
+        Args:
+            symbol: 合约代码
+            interval: K线周期
+            start: 起始时间（含）
+            end: 结束时间（含）
+
+        Returns:
+            按时间升序的BarData列表
+        """
+        from qtrader.trader.dao.bar_dao import BarDao
+
+        bars: dict[datetime, BarData] = {}
+
+        # 1. 历史表
+        try:
+            history_pos = await asyncio.to_thread(
+                BarDao().query_history_bars, symbol, interval, start, end
+            )
+            for po in history_pos:
+                bars[po.bar_time] = BarData(
                     symbol=symbol,
                     interval=interval,
-                    datetime=bar_datetime,
-                    open_price=float(row["open"]),
-                    high_price=float(row["high"]),
-                    low_price=float(row["low"]),
-                    close_price=float(row["close"]),
-                    volume=float(row["volume"]),
+                    datetime=po.bar_time,
+                    open_price=float(po.open_price),
+                    high_price=float(po.high_price),
+                    low_price=float(po.low_price),
+                    close_price=float(po.close_price),
+                    volume=float(po.volume or 0),
                     type="history",
-                    update_time=bar_datetime + timedelta(minutes=1),
+                    update_time=po.bar_time + timedelta(minutes=1),
                 )
-                trading_bars.append(bar)
-        if not trading_bars:
-            logger.warning(f"未找到 {symbol} {interval} 从 {start} 开始的K线数据")
+        except Exception as e:
+            logger.exception(f"查询历史K线表失败: {symbol} {interval}: {e}")
+
+        # 2. 网关内存K线（覆盖写入，内存数据最新）
+        kline_df = self.trading_engine.get_kline(symbol, interval)
+        if kline_df is not None:
+            for _, row in kline_df.iterrows():
+                bar_datetime = row["datetime"]
+                # 统一转换为datetime，避免Timestamp与datetime混合导致去重失效
+                if isinstance(bar_datetime, pd.Timestamp):
+                    bar_datetime = bar_datetime.to_pydatetime()
+                if start <= bar_datetime <= end:
+                    bars[bar_datetime] = BarData(
+                        symbol=symbol,
+                        interval=interval,
+                        datetime=bar_datetime,
+                        open_price=float(row["open"]),
+                        high_price=float(row["high"]),
+                        low_price=float(row["low"]),
+                        close_price=float(row["close"]),
+                        volume=float(row["volume"]),
+                        type="history",
+                        update_time=bar_datetime + timedelta(minutes=1),
+                    )
+
+        # 3. 当日表兜底补缺（仅补内存和历史表都没有的时间点）
+        try:
+            today_pos = await asyncio.to_thread(
+                BarDao().query_today_bars, symbol, interval, start, end
+            )
+            for po in today_pos:
+                if po.bar_time not in bars:
+                    bars[po.bar_time] = BarData(
+                        symbol=symbol,
+                        interval=interval,
+                        datetime=po.bar_time,
+                        open_price=float(po.open_price),
+                        high_price=float(po.high_price),
+                        low_price=float(po.low_price),
+                        close_price=float(po.close_price),
+                        volume=float(po.volume or 0),
+                        type="history",
+                        update_time=po.bar_time + timedelta(minutes=1),
+                    )
+        except Exception as e:
+            logger.exception(f"查询当日K线表失败: {symbol} {interval}: {e}")
+
+        if not bars:
+            logger.warning(f"未找到 {symbol} {interval} 从 {start} 到 {end} 的K线数据")
             return []
 
-        # 按时间排序
-        trading_bars.sort(key=lambda x: x.datetime)
-        return trading_bars
+        return [bars[t] for t in sorted(bars.keys())]

@@ -425,3 +425,77 @@ class PositionHistoryPo(Base):
 
     def __repr__(self):
         return f"<PositionHistoryPo(account_id={self.account_id}, settle_date={self.settle_date}, symbol={self.symbol}, long={self.pos_long}, short={self.pos_short})>"
+
+
+class BarHistoryPo(Base):
+    """历史K线数据表（Manager盘后统一更新）"""
+
+    __tablename__ = "bars_history"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    symbol = Column(String(50), nullable=False)  # 合约代码（如IM2609）
+    interval = Column(String(10), nullable=False)  # K线周期（如M1）
+    bar_time = Column(DateTime, nullable=False)  # bar开始时间
+    trading_day = Column(Date, nullable=False, index=True)  # 交易日
+
+    open_price = Column(Numeric(20, 4), nullable=False)
+    high_price = Column(Numeric(20, 4), nullable=False)
+    low_price = Column(Numeric(20, 4), nullable=False)
+    close_price = Column(Numeric(20, 4), nullable=False)
+    volume = Column(Numeric(20, 2), default=0)
+    turnover = Column(Numeric(24, 2), default=0)
+    open_interest = Column(Numeric(20, 2), default=0)
+
+    source = Column(String(20), default="")  # 数据来源（rq/tq）
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "symbol", "interval", "bar_time", name="uq_bars_history_symbol_interval_time"
+        ),
+    )
+
+    def __repr__(self):
+        return (
+            f"<BarHistoryPo(symbol={self.symbol}, interval={self.interval}, "
+            f"bar_time={self.bar_time}, close={self.close_price})>"
+        )
+
+
+class BarTodayPo(Base):
+    """当日K线数据表（各Trader盘中实时写入，多账户并存）"""
+
+    __tablename__ = "bars_today"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    symbol = Column(String(50), nullable=False)
+    interval = Column(String(10), nullable=False)
+    bar_time = Column(DateTime, nullable=False)  # bar开始时间
+    trading_day = Column(Date, nullable=False, index=True)  # 交易日
+    account_id = Column(String(50), nullable=False, index=True)  # 写入账户
+
+    open_price = Column(Numeric(20, 4), nullable=False)
+    high_price = Column(Numeric(20, 4), nullable=False)
+    low_price = Column(Numeric(20, 4), nullable=False)
+    close_price = Column(Numeric(20, 4), nullable=False)
+    volume = Column(Numeric(20, 2), default=0)
+    turnover = Column(Numeric(24, 2), default=0)
+    open_interest = Column(Numeric(20, 2), default=0)
+
+    created_at = Column(DateTime, default=datetime.now)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "symbol",
+            "interval",
+            "bar_time",
+            "account_id",
+            name="uq_bars_today_symbol_interval_time_account",
+        ),
+    )
+
+    def __repr__(self):
+        return (
+            f"<BarTodayPo(symbol={self.symbol}, interval={self.interval}, "
+            f"bar_time={self.bar_time}, account={self.account_id}, close={self.close_price})>"
+        )

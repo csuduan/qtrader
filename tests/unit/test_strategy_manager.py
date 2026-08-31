@@ -5,32 +5,31 @@ StrategyManager 单元测试
 
 import csv
 import os
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict
-from unittest.mock import AsyncMock, MagicMock, Mock, patch, mock_open
-from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, Mock, mock_open, patch
 
 import pytest
 
-from qtrader.trader.strategy_manager import (
-    StrategyManager,
-    load_csv_file,
-    load_strategy_params,
-    _csv_cache,
-)
 from qtrader.models.object import (
+    BarData,
     Direction,
+    Exchange,
+    Interval,
     Offset,
     OrderData,
-    TradeData,
     TickData,
-    BarData,
-    Interval,
-    Exchange,
+    TradeData,
+)
+from qtrader.trader.strategy_manager import (
+    StrategyManager,
+    _csv_cache,
+    load_csv_file,
+    load_strategy_params,
 )
 from qtrader.utils.async_event_engine import AsyncEventEngine, EventTypes
-
 
 # ==================== Fixtures ====================
 
@@ -83,7 +82,7 @@ def mock_strategy():
     strategy.strategy_id = "test_strategy"
     strategy.active = False
     strategy.config = {"enabled": True, "symbol": "SHFE.rb2505"}
-    strategy.init = MagicMock()
+    strategy.init = AsyncMock()
     strategy.start = MagicMock(return_value=True)
     strategy.stop = MagicMock(return_value=True)
     strategy.reset_for_new_day = MagicMock()
@@ -209,10 +208,16 @@ class TestLoadStrategyParams:
         # Clear cache to ensure we're testing the actual load
         _csv_cache.clear()
 
-        yaml_config = {"enabled": True, "symbol": "SHFE.rb2505", "params_file": "test_params.csv", "volume": "1"}
+        yaml_config = {
+            "enabled": True,
+            "symbol": "SHFE.rb2505",
+            "params_file": "test_params.csv",
+            "volume": "1",
+        }
 
         # Create a proper mock that has the paths attribute
         from types import SimpleNamespace
+
         mock_paths = SimpleNamespace(params=str(tmp_path))
         mock_config = SimpleNamespace(paths=mock_paths)
         mock_context = MagicMock()
@@ -266,10 +271,12 @@ class TestStrategyManagerStartMethod:
     @pytest.mark.asyncio
     async def test_start_success(self, strategy_manager, mock_event_engine):
         """测试成功启动"""
-        with patch("src.trader.strategy_manager.ctx") as mock_ctx, \
-             patch.object(strategy_manager, "_load_strategies"), \
-             patch.object(strategy_manager, "_register_events"), \
-             patch.object(strategy_manager, "start_all"):
+        with (
+            patch("src.trader.strategy_manager.ctx") as mock_ctx,
+            patch.object(strategy_manager, "_load_strategies"),
+            patch.object(strategy_manager, "_register_events"),
+            patch.object(strategy_manager, "start_all"),
+        ):
             mock_ctx.get_event_engine.return_value = mock_event_engine
 
             result = await strategy_manager.start()
@@ -284,29 +291,32 @@ class TestStrategyManagerStartMethod:
 class TestStrategyManagerLoadStrategies:
     """测试 _load_strategies 方法"""
 
-    def test_load_strategies_disabled(self, strategy_manager):
+    @pytest.mark.asyncio
+    async def test_load_strategies_disabled(self, strategy_manager):
         """测试跳过禁用的策略"""
         strategy_manager.strategies_config.strategies = {
             "disabled_strat": {"enabled": False, "type": "rsi_strategy"}
         }
 
         with patch("src.trader.strategy.get_strategy_class", return_value=None):
-            strategy_manager._load_strategies()
+            await strategy_manager._load_strategies()
 
             assert "disabled_strat" not in strategy_manager.strategies
 
-    def test_load_strategies_no_strategy_class(self, strategy_manager):
+    @pytest.mark.asyncio
+    async def test_load_strategies_no_strategy_class(self, strategy_manager):
         """测试策略类不存在"""
         strategy_manager.strategies_config.strategies = {
             "test_strat": {"enabled": True, "type": "nonexistent_strategy"}
         }
 
         with patch("src.trader.strategy.get_strategy_class", return_value=None):
-            strategy_manager._load_strategies()
+            await strategy_manager._load_strategies()
 
             assert "test_strat" not in strategy_manager.strategies
 
-    def test_load_strategies_success(self, strategy_manager, mock_strategy):
+    @pytest.mark.asyncio
+    async def test_load_strategies_success(self, strategy_manager, mock_strategy):
         """测试成功加载策略"""
         strategy_manager.strategies_config.strategies = {
             "test_strat": {"enabled": True, "type": "rsi_strategy", "symbol": "SHFE.rb2505"}
@@ -315,13 +325,16 @@ class TestStrategyManagerLoadStrategies:
         mock_class = MagicMock(return_value=mock_strategy)
         mock_strategy.strategy_id = "test_strat"
 
-        with patch("src.trader.strategy.get_strategy_class", return_value=mock_class), \
-             patch.object(strategy_manager, "subscribe_symbol"):
-            strategy_manager._load_strategies()
+        with (
+            patch("src.trader.strategy.get_strategy_class", return_value=mock_class),
+            patch.object(strategy_manager, "subscribe_symbol"),
+        ):
+            await strategy_manager._load_strategies()
 
             assert "test_strat" in strategy_manager.strategies
 
-    def test_load_strategies_exception(self, strategy_manager):
+    @pytest.mark.asyncio
+    async def test_load_strategies_exception(self, strategy_manager):
         """测试策略创建异常"""
         strategy_manager.strategies_config.strategies = {
             "test_strat": {"enabled": True, "type": "rsi_strategy"}
@@ -334,7 +347,7 @@ class TestStrategyManagerLoadStrategies:
 
         with patch("src.trader.strategy.get_strategy_class", return_value=mock_class):
             # Should not raise exception
-            strategy_manager._load_strategies()
+            await strategy_manager._load_strategies()
 
 
 # ==================== Test Register Events ====================
@@ -381,7 +394,7 @@ class TestStrategyManagerDispatchEvent:
             symbol="SHFE.rb2505",
             exchange=Exchange.SHFE,
             datetime=datetime.now(),
-            last_price=Decimal("3500")
+            last_price=Decimal("3500"),
         )
 
         strategy_manager._dispatch_event("on_tick", tick_data)
@@ -407,7 +420,7 @@ class TestStrategyManagerDispatchEvent:
             price=Decimal("3500"),
             traded=0,
             status="ACTIVE",
-            account_id="test_account"
+            account_id="test_account",
         )
 
         strategy_manager._dispatch_event("on_order", order_data)
@@ -446,7 +459,7 @@ class TestStrategyManagerDispatchEvent:
             offset=Offset.OPEN,
             volume=1,
             price=Decimal("3500"),
-            account_id="test_account"
+            account_id="test_account",
         )
 
         strategy_manager._dispatch_event("on_trade", trade_data)
@@ -465,7 +478,7 @@ class TestStrategyManagerDispatchEvent:
             symbol="SHFE.rb2505",
             exchange=Exchange.SHFE,
             datetime=datetime.now(),
-            last_price=Decimal("3500")
+            last_price=Decimal("3500"),
         )
 
         # Should not raise exception
@@ -523,7 +536,7 @@ class TestStrategyManagerStartStopAll:
         strategy_manager.strategies = {"strat1": strat1, "strat2": strat2}
         strategy_manager.strategies_config.strategies = {
             "strat1": {"enabled": True},
-            "strat2": {"enabled": False}
+            "strat2": {"enabled": False},
         }
 
         strategy_manager.start_all()
@@ -665,11 +678,7 @@ class TestStrategyManagerTrading:
         strategy_manager.trading_engine = mock_trading_engine
 
         result = strategy_manager.open(
-            strategy_id="test_strat",
-            symbol="SHFE.rb2505",
-            direction="BUY",
-            volume=1,
-            price=None
+            strategy_id="test_strat", symbol="SHFE.rb2505", direction="BUY", volume=1, price=None
         )
 
         assert result == "order_123"
@@ -799,7 +808,7 @@ class TestStrategyManagerEdgeCases:
             price=Decimal("3500"),
             traded=0,
             status="ACTIVE",
-            account_id="test_account"
+            account_id="test_account",
         )
 
         # Should not crash
@@ -819,7 +828,7 @@ class TestStrategyManagerEdgeCases:
             price=Decimal("3500"),
             traded=0,
             status="ACTIVE",
-            account_id="test_account"
+            account_id="test_account",
         )
 
         # Should not crash

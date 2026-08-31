@@ -37,6 +37,12 @@
           <span>策略</span>
         </el-menu-item>
 
+        <!-- 一级菜单：行情 -->
+        <el-menu-item index="/market">
+          <el-icon><DataAnalysis /></el-icon>
+          <span>行情</span>
+        </el-menu-item>
+
         <!-- 一级菜单：监控 -->
         <el-menu-item index="/alarms">
           <el-icon><Odometer /></el-icon>
@@ -122,6 +128,11 @@
         <el-menu-item index="/strategy">
           <el-icon><TrendCharts /></el-icon>
           <span>策略</span>
+        </el-menu-item>
+
+        <el-menu-item index="/market">
+          <el-icon><DataAnalysis /></el-icon>
+          <span>行情</span>
         </el-menu-item>
 
         <el-menu-item index="/alarms">

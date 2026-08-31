@@ -310,6 +310,19 @@ class SwitchPosManager:
             if not csv_files:
                 return
 
+            # 文件时间戳与系统时间偏差的绝对值不超过10秒时跳过，
+            # 避免导入未写完的文件（未来值一般是时区/时钟偏差，偏差大于10秒直接放行）
+            now_ts = time.time()
+            stable_files = []
+            for f in csv_files:
+                if abs(now_ts - f.stat().st_mtime) <= 10:
+                    logger.debug(f"文件 {f.name} 时间戳与系统时间偏差不足10秒，跳过本次扫描")
+                    continue
+                stable_files.append(f)
+            csv_files = stable_files
+            if not csv_files:
+                return
+
             csv_files = sorted(
                 csv_files, key=lambda f: f.stat().st_mtime if f.is_file() else 0, reverse=True
             )
