@@ -3,6 +3,7 @@
 实现交易风险控制功能
 """
 
+import threading
 from datetime import datetime, time
 
 from qtrader.utils.config_loader import RiskControlConfig
@@ -27,6 +28,8 @@ class RiskControl:
         self.daily_order_count = 0
         self.daily_cancel_count = 0
         self._last_reset_date: datetime | None = None
+        # 计数器延迟保存定时器（合并高频写入，避免每次下单/撤单都同步写库）
+        self._save_timer: threading.Timer | None = None
 
         # 从数据库加载当日计数（如果配置了账户ID）
         if account_id:
@@ -80,6 +83,19 @@ class RiskControl:
             self.daily_order_count = 0
             self.daily_cancel_count = 0
             self._last_reset_date = None
+
+    # 计数器延迟保存间隔（秒）
+    _SAVE_DELAY = 5.0
+
+    def _schedule_save_counters(self) -> None:
+        """延迟保存计数器：5秒内的连续变更合并为一次写库，避免下单热路径同步IO"""
+        if not self.account_id:
+            return
+        if self._save_timer and self._save_timer.is_alive():
+            return
+        self._save_timer = threading.Timer(self._SAVE_DELAY, self._save_counters)
+        self._save_timer.daemon = True
+        self._save_timer.start()
 
     def _save_counters(self) -> None:
         """保存计数器到数据库"""
@@ -180,15 +196,13 @@ class RiskControl:
         """报单成功后的回调"""
         self.daily_order_count += 1
         logger.debug(f"报单计数更新: {self.daily_order_count}/{self.config.max_daily_orders}")
-        if self.account_id:
-            self._save_counters()
+        self._schedule_save_counters()
 
     def on_order_cancelled(self) -> None:
         """撤单成功后的回调"""
         self.daily_cancel_count += 1
         logger.debug(f"撤单计数更新: {self.daily_cancel_count}/{self.config.max_daily_cancels}")
-        if self.account_id:
-            self._save_counters()
+        self._schedule_save_counters()
 
     def get_status(self) -> dict:
         """

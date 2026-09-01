@@ -57,6 +57,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import type { Trade } from '@/types'
+import { getTradeNaturalTime } from '@/utils/dateTime'
 
 const props = defineProps<{
   loading: boolean
@@ -88,24 +89,12 @@ onUnmounted(() => {
   window.removeEventListener('resize', updateIsMobile)
 })
 
-// 按时间倒序排序的成交记录
+// 按成交的自然时间倒序排序（夜盘成交按实际发生时间排，而非交易日时间）
 const sortedTrades = computed(() => {
   if (!props.trades || props.trades.length === 0) return []
-  return [...props.trades].sort((a, b) => {
-    let timeA = 0
-    let timeB = 0
-    if (typeof a.trade_date_time === 'number') {
-      timeA = a.trade_date_time
-    } else if (typeof a.trade_date_time === 'string') {
-      timeA = new Date(a.trade_date_time).getTime() / 1000
-    }
-    if (typeof b.trade_date_time === 'number') {
-      timeB = b.trade_date_time
-    } else if (typeof b.trade_date_time === 'string') {
-      timeB = new Date(b.trade_date_time).getTime() / 1000
-    }
-    return timeB - timeA
-  })
+  return [...props.trades].sort(
+    (a, b) => getTradeNaturalTime(b.trade_date_time) - getTradeNaturalTime(a.trade_date_time)
+  )
 })
 
 function formatNumber(num: number | null | undefined): string {

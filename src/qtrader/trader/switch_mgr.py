@@ -450,7 +450,7 @@ class SwitchPosManager:
         except Exception as e:
             logger.exception(f"换仓执行时出错: {e}")
         finally:
-            self._update_instructions(todo_instructions)
+            await asyncio.to_thread(self._update_instructions, todo_instructions)
             self.working = False
             logger.info("换仓任务结束")
 
@@ -530,8 +530,8 @@ class SwitchPosManager:
                         instruction.error_message = finish_reason
                     instruction.current_order_id = None
 
-            # 每次循环都更新数据库，确保前端能实时看到进度
-            self._update_instructions(active_instructions)
+            # 每次循环都更新数据库，确保前端能实时看到进度（放到线程执行，避免阻塞事件循环）
+            await asyncio.to_thread(self._update_instructions, active_instructions)
 
             # 检查是否全部完成
             if all_finished:

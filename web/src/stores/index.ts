@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import type { Account, Position, Trade, Order, SystemStatus, Quote } from '@/types'
 import { accountApi, positionApi, tradeApi, orderApi } from '@/api'
 import wsManager from '@/ws'
+import { getTradeNaturalTime } from '@/utils/dateTime'
 
 export const useStore = defineStore('main', () => {
   // 账户信息
@@ -66,17 +67,10 @@ export const useStore = defineStore('main', () => {
     if (selectedAccountId.value) {
       filtered = trades.value.filter(trade => trade.account_id === selectedAccountId.value)
     }
-    // 按成交时间倒序排列（最新的在前面）
-    // trade_date_time 可能是 number（时间戳）或 string（ISO 格式）
-    return [...filtered].sort((a, b) => {
-      const timeA = typeof a.trade_date_time === 'number'
-        ? a.trade_date_time
-        : new Date(a.trade_date_time).getTime()
-      const timeB = typeof b.trade_date_time === 'number'
-        ? b.trade_date_time
-        : new Date(b.trade_date_time).getTime()
-      return timeB - timeA
-    })
+    // 按成交的自然时间倒序排列（夜盘成交按实际发生时间排，而非交易日时间）
+    return [...filtered].sort(
+      (a, b) => getTradeNaturalTime(b.trade_date_time) - getTradeNaturalTime(a.trade_date_time)
+    )
   })
 
   // 当前账户的订单

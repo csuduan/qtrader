@@ -2,7 +2,7 @@
   <div class="account-combined">
     <el-tabs v-model="activeTab" class="account-tabs">
       <!-- 账户详情 Tab -->
-      <el-tab-pane label="账户详情" name="detail">
+      <el-tab-pane label="账户详情" name="detail" lazy>
         <AccountDetailTab
           :loading="loading"
           @refresh="loadAccountData"
@@ -12,7 +12,7 @@
       </el-tab-pane>
 
       <!-- 交易 Tab -->
-      <el-tab-pane label="账户交易" name="trading">
+      <el-tab-pane label="账户交易" name="trading" lazy>
         <AccountTradingTab
           :loading="loading"
           :quotes="quotes"
@@ -28,7 +28,7 @@
       </el-tab-pane>
 
       <!-- 成交记录 Tab -->
-      <el-tab-pane label="成交记录" name="trade">
+      <el-tab-pane label="成交记录" name="trade" lazy>
         <AccountTradeTab
           :loading="loading"
           :trades="store.currentTrades"
@@ -38,7 +38,7 @@
       </el-tab-pane>
 
       <!-- 报单指令 Tab -->
-      <el-tab-pane label="报单指令" name="order-cmd">
+      <el-tab-pane label="报单指令" name="order-cmd" lazy>
         <AccountOrderCmdTab
           :loading="loading"
           :order-cmds="orderCmds"
@@ -50,7 +50,7 @@
       </el-tab-pane>
 
       <!-- 合约信息 Tab -->
-      <el-tab-pane label="合约信息" name="contract">
+      <el-tab-pane label="合约信息" name="contract" lazy>
         <AccountContractTab
           :loading="loading"
           :contracts="contracts"
@@ -63,7 +63,7 @@
       </el-tab-pane>
 
       <!-- 设置 Tab -->
-      <el-tab-pane label="账户设置" name="setting">
+      <el-tab-pane label="账户设置" name="setting" lazy>
         <AccountSettingTab
           :loading-tasks="loadingTasks"
           :operating-job="operatingJob"

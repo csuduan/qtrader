@@ -400,8 +400,8 @@ class Trader:
     async def _on_order_update(self, data):
         """订单更新事件处理器 - 写入PG后直接广播完整数据"""
         try:
-            # 1. 先写入PG
-            self._persist_order(data)
+            # 1. 先写入PG（放到线程执行，避免阻塞事件循环）
+            await asyncio.to_thread(self._persist_order, data)
 
             # 2. 广播完整订单数据给Manager
             if self.socket_server:
@@ -414,8 +414,8 @@ class Trader:
     async def _on_trade_update(self, data):
         """成交更新事件处理器 - 写入PG后直接广播完整数据"""
         try:
-            # 1. 先写入PG
-            self._persist_trade(data)
+            # 1. 先写入PG（放到线程执行，避免阻塞事件循环）
+            await asyncio.to_thread(self._persist_trade, data)
 
             # 2. 广播完整成交数据给Manager
             if self.socket_server:
@@ -772,37 +772,50 @@ class Trader:
                 logger.exception(f"定时持久化任务出错: {e}")
 
     async def _batch_persist(self) -> None:
-        """批量持久化到PG"""
+        """批量持久化到PG（DB写入放到线程执行，避免阻塞事件循环）"""
         if not self._cached_account and not self._pending_positions:
             return
 
+        # 快照待写入数据
+        account_data = self._cached_account
+        positions = dict(self._pending_positions)
+
+        success = await asyncio.to_thread(self._do_batch_persist, account_data, positions)
+        if not success:
+            return
+
+        # 仅清除已写入且未被后续更新覆盖的缓存
+        if account_data is not None and self._cached_account is account_data:
+            self._cached_account = None
+        for symbol, data in positions.items():
+            if self._pending_positions.get(symbol) is data:
+                del self._pending_positions[symbol]
+
+    def _do_batch_persist(self, account_data: dict | None, positions: dict) -> bool:
+        """执行批量持久化（在线程中运行），返回是否成功"""
         try:
             from qtrader.utils.database import get_database
 
             db = get_database()
             if not db:
-                return
+                return False
 
             with db.get_session() as session:
                 # 批量写入账户
-                if self._cached_account:
-                    self._do_persist_account(session, self.account_id, self._cached_account)
+                if account_data:
+                    self._do_persist_account(session, self.account_id, account_data)
 
                 # 批量写入持仓
-                for symbol, data in self._pending_positions.items():
+                for symbol, data in positions.items():
                     self._do_persist_position(session, self.account_id, symbol, data)
 
                 session.commit()
 
-            # 清空待写入队列
-            count_accounts = 1
-            count_positions = len(self._pending_positions)
-            self._cached_account = None
-            self._pending_positions.clear()
-
-            logger.debug(f"批量持久化完成: {count_accounts} 账户, {count_positions} 持仓")
+            logger.debug(f"批量持久化完成: {1 if account_data else 0} 账户, {len(positions)} 持仓")
+            return True
         except Exception as e:
             logger.exception(f"批量持久化失败: {e}")
+            return False
 
     def _do_persist_account(self, session, account_id: str, data: dict) -> None:
         """执行账户数据持久化（内部方法）"""

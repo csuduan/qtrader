@@ -6,14 +6,14 @@ Manager 是共享数据库（qtrader.db）的唯一写入者。
 所有 Trader 的数据通过 IPC 推送到 Manager，再由此模块持久化。
 """
 
+import asyncio
 from datetime import datetime
 from decimal import Decimal
 
 from qtrader.app_context import get_app_context as ctx
 from qtrader.models.po import AccountPo, PositionPo, TradePo
-from qtrader.utils.async_event_engine import AsyncEventEngine
+from qtrader.utils.async_event_engine import AsyncEventEngine, EventTypes
 from qtrader.utils.database import get_database
-from qtrader.utils.async_event_engine import EventTypes
 from qtrader.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -53,8 +53,12 @@ class ManagerPersistence:
         self._handlers_registered = False
         logger.info("Manager 持久化服务已停止")
 
-    def _handle_account(self, data: dict) -> None:
-        """处理账户更新事件，upsert 到共享库"""
+    async def _handle_account(self, data: dict) -> None:
+        """处理账户更新事件，upsert 到共享库（DB写入放到线程，避免阻塞事件循环）"""
+        await asyncio.to_thread(self._save_account, data)
+
+    def _save_account(self, data: dict) -> None:
+        """账户数据写入共享库（在线程中运行）"""
         account_id = data.get("account_id")
         if not account_id:
             return
@@ -83,8 +87,12 @@ class ManagerPersistence:
         except Exception as e:
             logger.exception(f"持久化账户信息时出错: {e}")
 
-    def _handle_position(self, data: dict) -> None:
-        """处理持仓更新事件，upsert 到共享库"""
+    async def _handle_position(self, data: dict) -> None:
+        """处理持仓更新事件，upsert 到共享库（DB写入放到线程，避免阻塞事件循环）"""
+        await asyncio.to_thread(self._save_position, data)
+
+    def _save_position(self, data: dict) -> None:
+        """持仓数据写入共享库（在线程中运行）"""
         account_id = data.get("account_id") or data.get("extras", {}).get("account_id")
         symbol = data.get("symbol")
         if not account_id or not symbol:
@@ -148,8 +156,12 @@ class ManagerPersistence:
         except Exception as e:
             logger.exception(f"持久化持仓信息时出错: {e}")
 
-    def _handle_trade(self, data: dict) -> None:
-        """处理成交通知事件，insert 到共享库"""
+    async def _handle_trade(self, data: dict) -> None:
+        """处理成交通知事件，insert 到共享库（DB写入放到线程，避免阻塞事件循环）"""
+        await asyncio.to_thread(self._save_trade, data)
+
+    def _save_trade(self, data: dict) -> None:
+        """成交数据写入共享库（在线程中运行）"""
         trade_id = data.get("trade_id")
         if not trade_id:
             return

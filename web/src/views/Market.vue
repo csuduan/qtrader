@@ -54,7 +54,7 @@
         </el-tab-pane>
 
         <!-- Tick -->
-        <el-tab-pane label="Tick" name="tick">
+        <el-tab-pane label="Tick" name="tick" lazy>
           <el-table :data="quoteList" stripe size="small" max-height="560" v-loading="false">
             <el-table-column prop="symbol" label="合约代码" width="120" sortable />
             <el-table-column label="最新价" align="right" width="110">
