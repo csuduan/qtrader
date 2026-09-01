@@ -611,9 +611,7 @@ class Trader:
                 )
                 order_po.status = data.status if hasattr(data, "status") else ""
                 order_po.price_type = data.price_type if hasattr(data, "price_type") else "LIMIT"
-                order_po.exchange_order_id = (
-                    data.order_id if hasattr(data, "exchange_order_id") else None
-                )
+                order_po.exchange_order_id = data.order_sys_id if data.order_sys_id else None
                 order_po.status_msg = data.status_msg if hasattr(data, "status_msg") else None
                 order_po.update_date_time = (
                     data.update_time if hasattr(data, "update_time") else None
@@ -935,6 +933,11 @@ class Trader:
 
         # 关闭交易引擎
         if self.trading_engine:
+            # 风控计数器落库（取消延迟保存定时器，避免丢失最近的计数）
+            try:
+                await asyncio.to_thread(self.trading_engine.risk_control.flush_counters)
+            except Exception as e:
+                logger.warning(f"风控计数器落库失败: {e}")
             await self.trading_engine.close()
 
         # 停止Socket服务器

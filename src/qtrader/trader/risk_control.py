@@ -97,6 +97,13 @@ class RiskControl:
         self._save_timer.daemon = True
         self._save_timer.start()
 
+    def flush_counters(self) -> None:
+        """停止前落库：取消延迟保存定时器并立即写入计数器"""
+        if self._save_timer:
+            self._save_timer.cancel()
+            self._save_timer = None
+        self._save_counters()
+
     def _save_counters(self) -> None:
         """保存计数器到数据库"""
         if not self.account_id:
@@ -147,8 +154,7 @@ class RiskControl:
             self.daily_cancel_count = 0
             self._last_reset_date = now
             logger.info("新的一天，风控计数器已重置")
-            if self.account_id:
-                self._save_counters()
+            self._schedule_save_counters()
 
     def check_order(self, volume: int) -> bool:
         """

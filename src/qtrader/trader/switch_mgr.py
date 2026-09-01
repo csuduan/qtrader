@@ -450,7 +450,8 @@ class SwitchPosManager:
         except Exception as e:
             logger.exception(f"换仓执行时出错: {e}")
         finally:
-            await asyncio.to_thread(self._update_instructions, todo_instructions)
+            snapshots = [self._snapshot_instruction(inst) for inst in todo_instructions]
+            await asyncio.to_thread(self._update_instructions, snapshots)
             self.working = False
             logger.info("换仓任务结束")
 
@@ -530,8 +531,9 @@ class SwitchPosManager:
                         instruction.error_message = finish_reason
                     instruction.current_order_id = None
 
-            # 每次循环都更新数据库，确保前端能实时看到进度（放到线程执行，避免阻塞事件循环）
-            await asyncio.to_thread(self._update_instructions, active_instructions)
+            # 每次循环都更新数据库，确保前端能实时看到进度（快照后放到线程执行，避免阻塞事件循环）
+            snapshots = [self._snapshot_instruction(inst) for inst in active_instructions]
+            await asyncio.to_thread(self._update_instructions, snapshots)
 
             # 检查是否全部完成
             if all_finished:
@@ -543,20 +545,42 @@ class SwitchPosManager:
         # 清理已完成的OrderCmd
         # self.trading_engine.cleanup_finished_order_cmds()
 
-    def _update_instructions(self, instructions: list[RotationInstructionPo]) -> None:
+    @staticmethod
+    def _snapshot_instruction(instruction: RotationInstructionPo) -> dict:
         """
-        更新指令状态
+        提取指令待更新字段的快照
+
+        监控循环会持续改写 PO 对象，写库线程直接 merge PO 会并发读写同一对象，
+        先在事件循环线程中提取快照，写库线程只处理不可变数据。
+        """
+        return {
+            "id": instruction.id,
+            "status": instruction.status,
+            "filled_volume": instruction.filled_volume,
+            "remaining_volume": instruction.remaining_volume,
+            "error_message": instruction.error_message,
+            "current_order_id": instruction.current_order_id,
+            "order_placed_time": instruction.order_placed_time,
+            "updated_at": datetime.now(),
+        }
+
+    def _update_instructions(self, snapshots: list[dict]) -> None:
+        """
+        更新指令状态（接收 _snapshot_instruction 生成的快照，按 id 批量更新）
 
         Args:
-            instruction: 待更新的指令
+            snapshots: 指令字段快照列表
         """
-        if not instructions:
+        if not snapshots:
             return
 
         try:
             with session_scope() as session:
-                for instruction in instructions:
-                    session.merge(instruction)
+                for snap in snapshots:
+                    values = {k: v for k, v in snap.items() if k != "id"}
+                    session.query(RotationInstructionPo).filter(
+                        RotationInstructionPo.id == snap["id"]
+                    ).update(values, synchronize_session=False)
         except Exception as e:
             logger.error(f"更新指令状态时出错: {e}")
 

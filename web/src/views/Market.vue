@@ -53,25 +53,27 @@
           <div class="tab-footer">共 {{ contracts.length }} 个合约</div>
         </el-tab-pane>
 
-        <!-- Tick -->
-        <el-tab-pane label="Tick" name="tick" lazy>
-          <el-table :data="quoteList" stripe size="small" max-height="560" v-loading="false">
-            <el-table-column prop="symbol" label="合约代码" width="120" sortable />
-            <el-table-column label="最新价" align="right" width="110">
-              <template #default="{ row }">{{ formatPrice(row.last_price) }}</template>
-            </el-table-column>
-            <el-table-column label="买一价" align="right" width="110">
-              <template #default="{ row }">{{ formatPrice(row.bid_price1) }}</template>
-            </el-table-column>
-            <el-table-column label="卖一价" align="right" width="110">
-              <template #default="{ row }">{{ formatPrice(row.ask_price1) }}</template>
-            </el-table-column>
-            <el-table-column prop="volume" label="成交量" align="right" width="110" />
-            <el-table-column prop="datetime" label="时间" min-width="170">
-              <template #default="{ row }">{{ formatTime(row.datetime) }}</template>
-            </el-table-column>
-          </el-table>
-          <div class="tab-footer">共 {{ quoteList.length }} 个合约行情（WebSocket 实时推送）</div>
+        <!-- Tick（v-if 切走时卸载，避免高频行情驱动隐藏表格持续重渲染） -->
+        <el-tab-pane label="Tick" name="tick">
+          <template v-if="activeTab === 'tick'">
+            <el-table :data="quoteList" stripe size="small" max-height="560" v-loading="false">
+              <el-table-column prop="symbol" label="合约代码" width="120" sortable />
+              <el-table-column label="最新价" align="right" width="110">
+                <template #default="{ row }">{{ formatPrice(row.last_price) }}</template>
+              </el-table-column>
+              <el-table-column label="买一价" align="right" width="110">
+                <template #default="{ row }">{{ formatPrice(row.bid_price1) }}</template>
+              </el-table-column>
+              <el-table-column label="卖一价" align="right" width="110">
+                <template #default="{ row }">{{ formatPrice(row.ask_price1) }}</template>
+              </el-table-column>
+              <el-table-column prop="volume" label="成交量" align="right" width="110" />
+              <el-table-column prop="datetime" label="时间" min-width="170">
+                <template #default="{ row }">{{ formatTime(row.datetime) }}</template>
+              </el-table-column>
+            </el-table>
+            <div class="tab-footer">共 {{ quoteList.length }} 个合约行情（WebSocket 实时推送）</div>
+          </template>
         </el-tab-pane>
 
         <!-- K线 -->

@@ -1140,6 +1140,7 @@ class TraderReqHandler:
             "updated_at": (instruction.updated_at.isoformat() if instruction.updated_at else None),
         }
 
+    # 低频接口：手动UI操作触发，内部同步写库可接受，未做异步化
     @request("update_rotation_instruction")
     async def _req_update_rotation_instruction(self, data: dict) -> dict | None:
         """处理更新换仓指令请求"""
@@ -1150,6 +1151,7 @@ class TraderReqHandler:
         instruction = self.trader.switchPos_manager.update_instruction(data)
         return instruction
 
+    # 低频接口：手动UI操作触发，内部同步写库可接受，未做异步化
     @request("import_rotation_instructions")
     async def _req_import_rotation_instructions(self, data: dict) -> dict:
         """处理批量导入换仓指令请求"""
@@ -1186,6 +1188,7 @@ class TraderReqHandler:
         self.trader.switchPos_manager.stop_rotation()
         return True
 
+    # 低频接口：手动UI操作触发，内部同步写库可接受，未做异步化
     @request("batch_delete_instructions")
     async def _req_batch_delete_instructions(self, data: dict) -> dict:
         """处理批量删除换仓指令请求"""

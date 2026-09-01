@@ -20,7 +20,12 @@ export const useStore = defineStore('main', () => {
   const trades = ref<Trade[]>([])
 
   // 委托单
-  const orders = ref<Order[]>([])
+  // 委托单列表（Map 存储，键为 account_id|order_id：order_ref 跨账户可能重复，且更新为 O(1)）
+  const orders = ref(new Map<string, Order>())
+
+  function orderKey(order: Order): string {
+    return `${order.account_id}|${order.order_id}`
+  }
 
   // 行情数据
   const quotes = ref<Map<string, Quote>>(new Map())
@@ -52,7 +57,7 @@ export const useStore = defineStore('main', () => {
 
   // 活动订单
   const activeOrders = computed(() => {
-    return orders.value.filter(order => order.status === 'ALIVE')
+    return Array.from(orders.value.values()).filter(order => order.status === 'ALIVE')
   })
 
   // 当前账户的持仓
@@ -75,9 +80,9 @@ export const useStore = defineStore('main', () => {
 
   // 当前账户的订单
   const currentOrders = computed(() => {
-    let filtered = orders.value
+    let filtered = Array.from(orders.value.values())
     if (selectedAccountId.value) {
-      filtered = orders.value.filter(order => order.account_id === selectedAccountId.value)
+      filtered = filtered.filter(order => order.account_id === selectedAccountId.value)
     }
     // 按报单时间倒序排列（最新的在前面）
     // insert_date_time 可能是 number（时间戳）或 string（ISO 格式）
@@ -238,7 +243,8 @@ export const useStore = defineStore('main', () => {
     try {
       // 如果没有指定 accountId，使用当前选中的账户
       const targetAccountId = accountId || selectedAccountId.value || undefined
-      orders.value = await orderApi.getOrders(status, targetAccountId)
+      const list = await orderApi.getOrders(status, targetAccountId)
+      orders.value = new Map(list.map(o => [orderKey(o), o]))
     } catch (error) {
       console.error('加载委托单失败:', error)
     }
@@ -303,8 +309,10 @@ export const useStore = defineStore('main', () => {
    * 添加成交记录
    */
   function addTrade(data: Trade) {
-    // 检查是否已存在
-    const exists = trades.value.some(trade => trade.trade_id === data.trade_id)
+    // 检查是否已存在（trade_id 跨账户可能重复，需连同账户一起判断）
+    const exists = trades.value.some(
+      trade => trade.trade_id === data.trade_id && trade.account_id === data.account_id
+    )
     if (!exists) {
       trades.value.unshift(data)
     }
@@ -314,12 +322,7 @@ export const useStore = defineStore('main', () => {
    * 更新委托单
    */
   function updateOrder(data: Order) {
-    const index = orders.value.findIndex(order => order.order_id === data.order_id)
-    if (index > -1) {
-      orders.value[index] = data
-    } else {
-      orders.value.unshift(data)
-    }
+    orders.value.set(orderKey(data), data)
   }
 
   /**

@@ -22,7 +22,7 @@
       </template>
 
       <div class="table-wrapper">
-        <el-table :data="sortedTrades" stripe v-loading="loading" :size="isMobile ? 'small' : 'default'">
+        <el-table :data="trades" stripe v-loading="loading" :size="isMobile ? 'small' : 'default'">
           <template #empty>
             <el-empty description="暂无成交记录" />
           </template>
@@ -57,7 +57,6 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import type { Trade } from '@/types'
-import { getTradeNaturalTime } from '@/utils/dateTime'
 
 const props = defineProps<{
   loading: boolean
@@ -87,14 +86,6 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('resize', updateIsMobile)
-})
-
-// 按成交的自然时间倒序排序（夜盘成交按实际发生时间排，而非交易日时间）
-const sortedTrades = computed(() => {
-  if (!props.trades || props.trades.length === 0) return []
-  return [...props.trades].sort(
-    (a, b) => getTradeNaturalTime(b.trade_date_time) - getTradeNaturalTime(a.trade_date_time)
-  )
 })
 
 function formatNumber(num: number | null | undefined): string {

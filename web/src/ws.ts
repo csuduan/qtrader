@@ -110,6 +110,13 @@ class WebSocketManager {
       this.flushTimer = null
     }
 
+    // 清空未分发的消息，避免断线前的陈旧状态在重连后被推入 store
+    this.pendingAccounts.clear()
+    this.pendingPositions.clear()
+    this.pendingOrders.clear()
+    this.pendingTrades.clear()
+    this.pendingTicks.clear()
+
     if (this.ws) {
       this.ws.close()
       this.ws = null
@@ -163,15 +170,15 @@ class WebSocketManager {
            break
          }
          case 'trade_update': {
-           // 成交是事件流，按 trade_id 去重保留最新
+           // 成交是事件流，按 trade_id 去重保留最新；order_ref/trade_id 跨账户可能重复，键加账户前缀
            const trade = message.data as Trade
-           this.pendingTrades.set(trade.trade_id, trade)
+           this.pendingTrades.set(`${trade.account_id}|${trade.trade_id}`, trade)
            break
          }
          case 'order_update': {
-           // 同一订单在窗口期内只保留最终状态
+           // 同一订单在窗口期内只保留最终状态；order_ref 跨账户可能重复，键加账户前缀
            const order = message.data as Order
-           this.pendingOrders.set(order.order_id, order)
+           this.pendingOrders.set(`${order.account_id}|${order.order_id}`, order)
            break
          }
          case 'tick_update':
