@@ -10,16 +10,58 @@ from pydantic import BaseModel
 from qtrader.manager.api.dependencies import get_trading_manager
 from qtrader.manager.api.responses import error_response, success_response
 from qtrader.manager.api.schemas import SystemStatusRes
-from qtrader.manager.api.websocket_manager import websocket_manager
 from qtrader.manager.manager import TradingManager
 from qtrader.models.object import AccountData
-from qtrader.models.po import JobPo
+from qtrader.models.po import JobPo, SystemParamPo
 from qtrader.utils.config_loader import get_config_loader
+from qtrader.utils.database import get_database
 from qtrader.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/system", tags=["系统"])
+
+
+def _upsert_risk_params(param_values: dict[str, int | None], account_id: str | None) -> None:
+    """
+    将风控参数写入 SystemParam 表（None 值跳过）
+
+    Args:
+        param_values: {参数键: 值}，键与 Trader 侧 _load_risk_control_config 读取的键一致
+        account_id: 账户ID，None 表示全局参数
+    """
+    db = get_database()
+    now = datetime.now()
+    with db.get_session() as session:
+        for key, value in param_values.items():
+            if value is None:
+                continue
+            param = (
+                session.query(SystemParamPo)
+                .filter(
+                    SystemParamPo.param_key == key,
+                    (
+                        SystemParamPo.account_id == account_id
+                        if account_id
+                        else SystemParamPo.account_id.is_(None)
+                    ),
+                )
+                .first()
+            )
+            if param:
+                param.param_value = str(value)
+                param.updated_at = now
+            else:
+                session.add(
+                    SystemParamPo(
+                        param_key=key,
+                        param_value=str(value),
+                        param_type="int",
+                        description="风控参数",
+                        group="risk_control",
+                        account_id=account_id,
+                    )
+                )
 
 
 @router.get("/status")
@@ -84,14 +126,24 @@ async def update_risk_control(
     if not trader:
         return error_response(code=404, message=f"账户 [{account_id}] 不存在")
 
-    # 更新风控参数
-    await trader.update_risk_control(
-        max_daily_orders=max_daily_orders,
-        max_daily_cancels=max_daily_cancels,
-        max_order_volume=max_order_volume,
-        max_split_volume=max_split_volume,
-        order_timeout=order_timeout,
-    )
+    # 写入共享数据库的 SystemParam 表（与 Trader 侧 _load_risk_control_config 的读取键一致）
+    param_values = {
+        "risk_control.max_daily_orders": max_daily_orders,
+        "risk_control.max_daily_cancels": max_daily_cancels,
+        "risk_control.max_order_volume": max_order_volume,
+        "risk_control.max_split_volume": max_split_volume,
+        "risk_control.order_timeout": order_timeout,
+    }
+    try:
+        import asyncio
+
+        await asyncio.to_thread(_upsert_risk_params, param_values, account_id)
+    except Exception as e:
+        logger.exception(f"写入风控参数失败: {e}")
+        return error_response(code=500, message="风控参数写入数据库失败")
+
+    # 通知 Trader 进程重新加载风控配置
+    await trader.reload_risk_config()
 
     # 获取更新后的账户信息
     account = await trading_manager.get_account(account_id)
@@ -164,7 +216,7 @@ async def connect_system(
     if not trader:
         return error_response(code=404, message=f"账户 [{account_id}] 不存在")
 
-    success = await trader.connect_gateway()
+    success = await trader.connect()
 
     if success:
         return success_response(data={"connected": True}, message="连接成功")
@@ -188,7 +240,7 @@ async def disconnect_system(
     if not trader:
         return error_response(code=404, message=f"账户 [{account_id}] 不存在")
 
-    await trader.disconnect_gateway()
+    await trader.disconnect()
     return success_response(data={"connected": False}, message="已断开连接")
 
 
@@ -208,7 +260,7 @@ async def disconnect_gateway(
     if not trader:
         return error_response(code=404, message=f"账户 [{account_id}] 不存在")
 
-    await trader.disconnect_gateway()
+    await trader.disconnect()
     return success_response(
         data={"md_connected": False, "td_connected": False}, message="已断开网关连接"
     )
@@ -302,7 +354,7 @@ async def pause_trading(
     if not trader:
         return error_response(code=404, message=f"账户 [{account_id}] 不存在")
 
-    await trader.pause_trading()
+    await trader.pause()
     return success_response(data={"paused": True}, message="交易已暂停")
 
 
@@ -322,55 +374,8 @@ async def resume_trading(
     if not trader:
         return error_response(code=404, message=f"账户 [{account_id}] 不存在")
 
-    await trader.resume_trading()
+    await trader.resume()
     return success_response(data={"paused": False}, message="交易已恢复")
-
-
-@router.post("/log-monitoring/start")
-async def start_log_monitoring(request: Request):
-    """
-    启动日志监控服务
-
-    启动后，服务端会开始监控日志文件并向订阅了日志的WebSocket客户端推送日志
-    """
-    if websocket_manager.is_log_monitoring_enabled():
-        return success_response(data={"enabled": True}, message="日志监控服务已在运行")
-
-    log_watcher = request.app.state.log_watcher
-    if log_watcher:
-        log_watcher.start()
-        websocket_manager.enable_log_monitoring()
-
-    return success_response(data={"enabled": True}, message="日志监控服务已启动")
-
-
-@router.post("/log-monitoring/stop")
-async def stop_log_monitoring(request: Request):
-    """
-    停止日志监控服务
-
-    停止后，服务端将不再向WebSocket客户端推送日志
-    """
-    if not websocket_manager.is_log_monitoring_enabled():
-        return success_response(data={"enabled": False}, message="日志监控服务未在运行")
-
-    log_watcher = request.app.state.log_watcher
-    if log_watcher:
-        log_watcher.stop()
-        websocket_manager.disable_log_monitoring()
-
-    return success_response(data={"enabled": False}, message="日志监控服务已停止")
-
-
-@router.get("/log-monitoring/status")
-async def get_log_monitoring_status():
-    """
-    获取日志监控服务状态
-
-    返回日志监控服务是否正在运行
-    """
-    enabled = websocket_manager.is_log_monitoring_enabled()
-    return success_response(data={"enabled": enabled}, message="获取成功")
 
 
 @router.get("/scheduler/jobs")

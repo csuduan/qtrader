@@ -31,20 +31,25 @@ class AccountDao:
             account_po = AccountPo(account_id=account_id)
 
         account_po.balance = (
-            Decimal(str(data.balance)) if hasattr(data, "balance") else Decimal("0")
+            Decimal(str(data.balance or 0)) if hasattr(data, "balance") else Decimal("0")
         )
         account_po.available = (
-            Decimal(str(data.available)) if hasattr(data, "available") else Decimal("0")
+            Decimal(str(data.available or 0)) if hasattr(data, "available") else Decimal("0")
         )
-        account_po.margin = Decimal(str(data.margin)) if hasattr(data, "margin") else Decimal("0")
+        account_po.margin = (
+            Decimal(str(data.margin or 0)) if hasattr(data, "margin") else Decimal("0")
+        )
+        account_po.float_profit = (
+            Decimal(str(data.float_profit or 0)) if hasattr(data, "float_profit") else Decimal("0")
+        )
         account_po.position_profit = (
-            Decimal(str(data.hold_profit)) if hasattr(data, "hold_profit") else Decimal("0")
+            Decimal(str(data.hold_profit or 0)) if hasattr(data, "hold_profit") else Decimal("0")
         )
         account_po.close_profit = (
-            Decimal(str(data.close_profit)) if hasattr(data, "close_profit") else Decimal("0")
+            Decimal(str(data.close_profit or 0)) if hasattr(data, "close_profit") else Decimal("0")
         )
         account_po.risk_ratio = (
-            Decimal(str(data.risk_ratio)) if hasattr(data, "risk_ratio") else Decimal("0")
+            Decimal(str(data.risk_ratio or 0)) if hasattr(data, "risk_ratio") else Decimal("0")
         )
         account_po.updated_at = datetime.now()
 
@@ -60,6 +65,7 @@ class AccountDao:
         account_po.balance = Decimal(str(data.get("balance") or 0))
         account_po.available = Decimal(str(data.get("available") or 0))
         account_po.margin = Decimal(str(data.get("margin") or 0))
+        account_po.float_profit = Decimal(str(data.get("float_profit") or 0))
         account_po.position_profit = Decimal(str(data.get("hold_profit") or 0))
         account_po.close_profit = Decimal(str(data.get("close_profit") or 0))
         account_po.risk_ratio = Decimal(str(data.get("risk_ratio") or 0))

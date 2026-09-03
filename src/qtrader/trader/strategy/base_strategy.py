@@ -368,7 +368,6 @@ class BaseStrategy:
                     f"与配置合约 {self.symbol} 不一致"
                 )
                 await self.send_order_cmds(cmds)
-                return
 
     async def _handle_normal_close(self, signal: Signal) -> None:
         """正常模式平仓处理"""

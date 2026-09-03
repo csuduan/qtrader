@@ -30,10 +30,9 @@ from qtrader.models.po import SystemParamPo
 from qtrader.trader.order_cmd import OrderCmd, OrderCmdStatus, SplitStrategyType
 from qtrader.trader.order_executor import OrderCmdExecutor
 from qtrader.trader.risk_control import RiskControl
-from qtrader.utils.async_event_engine import AsyncEventEngine
+from qtrader.utils.async_event_engine import AsyncEventEngine, EventTypes
 from qtrader.utils.config_loader import AccountConfig, AppConfig, RiskControlConfig
 from qtrader.utils.database import get_session
-from qtrader.utils.async_event_engine import EventTypes
 from qtrader.utils.helpers import _get_int_param
 from qtrader.utils.logger import get_logger
 
@@ -243,8 +242,12 @@ class TradingEngine:
                 }
 
                 risk_control_params = {
-                    "max_daily_orders": _get_int_param(params, "risk_control.max_daily_orders", 1000),
-                    "max_daily_cancels": _get_int_param(params, "risk_control.max_daily_cancels", 500),
+                    "max_daily_orders": _get_int_param(
+                        params, "risk_control.max_daily_orders", 1000
+                    ),
+                    "max_daily_cancels": _get_int_param(
+                        params, "risk_control.max_daily_cancels", 500
+                    ),
                     "max_order_volume": _get_int_param(params, "risk_control.max_order_volume", 50),
                     "max_split_volume": _get_int_param(params, "risk_control.max_split_volume", 5),
                     "order_timeout": _get_int_param(params, "risk_control.order_timeout", 5),
@@ -396,6 +399,9 @@ class TradingEngine:
             bool: 撤单是否成功
         """
         if self.gateway and self.gateway.connected:
+            # 撤单前风控检查（单日撤单次数限制）
+            if not self.risk_control.check_cancel():
+                return False
             req = CancelRequest(order_id=order_id)
             success = self.gateway.cancel_order(req)
             if success:
@@ -433,7 +439,6 @@ class TradingEngine:
             update_data = account_data.model_dump()
             update_data["trade_paused"] = False
             self._emit_event(EventTypes.ACCOUNT_UPDATE, update_data)
-    
 
     def get_position(self, symbol: str) -> PositionData | None:
         """

@@ -293,7 +293,8 @@ class AdminConfig(BaseModel):
     """管理员账户配置"""
 
     user: str = "admin"
-    password: str = "admin123"
+    password: str = ""  # 必须在 config.yaml 中显式配置，不提供默认口令
+    jwt_secret: str = ""  # JWT 签名密钥，可被环境变量 QTRADER_JWT_SECRET 覆盖
 
 
 class AppConfig(BaseModel):

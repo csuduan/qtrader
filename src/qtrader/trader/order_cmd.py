@@ -286,11 +286,11 @@ class OrderCmd:
         if self.started_at is not None:
             elapsed = now - self.started_at
             if elapsed.total_seconds() >= self.cmd_timeout:
-                self._cancel("超时指令")
+                self._cancel(OrderCmdFinishReason.TIMEOUT)
 
         # 检查是否完成
         if self.filled_volume >= self.volume:
-            self._cancel("全部完成")
+            self._cancel(OrderCmdFinishReason.ALL_COMPLETED)
 
         # 检查当前报单是否超时
         if self._pending_order and self._pending_order.can_cancel():
@@ -404,13 +404,16 @@ class OrderCmd:
         # 这里只做完成检查
         pass
 
-    def _cancel(self, reason: str) -> None:
-        """结束指令"""
+    def _cancel(self, reason: OrderCmdFinishReason | str) -> None:
+        """结束指令（reason 使用 OrderCmdFinishReason 枚举值，便于下游按原因判断）"""
         if self.status == OrderCmdStatus.FINISHED or self.status == OrderCmdStatus.CANCELING:
             # 指令已完成或者取消中
             return
 
-        if not "全部完成" in reason:
+        if isinstance(reason, OrderCmdFinishReason):
+            reason = reason.value
+
+        if reason != OrderCmdFinishReason.ALL_COMPLETED.value:
             logger.error(f"报单指令取消：{self.cmd_id} {reason}")
 
         # 检查是否有未完成的挂单

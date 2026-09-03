@@ -411,7 +411,7 @@ def test_order_cmd_finishes_when_all_filled():
 
     assert order_req is None
     assert cmd.status == OrderCmdStatus.FINISHED
-    assert cmd.finish_reason == "全部完成"
+    assert cmd.finish_reason == OrderCmdFinishReason.ALL_COMPLETED.value
 
     print("test_order_cmd_finishes_when_all_filled passed")
 

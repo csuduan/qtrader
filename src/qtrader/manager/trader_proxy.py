@@ -175,6 +175,8 @@ class TraderProxy:
             logger.warning(f"TraderProxy [{self.account_id}] 进程已存在{pid}，不允许重复启动")
             return False
 
+        # 重新启动视为手动干预结束，复位标记，否则后续进程崩溃时健康检查会按"手动停止"跳过告警
+        self._manual_stop = False
         self._created_process = False
         logger.info(f"TraderProxy [{self.account_id}] 开始启动...")
 
@@ -782,9 +784,12 @@ class TraderProxy:
     async def _periodic_sync_loop(self) -> None:
         """定时从Trader同步全量数据（兜底机制）"""
         self._sync_interval = 60.0
-        while self._running and self._is_state(TraderState.CONNECTED):
+        # 循环体内部判断连接状态：任务构造时状态为 STOPPED，若写在 while 条件里首轮即退出，兜底永不生效
+        while self._running:
             try:
                 await asyncio.sleep(self._sync_interval)
+                if not self._is_state(TraderState.CONNECTED):
+                    continue
                 if not self.socket_client or not self.socket_client.is_connected():
                     logger.debug(f"TraderProxy [{self.account_id}] 未连接，跳过本次定时同步")
                     continue
@@ -1203,6 +1208,26 @@ class TraderProxy:
             return bool(response)
         except Exception as e:
             logger.error(f"TraderProxy [{self.account_id}] 恢复交易请求失败: {e}")
+            return False
+
+    async def reload_risk_config(self) -> bool:
+        """
+        通知 Trader 从共享数据库重新加载风控配置
+
+        Returns:
+            是否成功发送请求
+        """
+        if not self.socket_client or not self.socket_client.is_connected():
+            logger.warning(
+                f"TraderProxy [{self.account_id}] 未连接到Trader，风控配置将在Trader重启后生效"
+            )
+            return False
+
+        try:
+            response = await self.socket_client.request("reload_risk_config", {}, timeout=10.0)
+            return bool(response)
+        except Exception as e:
+            logger.error(f"TraderProxy [{self.account_id}] 重载风控配置请求失败: {e}")
             return False
 
     async def update_alert_wechat(self, alert_wechat: bool) -> bool:

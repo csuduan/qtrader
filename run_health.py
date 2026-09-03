@@ -186,7 +186,8 @@ def main():
 
     # 加载配置
     config = get_config_loader().load_config()
-    host = config.api.host
+    # api.host 通常为 0.0.0.0（监听地址，非请求地址），健康检查固定走本机回环
+    host = "127.0.0.1"
     port = config.api.port
     socket_dir = config.socket.socket_dir
 

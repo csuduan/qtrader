@@ -301,6 +301,26 @@ class TradingManager:
             return trader.get_status()
         return None
 
+    def get_all_account_ids(self) -> list[str]:
+        """获取所有账户ID列表"""
+        return list(self.traders.keys())
+
+    async def restart_trader(self, account_id: str) -> bool:
+        """
+        重启指定Trader（停止后启动）
+
+        Args:
+            account_id: 账户ID
+
+        Returns:
+            是否成功
+        """
+        logger.info(f"开始重启 Trader [{account_id}]")
+        stopped = await self.stop_trader(account_id)
+        if not stopped:
+            logger.warning(f"Trader [{account_id}] 停止未确认，仍尝试重新启动")
+        return await self.start_trader(account_id)
+
     def get_all_trader_status(self) -> list[dict]:
         """
         获取所有Trader状态
@@ -632,7 +652,7 @@ class TradingManager:
         all_trades = []
         for trader in self.traders.values():
             all_trades.extend(await trader.get_trades())
-        return []
+        return all_trades
 
     async def get_positions(self, account_id: str | None = None) -> dict[str, list[Any]]:
         """获取持仓列表"""
@@ -1081,8 +1101,10 @@ class TradingManager:
                 raw_symbol = contract["symbol"]  # Tq格式: "rb2505" (无交易所前缀)
                 contract["min_open_volume"] = min_order_map_upper.get(raw_symbol.upper(), 1)
 
-            # 4. 写入共享库
-            count = self.public_data_service.upsert_contracts(contracts, data_source="tq")
+            # 4. 写入共享库（批量 upsert，放线程避免阻塞事件循环）
+            count = await asyncio.to_thread(
+                self.public_data_service.upsert_contracts, contracts, "tq"
+            )
             logger.info(f"从 TqSdk + 米筐刷新了 {count} 个合约信息")
         except Exception as e:
             logger.exception(f"刷新合约信息失败: {e}")

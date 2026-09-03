@@ -61,6 +61,10 @@ class BarGenerator:
         # 回调函数列表 (interval_value -> list of callbacks)
         self._callbacks: dict[str, list[Callable[[BarData], None]]] = defaultdict(list)
 
+        # 上一tick的当日累计成交量/成交额（用于计算增量，首个tick增量为0）
+        self._last_tick_volume: float | None = None
+        self._last_tick_turnover: float | None = None
+
         logger.debug(f"BarGenerator创建: {self.std_symbol}")
 
     def subscribe(
@@ -104,15 +108,54 @@ class BarGenerator:
         """
         completed_bars: list[BarData] = []
 
+        # tick.volume/turnover 为当日累计值，先换算为本tick增量（所有周期共用）
+        delta_volume, delta_turnover = self._calc_increment(tick)
+
         # 更新所有订阅的周期
         for interval_value, minutes in list(self._subscribed_intervals.items()):
-            bar = self._update_bar(tick, interval_value, minutes)
+            bar = self._update_bar(tick, interval_value, minutes, delta_volume, delta_turnover)
             if bar:
                 completed_bars.append(bar)
 
         return completed_bars
 
-    def _update_bar(self, tick: TickData, interval_value: str, minutes: int) -> BarData | None:
+    def _calc_increment(self, tick: TickData) -> tuple[float, float]:
+        """
+        计算tick相对上一tick的增量成交量/成交额
+
+        tick.volume 为当日累计值；累计值回绕（跨交易日重置或乱序）时按全量计；
+        首个tick增量为0（无基准线）。
+
+        Args:
+            tick: tick数据
+
+        Returns:
+            (增量成交量, 增量成交额)
+        """
+        volume = tick.volume or 0
+        turnover = tick.turnover or 0
+
+        if self._last_tick_volume is None or self._last_tick_turnover is None:
+            delta_volume, delta_turnover = 0.0, 0.0
+        else:
+            delta_volume = volume - self._last_tick_volume
+            delta_turnover = turnover - self._last_tick_turnover
+            if delta_volume < 0 or delta_turnover < 0:
+                # 累计值回绕（新交易日），按全量计
+                delta_volume, delta_turnover = volume, turnover
+
+        self._last_tick_volume = volume
+        self._last_tick_turnover = turnover
+        return delta_volume, delta_turnover
+
+    def _update_bar(
+        self,
+        tick: TickData,
+        interval_value: str,
+        minutes: int,
+        delta_volume: float,
+        delta_turnover: float,
+    ) -> BarData | None:
         """
         更新指定周期的bar
 
@@ -125,7 +168,7 @@ class BarGenerator:
             如果bar完成则返回BarData，否则返回None
         """
         current_bar = self._current_bars.get(interval_value)
-        bar_start = self._get_bar_start_time(tick.datetime, minutes)
+        bar_start = self._get_bar_start_time(tick, minutes)
 
         if current_bar is None:
             # 创建新bar
@@ -137,8 +180,8 @@ class BarGenerator:
                 "high_price": tick.last_price,
                 "low_price": tick.last_price,
                 "close_price": tick.last_price,
-                "volume": tick.volume or 0,
-                "turnover": tick.turnover or 0,
+                "volume": delta_volume,
+                "turnover": delta_turnover,
                 "open_interest": tick.open_interest or 0,
             }
             return None
@@ -161,8 +204,8 @@ class BarGenerator:
                 "high_price": tick.last_price,
                 "low_price": tick.last_price,
                 "close_price": tick.last_price,
-                "volume": tick.volume or 0,
-                "turnover": tick.turnover or 0,
+                "volume": delta_volume,
+                "turnover": delta_turnover,
                 "open_interest": tick.open_interest or 0,
             }
 
@@ -172,10 +215,8 @@ class BarGenerator:
             current_bar["high_price"] = max(current_bar["high_price"], tick.last_price)
             current_bar["low_price"] = min(current_bar["low_price"], tick.last_price)
             current_bar["close_price"] = tick.last_price
-            if tick.volume:
-                current_bar["volume"] += tick.volume
-            if tick.turnover:
-                current_bar["turnover"] += tick.turnover
+            current_bar["volume"] += delta_volume
+            current_bar["turnover"] += delta_turnover
             current_bar["open_interest"] = tick.open_interest or 0
             current_bar["update_time"] = tick.datetime
 
@@ -196,18 +237,25 @@ class BarGenerator:
             except Exception as e:
                 logger.exception(f"Bar回调执行失败: {e}")
 
-    def _get_bar_start_time(self, dt: datetime, minutes: int) -> datetime:
+    def _get_bar_start_time(self, tick: TickData, minutes: int) -> datetime:
         """
         计算bar的开始时间
 
+        日线及以上：优先按 tick.trading_day 切分（夜盘归属下一交易日，
+        避免同一交易日被切成两根日线）；无交易日信息时退化为自然日。
+
         Args:
-            dt: 当前时间
+            tick: tick数据
             minutes: bar周期（分钟）
 
         Returns:
             bar开始时间
         """
+        dt = tick.datetime
         if minutes >= 1440:  # 日线及以上
+            trading_day = (tick.trading_day or "").replace("-", "")
+            if len(trading_day) == 8 and trading_day.isdigit():
+                return datetime.strptime(trading_day, "%Y%m%d")
             return dt.replace(hour=0, minute=0, second=0, microsecond=0)
         elif minutes >= 60:  # 小时线
             hour = (dt.hour // (minutes // 60)) * (minutes // 60)

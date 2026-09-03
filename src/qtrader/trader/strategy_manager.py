@@ -19,6 +19,7 @@ from qtrader.models.object import (
     Exchange,
     Offset,
     OrderData,
+    OrderStatus,
     PositionData,
     TickData,
     TradeData,
@@ -273,24 +274,33 @@ class StrategyManager:
                     logger.exception(f"策略 {name} on_bar 失败: {e}")
 
     async def _on_order(self, data: OrderData) -> None:
-        """处理订单事件"""
+        """处理订单事件（按 order_strategy_map 分发，未映射订单不分发给策略）"""
         order: OrderData = data
-        for name, strategy in self.strategies.items():
-            if strategy.enabled and strategy.symbol == order.symbol:
-                try:
-                    await strategy.on_order(order)
-                except Exception as e:
-                    logger.exception(f"策略 {name} on_order 失败: {e}")
+        strategy_id = self.order_strategy_map.get(order.order_id)
+        if not strategy_id:
+            return
+        strategy = self.strategies.get(strategy_id)
+        if strategy and strategy.enabled:
+            try:
+                await strategy.on_order(order)
+            except Exception as e:
+                logger.exception(f"策略 {strategy_id} on_order 失败: {e}")
+        # 订单终态后清理映射，避免字典无界增长
+        if order.status in (OrderStatus.FINISHED, OrderStatus.REJECTED):
+            self.order_strategy_map.pop(order.order_id, None)
 
     async def _on_trade(self, data: TradeData) -> None:
-        """处理成交事件"""
+        """处理成交事件（按 order_strategy_map 分发）"""
         trade: TradeData = data
-        for name, strategy in self.strategies.items():
-            if strategy.enabled and strategy.symbol == trade.symbol:
-                try:
-                    await strategy.on_trade(trade)
-                except Exception as e:
-                    logger.exception(f"策略 {name} on_trade 失败: {e}")
+        strategy_id = self.order_strategy_map.get(trade.order_id)
+        if not strategy_id:
+            return
+        strategy = self.strategies.get(strategy_id)
+        if strategy and strategy.enabled:
+            try:
+                await strategy.on_trade(trade)
+            except Exception as e:
+                logger.exception(f"策略 {strategy_id} on_trade 失败: {e}")
 
     def enable_strategy(self, name: str) -> bool:
         """启用策略"""
@@ -540,7 +550,7 @@ class StrategyManager:
             return False
 
         try:
-            success = await self.trading_engine.cancel_order(order_id)
+            success = self.trading_engine.cancel_order(order_id)
             if success:
                 logger.info(f"策略 [{strategy_id}] 撤单成功: {order_id}")
             return success

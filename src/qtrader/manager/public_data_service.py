@@ -116,6 +116,9 @@ class PublicDataService:
         """
         批量写入/更新合约信息（来自某个数据源）
 
+        使用 PostgreSQL INSERT ... ON CONFLICT (symbol) DO UPDATE 分批批量写入，
+        避免逐条 SELECT+UPDATE 产生的 N+1 往返。
+
         Args:
             contracts: 合约信息字典列表
             data_source: 数据来源标识（如 "tq"、"ctp"）
@@ -123,13 +126,15 @@ class PublicDataService:
         Returns:
             写入的合约数量
         """
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
         from qtrader.models.po import ContractPo
 
         update_date = datetime.now().strftime("%Y-%m-%d")
-        count = 0
+        now = datetime.now()
 
         # 按 symbol 去重（保留最后一个）
-        seen = {}
+        seen: dict[str, dict] = {}
         for contract_dict in contracts:
             symbol = contract_dict.get("symbol")
             if symbol:
@@ -139,81 +144,73 @@ class PublicDataService:
         if len(unique_contracts) < len(contracts):
             logger.warning(f"合约列表去重: {len(contracts)} -> {len(unique_contracts)}")
 
-        with self.shared_db.get_session() as session:
-            for contract_dict in unique_contracts:
-                symbol = contract_dict.get("symbol")
-                if not symbol:
-                    continue
+        # 组装行数据（缺失字段按新增记录的默认值补齐）
+        rows = [
+            {
+                "symbol": contract_dict["symbol"],
+                "exchange_id": contract_dict.get("exchange_id", ""),
+                "instrument_name": contract_dict.get("instrument_name"),
+                "product_type": contract_dict.get("product_type", "FUTURES"),
+                "volume_multiple": contract_dict.get("volume_multiple", 1),
+                "price_tick": contract_dict.get("price_tick", 0.01),
+                "min_volume": contract_dict.get("min_volume", 1),
+                "min_open_volume": contract_dict.get("min_open_volume", 1),
+                "option_strike": contract_dict.get("option_strike"),
+                "option_underlying": contract_dict.get("option_underlying"),
+                "option_type": contract_dict.get("option_type"),
+                "update_date": update_date,
+                "data_source": data_source,
+                "is_active": contract_dict.get("is_active", True),
+            }
+            for contract_dict in unique_contracts
+        ]
 
-                # 查找已有记录
-                existing = session.query(ContractPo).filter(ContractPo.symbol == symbol).first()
+        # 分批批量 upsert
+        chunk_size = 1000
+        if rows:
+            update_cols = {
+                col.name: getattr(pg_insert(ContractPo).excluded, col.name)
+                for col in ContractPo.__table__.columns
+                if col.name not in ("id", "symbol", "created_at")
+            }
+            update_cols["updated_at"] = now
 
-                if existing:
-                    # 更新现有记录
-                    existing.exchange_id = contract_dict.get("exchange_id", existing.exchange_id)
-                    existing.instrument_name = contract_dict.get(
-                        "instrument_name", existing.instrument_name
+            with self.shared_db.get_session() as session:
+                for i in range(0, len(rows), chunk_size):
+                    chunk = rows[i : i + chunk_size]
+                    stmt = (
+                        pg_insert(ContractPo)
+                        .values(chunk)
+                        .on_conflict_do_update(index_elements=[ContractPo.symbol], set_=update_cols)
                     )
-                    existing.product_type = contract_dict.get("product_type", existing.product_type)
-                    existing.volume_multiple = contract_dict.get(
-                        "volume_multiple", existing.volume_multiple
-                    )
-                    existing.price_tick = contract_dict.get("price_tick", existing.price_tick)
-                    existing.min_volume = contract_dict.get("min_volume", existing.min_volume)
-                    existing.min_open_volume = contract_dict.get(
-                        "min_open_volume", existing.min_open_volume
-                    )
-                    existing.option_strike = contract_dict.get("option_strike")
-                    existing.option_underlying = contract_dict.get("option_underlying")
-                    existing.option_type = contract_dict.get("option_type")
-                    existing.update_date = update_date
-                    existing.data_source = data_source
-                    existing.is_active = contract_dict.get("is_active", True)
-                else:
-                    # 新增记录
-                    po = ContractPo(
-                        symbol=symbol,
-                        exchange_id=contract_dict.get("exchange_id", ""),
-                        instrument_name=contract_dict.get("instrument_name"),
-                        product_type=contract_dict.get("product_type", "FUTURES"),
-                        volume_multiple=contract_dict.get("volume_multiple", 1),
-                        price_tick=contract_dict.get("price_tick", 0.01),
-                        min_volume=contract_dict.get("min_volume", 1),
-                        min_open_volume=contract_dict.get("min_open_volume", 1),
-                        option_strike=contract_dict.get("option_strike"),
-                        option_underlying=contract_dict.get("option_underlying"),
-                        option_type=contract_dict.get("option_type"),
-                        update_date=update_date,
-                        data_source=data_source,
-                        is_active=contract_dict.get("is_active", True),
-                    )
-                    session.add(po)
+                    session.execute(stmt)
 
-                # 同步到内存缓存
-                info = ContractInfo(
-                    symbol=symbol,
-                    exchange_id=contract_dict.get("exchange_id", ""),
-                    instrument_name=contract_dict.get("instrument_name"),
-                    product_type=contract_dict.get("product_type", "FUTURES"),
-                    volume_multiple=contract_dict.get("volume_multiple", 1),
-                    price_tick=float(contract_dict.get("price_tick", 0.01)),
-                    min_volume=contract_dict.get("min_volume", 1),
-                    option_strike=contract_dict.get("option_strike"),
-                    option_underlying=contract_dict.get("option_underlying"),
-                    option_type=contract_dict.get("option_type"),
-                    update_date=update_date,
-                    data_source=data_source,
-                    is_active=contract_dict.get("is_active", True),
-                )
-                self._contracts[symbol] = info
-                if data_source not in self._contracts_by_source:
-                    self._contracts_by_source[data_source] = {}
-                self._contracts_by_source[data_source][symbol] = info
-                count += 1
+        # 同步到内存缓存
+        for contract_dict in unique_contracts:
+            symbol = contract_dict["symbol"]
+            info = ContractInfo(
+                symbol=symbol,
+                exchange_id=contract_dict.get("exchange_id", ""),
+                instrument_name=contract_dict.get("instrument_name"),
+                product_type=contract_dict.get("product_type", "FUTURES"),
+                volume_multiple=contract_dict.get("volume_multiple", 1),
+                price_tick=float(contract_dict.get("price_tick", 0.01)),
+                min_volume=contract_dict.get("min_volume", 1),
+                option_strike=contract_dict.get("option_strike"),
+                option_underlying=contract_dict.get("option_underlying"),
+                option_type=contract_dict.get("option_type"),
+                update_date=update_date,
+                data_source=data_source,
+                is_active=contract_dict.get("is_active", True),
+            )
+            self._contracts[symbol] = info
+            if data_source not in self._contracts_by_source:
+                self._contracts_by_source[data_source] = {}
+            self._contracts_by_source[data_source][symbol] = info
 
         self._last_updated = datetime.now()
-        logger.info(f"PublicDataService: 写入 {count} 个合约 (来源: {data_source})")
-        return count
+        logger.info(f"PublicDataService: 写入 {len(rows)} 个合约 (来源: {data_source})")
+        return len(rows)
 
     # ==================== 合约数据读取 ====================
 

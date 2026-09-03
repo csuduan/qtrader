@@ -39,7 +39,9 @@ class OrderDao:
         order_po.symbol = data.symbol if hasattr(data, "symbol") else ""
         order_po.direction = data.direction.value if hasattr(data, "direction") else ""
         order_po.offset = data.offset.value if hasattr(data, "offset") else ""
-        order_po.limit_price = Decimal(str(data.price)) if hasattr(data, "price") else None
+        order_po.limit_price = (
+            Decimal(str(data.price)) if hasattr(data, "price") and data.price is not None else None
+        )
         order_po.volume_orign = data.volume if hasattr(data, "volume") else 0
         order_po.volume_left = (
             data.volume_left
@@ -48,7 +50,9 @@ class OrderDao:
         )
         order_po.status = data.status if hasattr(data, "status") else ""
         order_po.price_type = data.price_type if hasattr(data, "price_type") else "LIMIT"
-        order_po.exchange_order_id = data.order_id if hasattr(data, "exchange_order_id") else None
+        order_po.exchange_order_id = getattr(data, "gateway_order_id", None) or getattr(
+            data, "order_sys_id", None
+        )
         order_po.status_msg = data.status_msg if hasattr(data, "status_msg") else None
         order_po.update_date_time = data.update_time if hasattr(data, "update_time") else None
         insert_time = data.insert_time if hasattr(data, "insert_time") else None

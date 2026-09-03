@@ -366,6 +366,8 @@ async function handleLogout() {
   } catch (error) {
     // 忽略错误
   }
+  // 先断开 WebSocket，避免登出后继续接收账户数据推送
+  wsManager.disconnect()
   localStorage.removeItem('isLoggedIn')
   localStorage.removeItem('username')
   localStorage.removeItem('userRole')

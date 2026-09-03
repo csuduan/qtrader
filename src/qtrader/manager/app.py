@@ -6,6 +6,7 @@ Q-Trader 应用主入口
 import asyncio
 import importlib
 import json
+import os
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -72,6 +73,16 @@ async def lifespan(app: FastAPI):
         log_dir=str(log_dir),
         log_level="INFO",
     )
+
+    # 写入 Manager PID 文件（供 run_health.py 健康检查使用）
+    try:
+        pid_dir = Path(_app_config.socket.socket_dir)
+        pid_dir.mkdir(parents=True, exist_ok=True)
+        manager_pid_file = pid_dir / "qtrader_manager.pid"
+        manager_pid_file.write_text(str(os.getpid()))
+        logger.info(f"Manager PID 文件已写入: {manager_pid_file}")
+    except Exception as e:
+        logger.warning(f"写入 Manager PID 文件失败: {e}")
 
     # 初始化统一共享数据库（PostgreSQL）
     db_config = _app_config.data_base
@@ -148,6 +159,14 @@ async def lifespan(app: FastAPI):
 
     # ==================== 关闭事件 ====================
     logger.info("FastAPI应用关闭中...")
+    # 清理 Manager PID 文件
+    try:
+        manager_pid_file = Path(_app_config.socket.socket_dir) / "qtrader_manager.pid"
+        if manager_pid_file.exists():
+            manager_pid_file.unlink()
+    except Exception as e:
+        logger.warning(f"清理 Manager PID 文件失败: {e}")
+
     # 停止交易管理器
     if _trading_manager:
         await _trading_manager.stop()
@@ -231,7 +250,15 @@ def create_app() -> FastAPI:
 
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket):
-        """WebSocket端点"""
+        """WebSocket端点（握手时校验 token，未认证拒绝连接）"""
+        from qtrader.manager.api.routes.auth import verify_token
+
+        token = websocket.query_params.get("token", "")
+        if not token or verify_token(token) is None:
+            logger.warning("WebSocket 鉴权失败，拒绝连接")
+            await websocket.close(code=4401)
+            return
+
         await websocket_manager.connect(websocket)
 
         try:

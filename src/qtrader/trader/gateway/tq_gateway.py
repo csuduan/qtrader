@@ -9,11 +9,11 @@ import math
 import queue
 import threading
 import time
+from concurrent.futures import Future
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from contextlib import closing
 from datetime import datetime, timedelta
-from typing import Any
-from qtrader.utils.event import EventTypes
-
+from typing import Any, Callable
 
 from pandas import DataFrame
 from tqsdk import TqAccount, TqApi, TqAuth, TqCtp, TqJees, TqKq, TqRohon, TqSim, data_extension
@@ -40,6 +40,7 @@ from qtrader.models.object import (
 from qtrader.trader.gateway.base_gateway import BaseGateway
 from qtrader.utils.async_event_engine import AsyncEventEngine
 from qtrader.utils.config_loader import GatewayConfig, TraderConfig
+from qtrader.utils.event import EventTypes
 from qtrader.utils.logger import get_logger
 
 ctx = get_app_context()
@@ -95,6 +96,13 @@ class TqGateway(BaseGateway):
         # 订单引用计数
         self._order_ref = 0
 
+        # tq 线程与指令队列（TqApi 非线程安全，跨线程调用经队列转交 tq 线程执行）
+        self._tq_thead: threading.Thread | None = None
+        self._cmd_queue: queue.Queue = queue.Queue()
+
+        # 交易日缓存刷新标记（(日期, 是否夜盘) 变化时在 tq 线程内重算）
+        self._td_check_key: tuple | None = None
+
         # 先尝试从数据库加载合约信息
         self.load_contracts()
 
@@ -115,7 +123,6 @@ class TqGateway(BaseGateway):
             if self._running:
                 logger.warning("TqSdk运行中，先断开连接")
                 self.disconnect()
-
 
             self._running = True
             # 启动tq主线程
@@ -151,6 +158,50 @@ class TqGateway(BaseGateway):
         except Exception as e:
             logger.error(f"TqSdk断开连接失败: {e}", exc_info=True)
             return False
+
+    def _submit_to_tq_thread(self, fn: Callable, timeout: float = 5.0) -> Any:
+        """
+        将 TqApi 调用提交到 tq 线程执行并阻塞等待结果
+
+        TqApi 及其关联对象（行情/委托/账户）非线程安全，只能在驱动
+        wait_update 的线程内调用；主事件循环线程的下单/撤单/订阅等
+        请求经指令队列转交 tq 线程执行。已在 tq 线程内时直接执行。
+
+        Args:
+            fn: 在 tq 线程内执行的调用（闭包）
+            timeout: 等待结果的超时时间（秒），超时后取消指令并抛异常
+
+        Returns:
+            fn 的返回值
+        """
+        if threading.current_thread() is self._tq_thead:
+            return fn()
+
+        if not self._running or self.api is None:
+            raise Exception("TqSdk未连接")
+
+        fut: Future = Future()
+        self._cmd_queue.put((fut, fn))
+        try:
+            return fut.result(timeout=timeout)
+        except FuturesTimeoutError:
+            if fut.cancel():
+                logger.error(f"TqApi指令执行超时({timeout}秒)，已取消排队指令")
+            raise Exception(f"TqApi指令执行超时({timeout}秒)")
+
+    def _drain_cmds(self) -> None:
+        """在 tq 线程内排空指令队列"""
+        while True:
+            try:
+                fut, fn = self._cmd_queue.get_nowait()
+            except queue.Empty:
+                return
+            if not fut.set_running_or_notify_cancel():
+                continue  # 已被等待方取消，跳过
+            try:
+                fut.set_result(fn())
+            except Exception as e:
+                fut.set_exception(e)
 
     def _tq_run(self):
         """
@@ -213,7 +264,7 @@ class TqGateway(BaseGateway):
                 account = TqSim()
 
             # 创建TqApi
-            self.api = TqApi(account, auth=self.auth, web_gui=False,debug=False)
+            self.api = TqApi(account, auth=self.auth, web_gui=False, debug=False)
             assert self.api is not None  # 确保类型检查器知道 api 不是 None
 
             # 获取账户和持仓、成交、委托单初始数据
@@ -260,7 +311,16 @@ class TqGateway(BaseGateway):
                 if self.api is None:
                     break
                 try:
-                    has_data = self.api.wait_update(deadline=time.time() + 3)
+                    # 短deadline保证指令队列及时排空（无数据时最多等0.5秒）
+                    has_data = self.api.wait_update(deadline=time.time() + 0.5)
+                    # 先排空指令队列（下单/撤单优先于行情批处理）
+                    self._drain_cmds()
+                    # 日期或昼夜切换时刷新交易日缓存（供 _convert_tick 使用）
+                    now = datetime.now()
+                    check_key = (now.date(), now.hour >= 20)
+                    if check_key != self._td_check_key:
+                        self._td_check_key = check_key
+                        self.trading_day = self.get_trading_day()
                     if has_data:
                         self._collect_and_push_updates()
 
@@ -290,7 +350,10 @@ class TqGateway(BaseGateway):
 
         # 根据交易日历查找下一个交易日
         if self.connected:
-            trading_calendar = self.api.get_trading_calendar(now, now + timedelta(days=30))  # type: ignore[union-attr]
+            trading_calendar = self._submit_to_tq_thread(
+                lambda: self.api.get_trading_calendar(now, now + timedelta(days=30)),  # type: ignore[union-attr]
+                timeout=10.0,
+            )
             while not trading_calendar[trading_calendar.date == trading_day.strftime("%Y-%m-%d")][
                 "trading"
             ].iloc[0]:
@@ -311,21 +374,28 @@ class TqGateway(BaseGateway):
                 logger.info(f"无合约需要订阅")
                 return True
 
-            for s in subscribe_symbols:
-                contract = self.contracts.get(s)
-                if not contract:
-                    logger.error(f"未获取到合约信息: {s}")
-                    continue
-                if self.api is None:
-                    continue
-                quote = self.api.get_quote(contract.exchange.value + "." + contract.symbol)
-                self._quotes[contract.symbol] = quote
+            self._submit_to_tq_thread(
+                lambda: self._do_subscribe_quotes(subscribe_symbols), timeout=30.0
+            )
             logger.info(f"订阅行情: {subscribe_symbols}")
 
             return True
         except Exception as e:
             logger.exception(f"订阅行情失败:{symbols} {e}")
             return False
+
+    def _do_subscribe_quotes(self, subscribe_symbols: list[str]) -> list[str]:
+        """在 tq 线程内订阅行情（get_quote 会阻塞等待行情就绪）"""
+        for s in subscribe_symbols:
+            contract = self.contracts.get(s)
+            if not contract:
+                logger.error(f"未获取到合约信息: {s}")
+                continue
+            if self.api is None:
+                continue
+            quote = self.api.get_quote(contract.exchange.value + "." + contract.symbol)
+            self._quotes[contract.symbol] = quote
+        return subscribe_symbols
 
     def subscribe_bars(self, symbol: str, interval: str) -> bool:
         """订阅K线数据"""
@@ -339,6 +409,14 @@ class TqGateway(BaseGateway):
         if not self.connected:
             return False
 
+        return bool(
+            self._submit_to_tq_thread(
+                lambda: self._do_subscribe_bars(std_symbol, interval), timeout=30.0
+            )
+        )
+
+    def _do_subscribe_bars(self, std_symbol: str, interval: str) -> bool:
+        """在 tq 线程内订阅K线（get_kline_serial 会阻塞等待数据就绪）"""
         seconds = self._interval_to_seconds(interval)
         data_length = 240 * 3
         if self.api is None:
@@ -347,7 +425,7 @@ class TqGateway(BaseGateway):
         if not contract:
             logger.error(f"未获取到合约信息: {std_symbol}")
             return False
-        kline = self.api.get_kline_serial(  # type: ignore[union-attr]
+        kline = self.api.get_kline_serial(
             symbol=contract.exchange.value + "." + contract.symbol,
             duration_seconds=seconds,
             data_length=data_length,
@@ -363,10 +441,6 @@ class TqGateway(BaseGateway):
                 logger.error("TqSdk未连接")
                 raise Exception("TqSdk未连接")
 
-            # 调用TqSdk下单
-            if self.api is None:
-                raise Exception("TqSdk未连接")
-
             contract = self.contracts.get(req.symbol)
             if not contract:
                 logger.error(f"未获取到合约信息: {req.symbol}")
@@ -376,39 +450,50 @@ class TqGateway(BaseGateway):
             tick_price: float = 0.0
             if req.slip is not None and req.slip > 0 and contract.pricetick is not None:
                 tick_price = contract.pricetick * req.slip
-            # 获取行情信息(市价单使用对手价)
-            price = req.price
-            if price is None or price == 0:
-                quote = self._quotes.get(symbol)
-                if not quote or math.isnan(quote.last_price):
-                    logger.error(f"未获取到行情信息: {symbol},{quote}")
-                    raise Exception(f"未获取到行情信息: {symbol}")
 
-                # 使用对手价
-                if req.direction == Direction.BUY:
-                    price = quote.ask_price1 + tick_price
-                else:
-                    price = quote.bid_price1 - tick_price
-
-            order = self.api.insert_order(
-                symbol=contract.exchange.value + "." + req.symbol,
-                direction=req.direction.value,
-                offset=req.offset.value,
-                volume=req.volume,
-                limit_price=price,
+            return self._submit_to_tq_thread(
+                lambda: self._do_insert_order(req, contract, symbol, tick_price)
             )
-            order_id = order.get("order_id", "")
-            logger.info(
-                f"下单成功: {req.symbol} {req.direction.value} {req.offset.value} {req.volume}手 价格：{price}, order_id: {order_id}"
-            )
-
-            # 推送通知
-            self._pending_orders[order_id] = order
-            order_data = self._convert_order(order)
-            return order_data
         except Exception as e:
             logger.exception(f"下单失败: {e}")
             raise e
+
+    def _do_insert_order(
+        self, req: OrderRequest, contract: ContractData, symbol: str, tick_price: float
+    ) -> OrderData:
+        """在 tq 线程内执行下单（行情读取与报单需在驱动线程内完成）"""
+        if self.api is None:
+            raise Exception("TqSdk未连接")
+
+        # 获取行情信息(市价单使用对手价)
+        price = req.price
+        if price is None or price == 0:
+            quote = self._quotes.get(symbol)
+            if not quote or math.isnan(quote.last_price):
+                logger.error(f"未获取到行情信息: {symbol},{quote}")
+                raise Exception(f"未获取到行情信息: {symbol}")
+
+            # 使用对手价
+            if req.direction == Direction.BUY:
+                price = quote.ask_price1 + tick_price
+            else:
+                price = quote.bid_price1 - tick_price
+
+        order = self.api.insert_order(
+            symbol=contract.exchange.value + "." + req.symbol,
+            direction=req.direction.value,
+            offset=req.offset.value,
+            volume=req.volume,
+            limit_price=price,
+        )
+        order_id = order.get("order_id", "")
+        logger.info(
+            f"下单成功: {req.symbol} {req.direction.value} {req.offset.value} {req.volume}手 价格：{price}, order_id: {order_id}"
+        )
+
+        # 推送通知
+        self._pending_orders[order_id] = order
+        return self._convert_order(order)
 
     def cancel_order(self, req: CancelRequest) -> bool:
         """撤单"""
@@ -417,18 +502,22 @@ class TqGateway(BaseGateway):
                 logger.error("TqSdk未连接")
                 return False
 
-            order = self._orders.get(req.order_id)
-            if not order:
-                logger.error(f"订单不存在: {req.order_id}")
-                return False
-            if self.api is None:
-                return False
-            self.api.cancel_order(order)
-            logger.info(f"撤单成功: {req.order_id}")
-            return True
+            return bool(self._submit_to_tq_thread(lambda: self._do_cancel_order(req)))
         except Exception as e:
             logger.exception(f"撤单失败: {e}")
             raise e
+
+    def _do_cancel_order(self, req: CancelRequest) -> bool:
+        """在 tq 线程内执行撤单"""
+        order = self._orders.get(req.order_id)
+        if not order:
+            logger.error(f"订单不存在: {req.order_id}")
+            return False
+        if self.api is None:
+            return False
+        self.api.cancel_order(order)
+        logger.info(f"撤单成功: {req.order_id}")
+        return True
 
     def _query_and_save_contracts(self, update_date: str) -> None:
         """
@@ -498,8 +587,10 @@ class TqGateway(BaseGateway):
 
             # 重置合约缓存日期，强制从API查询
             self._contracts_update_date = None
-            # 调用查询方法
-            self._query_and_save_contracts(update_date)
+            # 调用查询方法（转交 tq 线程执行，查询耗时较长给足超时）
+            self._submit_to_tq_thread(
+                lambda: self._query_and_save_contracts(update_date), timeout=60.0
+            )
 
             logger.info(f"强制刷新合约信息完成，共 {len(self.contracts)} 个合约")
             return True
@@ -615,10 +706,9 @@ class TqGateway(BaseGateway):
 
     def _convert_order(self, order: Order) -> OrderData:
         """转换订单数据"""
-        # 判断订单状态
+        # 判断订单状态：仅终态订单区分被拒（REJECTED）与正常结束（FINISHED，含全部成交/正常撤单）
         error_msg = [
             "拒绝",
-            "取消",
             "不足",
             "暂停",
             "禁止",
@@ -634,10 +724,13 @@ class TqGateway(BaseGateway):
         ]
         status_msg = order.get("last_msg", "")
         status = OrderStatus.PENDING
-        if any(keyword in status_msg for keyword in error_msg):
-            status = OrderStatus.REJECTED
-        elif order.status == "FINISHED":
-            status = OrderStatus.FINISHED
+        if order.status == "FINISHED":
+            is_cancel = any(k in status_msg for k in ("撤单", "撤销", "取消"))
+            is_reject = any(keyword in status_msg for keyword in error_msg)
+            if is_reject and not is_cancel:
+                status = OrderStatus.REJECTED
+            else:
+                status = OrderStatus.FINISHED
 
         data = OrderData(
             account_id=self.account_id or "",
@@ -713,9 +806,10 @@ class TqGateway(BaseGateway):
             open_price=float(quote.get("open", 0)),
             high_price=float(quote.get("highest", 0)),
             low_price=float(quote.get("lowest", 0)),
-            pre_close=float(quote.get("pre_open_interest", 0)),
+            pre_close=float(quote.get("pre_close", 0) or 0),
             limit_up=float(quote.get("upper_limit", 0)),
             limit_down=float(quote.get("lower_limit", 0)),
+            trading_day=self.trading_day,
         )  # type: ignore[call-arg]
 
     def _convert_bar(self, symbol: str, interval: str, data, update: int | float) -> BarData:
@@ -794,7 +888,6 @@ class TqGateway(BaseGateway):
         except Exception as e:
             logger.exception(f"收集数据变化异常: {e}")
 
-
     def _push_tick(self, tick_data: TickData):
         """推送Tick数据到同步队列（非阻塞）"""
         self.emit_event(EventTypes.TICK_UPDATE, tick_data)
@@ -842,7 +935,6 @@ class TqGateway(BaseGateway):
     def _push_contract(self, contract_data: ContractData):
         """推送Contract数据到同步队列（非阻塞）"""
         self.emit_event(EventTypes.CONTRACT_UPDATE, contract_data)
-
 
     def _parse_exchange(self, exchange_code: str) -> Exchange:
         """解析交易所代码"""

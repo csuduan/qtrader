@@ -18,6 +18,9 @@ from qtrader.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# 单条消息最大长度（16MB），防止对端声明超大长度导致内存耗尽
+MAX_MESSAGE_SIZE = 16 * 1024 * 1024
+
 
 class MessageType(str, Enum):
     """消息类型枚举"""
@@ -153,6 +156,12 @@ class MessageProtocol:
 
             # 解析消息长度
             total_length = struct.unpack("!I", length_data)[0]
+
+            if total_length > MAX_MESSAGE_SIZE:
+                logger.error(
+                    f"消息长度超限: {total_length} > {MAX_MESSAGE_SIZE}，判定为非法对端，断开连接"
+                )
+                raise ConnectionError(f"Message too large: {total_length}")
 
             # 读取消息体
             message_data = await reader.readexactly(total_length)

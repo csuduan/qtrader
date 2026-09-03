@@ -46,7 +46,7 @@ class WebSocketManager {
   public connecting: Ref<boolean> = ref(false)
 
   /**
-   * 连接 WebSocket
+   * 连接 WebSocket（自动附加登录 token，未登录时跳过）
    */
   connect(url: string = getWebSocketUrl()): void {
     if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) {
@@ -54,8 +54,18 @@ class WebSocketManager {
       return
     }
 
+    const token = localStorage.getItem('token')
+    if (!token) {
+      console.warn('未登录，跳过 WebSocket 连接')
+      this.connecting.value = false
+      return
+    }
+
+    const sep = url.includes('?') ? '&' : '?'
+    const authedUrl = `${url}${sep}token=${encodeURIComponent(token)}`
+
     this.connecting.value = true
-    this.ws = new WebSocket(url)
+    this.ws = new WebSocket(authedUrl)
 
     this.ws.onopen = () => {
       console.log('WebSocket 连接成功')
@@ -74,11 +84,17 @@ class WebSocketManager {
       }
     }
 
-    this.ws.onclose = () => {
+    this.ws.onclose = (event) => {
       console.log('WebSocket 连接关闭')
       this.connected.value = false
       this.connecting.value = false
       this.onDisconnectedCallbacks.forEach(cb => cb())
+
+      // 4401: 服务端鉴权拒绝（token 无效/过期），不再自动重连
+      if (event.code === 4401) {
+        console.warn('WebSocket 鉴权失败，停止重连')
+        return
+      }
 
       // 自动重连
       if (this.reconnectAttempts < this.maxReconnectAttempts) {

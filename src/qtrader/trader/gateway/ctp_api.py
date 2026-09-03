@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from qtrader.app_context import get_app_context
 from qtrader.models.object import (
     AccountData,
     CancelRequest,
@@ -29,9 +30,8 @@ from qtrader.models.object import (
     TickData,
     TradeData,
 )
-from qtrader.utils.logger import get_logger
-from qtrader.app_context import get_app_context
 from qtrader.utils.config_loader import TraderConfig
+from qtrader.utils.logger import get_logger
 
 ctx = get_app_context()
 config: TraderConfig = ctx.get_config()
@@ -48,7 +48,6 @@ else:
 
 if TYPE_CHECKING:
     from qtrader.trader.gateway.ctp_gateway import CtpGateway
-
 
 
 # CTP 订单引用号上限（int32 最大值）
@@ -116,7 +115,6 @@ MIN_VOLUME = 1
 
 error_msg = [
     "拒绝",
-    "取消",
     "不足",
     "暂停",
     "禁止",
@@ -130,6 +128,9 @@ error_msg = [
     "超限",
     "没有",
 ]
+
+# 正常撤单类消息关键词（命中时保持状态映射，不判为拒单）
+cancel_keywords = ["撤单", "撤销", "取消"]
 
 
 def adjust_price(price: float, max_value: float = 1e308) -> float:
@@ -276,6 +277,13 @@ class CtpMdApi(mdapi.CThostFtdcMdSpi):
         trading_day = pRspUserLogin.TradingDay if pRspUserLogin else ""
         logger.info(f"CTP 行情服务器登录成功，交易日: {trading_day}")
 
+        # 断线重连后服务器侧订阅已丢失，重新订阅原有合约（先清空，回调成功后再入集合）
+        if self.subscribed and self.api:
+            symbols = list(self.subscribed)
+            self.subscribed.clear()
+            self.api.SubscribeMarketData([s.encode("utf-8") for s in symbols if s], len(symbols))
+            logger.info(f"CTP 行情重连后重新订阅: {len(symbols)} 个合约")
+
         self.gateway.on_status()
 
     def OnRspSubMarketData(
@@ -289,7 +297,7 @@ class CtpMdApi(mdapi.CThostFtdcMdSpi):
             return
 
         if pSpecificInstrument:
-            self.subscribed.update(pSpecificInstrument.InstrumentID)
+            self.subscribed.add(pSpecificInstrument.InstrumentID)
             logger.info(f"CTP 订阅行情成功: {pSpecificInstrument.InstrumentID}")
 
     def OnRtnDepthMarketData(self, data: mdapi.CThostFtdcDepthMarketDataField) -> None:
@@ -331,6 +339,7 @@ class CtpMdApi(mdapi.CThostFtdcMdSpi):
                 pre_close=adjust_price(data.PreClosePrice),
                 limit_up=data.UpperLimitPrice,
                 limit_down=data.LowerLimitPrice,
+                trading_day=data.TradingDay,
                 open_min_volume=contract.min_volume or 1,
             )
 
@@ -642,11 +651,15 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
             logger.error(f"查询持仓失败，错误代码：{ret}")
             self._safe_release_semaphore()
 
-    def query_instrument(self) -> None:
+    def query_instrument(self, force: bool = False) -> None:
         """查询合约"""
-        # 检查是否已有当日合约缓存
+        # 检查是否已有当日合约缓存（force=True 时强制刷新）
         today = datetime.now().strftime("%Y-%m-%d")
-        if len(self.gateway.contracts) > 0:
+        if (
+            not force
+            and len(self.gateway.contracts) > 0
+            and self.gateway._contracts_update_date == today
+        ):
             logger.info(f"合约信息已缓存 ({len(self.gateway.contracts)} 个)，跳过查询")
             self.contract_inited = True
             self._safe_release_semaphore()
@@ -798,6 +811,38 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
                 f"CTP 撤单失败: {pInputOrderAction.OrderRef}, {pRspInfo.ErrorID} {pRspInfo.ErrorMsg}"
             )
 
+    def OnErrRtnOrderInsert(
+        self,
+        pInputOrder: tdapi.CThostFtdcInputOrderField,
+        pRspInfo: tdapi.CThostFtdcRspInfoField,
+    ) -> None:
+        """交易所报单失败回报（私有流，柜台校验通过后被交易所拒绝）"""
+        if not pRspInfo or pRspInfo.ErrorID == 0:
+            return
+
+        order_ref = pInputOrder.OrderRef if pInputOrder else ""
+        logger.error(f"CTP 交易所报单失败: {order_ref}, {pRspInfo.ErrorID} {pRspInfo.ErrorMsg}")
+
+        order = self.order_map.get(order_ref)
+        if order:
+            order.status = OrderStatus.REJECTED
+            order.status_msg = pRspInfo.ErrorMsg
+            order.update_time = datetime.now()
+            self.gateway.on_order(order)
+            self.order_map.pop(order_ref, None)
+
+    def OnErrRtnOrderAction(
+        self,
+        pOrderAction: tdapi.CThostFtdcOrderActionField,
+        pRspInfo: tdapi.CThostFtdcRspInfoField,
+    ) -> None:
+        """交易所撤单失败回报（私有流）"""
+        if not pRspInfo or pRspInfo.ErrorID == 0:
+            return
+
+        order_ref = pOrderAction.OrderRef if pOrderAction else ""
+        logger.error(f"CTP 交易所撤单失败: {order_ref}, {pRspInfo.ErrorID} {pRspInfo.ErrorMsg}")
+
     def OnRtnOrder(self, pOrder: tdapi.CThostFtdcOrderField) -> None:
         """委托更新推送"""
         if not pOrder:
@@ -814,10 +859,13 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
             logger.warning(f"CTP 找不到订单: {order_ref}")
             return
 
-        if pOrder.StatusMsg and pOrder.StatusMsg in error_msg:
+        # 撤单类消息保持映射状态（Canceled→FINISHED），其余错误关键词视为拒单（子串匹配）
+        status_msg = pOrder.StatusMsg or ""
+        if not any(k in status_msg for k in cancel_keywords) and any(
+            k in status_msg for k in error_msg
+        ):
             status = OrderStatus.REJECTED
 
-        
         order.order_sys_id = pOrder.OrderSysID
         order.status = status
         order.status_msg = pOrder.StatusMsg

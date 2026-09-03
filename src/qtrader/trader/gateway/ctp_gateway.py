@@ -83,12 +83,9 @@ class CtpGateway(BaseGateway):
         # K线生成器（使用 utils.bar_generator）
         self._bar_generator = MultiSymbolBarGenerator()
 
-    
-
         # 行情和交易接口
         self.md_api: CtpMdApi | None = None
         self.td_api: CtpTdApi | None = None
-
 
         # 订阅配置（来自全局config.yaml）
         self.subs_config = acct_config.subs
@@ -103,7 +100,7 @@ class CtpGateway(BaseGateway):
         if self.connected:
             logger.warning("CTP Gateway 已连接")
             return True
-        
+
         if self._running:
             logger.warning("CTP Gateway 运行中，先断开连接")
             await self.disconnect()
@@ -123,7 +120,7 @@ class CtpGateway(BaseGateway):
             self.md_api.connect()
             self.td_api.connect()
             logger.info("CTP Gateway 连接中...")
-            
+
             return True
 
         except Exception as e:
@@ -251,9 +248,15 @@ class CtpGateway(BaseGateway):
 
             logger.info("开始强制刷新CTP合约信息")
 
-            self._contracts_update_date = None
-            # 调用API查询合约
-            self.td_api.query_instrument()
+            # 先获取查询信号量（查询串行化，避免与查询线程并发触发CTP流控；
+            # query_instrument 内部在失败早退/回报完成时释放）
+            acquired = self.td_api.semaphore.acquire(timeout=5)
+            if not acquired:
+                logger.error("强制刷新CTP合约信息失败：查询信号量获取超时")
+                return False
+
+            # 调用API查询合约（force=True 跳过缓存判断）
+            self.td_api.query_instrument(force=True)
 
             logger.info(f"强制刷新CTP合约信息请求已发送")
             return True
@@ -469,7 +472,6 @@ class CtpGateway(BaseGateway):
             for sub_bar in self.subs_config.subscribe_bars:
                 symbol, interval = sub_bar.split("-")
                 self.subscribe_bars(symbol, interval)
-
 
     def _update_close_profit(self, trade: TradeData, position: PositionData, volume: int) -> None:
         """

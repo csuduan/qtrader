@@ -10,6 +10,7 @@ Socket服务器 - V2版本，使用标准协议
 """
 
 import asyncio
+import os
 import time
 import uuid
 from collections import deque
@@ -273,6 +274,12 @@ class SocketServer:
 
         # 创建Unix Domain Socket服务器
         self.server = await asyncio.start_unix_server(self._handle_client, path=self.socket_path)
+
+        # 收紧socket文件权限：仅所有者可读写，防止同机其他进程连接下单
+        try:
+            os.chmod(self.socket_path, 0o600)
+        except OSError as e:
+            logger.warning(f"无法设置socket文件权限: {e}")
 
         # 启动健康检查任务
         if self._enable_health_check:

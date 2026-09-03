@@ -350,9 +350,11 @@ class SwitchPosManager:
                     try:
                         self.import_csv(content, csv_file.name, mode="replace")
                     except Exception as e:
+                        # 导入失败不写导入记录，下轮扫描重试
                         logger.error(f"导入文件 {csv_file.name} 时出错: {e}")
+                        continue
 
-                    # 记录导入成功，写入导入记录
+                    # 导入成功后写入导入记录
                     record = OrderFile(
                         account_id=self.config.account_id,
                         file_name=csv_file.name,
@@ -361,7 +363,6 @@ class SwitchPosManager:
                         created_at=datetime.now(),
                     )
                     session.add(record)
-                    # session.commit()
                     logger.info(f"文件 {csv_file.name} 导入记录已保存")
 
         except Exception as e:
@@ -387,7 +388,7 @@ class SwitchPosManager:
         todo_instructions = [
             x
             for x in self.get_today_instructions()
-            if x.status not in ("COMPLETED")
+            if x.status != "COMPLETED"
             and x.enabled
             and x.is_deleted == False
             and x.account_id == self.config.account_id
@@ -404,7 +405,7 @@ class SwitchPosManager:
                 if instruction.filled_volume >= instruction.volume:
                     instruction.status = "COMPLETED"
 
-                if instruction.status not in ("COMPLETED"):
+                if instruction.status != "COMPLETED":
                     instruction.status = "PENDING"
                     instruction.error_message = None
                     instruction.current_order_id = None

@@ -68,20 +68,57 @@ class AsyncEventEngine:
     5. 线程安全：支持其他线程通过put/put_async安全投递事件
     """
 
-    def __init__(self, name: str = "AsyncEventEngine") -> None:
+    def __init__(self, name: str = "AsyncEventEngine", queue_size: int = 10000) -> None:
         """
         初始化异步事件引擎
 
         Args:
             name: 事件引擎名称，用于日志区分
+            queue_size: 事件队列上限（防止tick风暴下内存无界增长，满后丢弃新事件）
         """
         self._name = name
         self._running = False
-        self._queue: asyncio.Queue = asyncio.Queue()
+        self._queue: asyncio.Queue = asyncio.Queue(maxsize=queue_size)
+        self._drop_count = 0
         self._handlers: defaultdict = defaultdict(list)
         self._general_handlers: list = []
         self._process_task: asyncio.Task | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
+
+    async def _dispatch(self, handlers: list, data: Any) -> None:
+        """
+        并发执行处理器
+
+        同步处理器直接调用；异步处理器gather后逐个检查结果，
+        异常不再被静默吞掉而是记录日志。
+
+        Args:
+            handlers: 处理器列表
+            data: 事件数据
+        """
+        tasks = []
+        async_handlers = []
+        for handler in handlers:
+            if asyncio.iscoroutinefunction(handler):
+                tasks.append(asyncio.create_task(handler(data)))
+                async_handlers.append(handler)
+            else:
+                try:
+                    handler(data)
+                except Exception as e:
+                    logger.exception(f"[{self._name}] 同步处理器执行失败: {e}")
+
+        if tasks:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for handler, result in zip(async_handlers, results):
+                if isinstance(result, BaseException) and not isinstance(
+                    result, asyncio.CancelledError
+                ):
+                    logger.error(
+                        f"[{self._name}] 异步处理器执行失败 "
+                        f"[{getattr(handler, '__qualname__', handler)}]: {result}",
+                        exc_info=result,
+                    )
 
     async def _process(self, event: Event) -> None:
         """
@@ -96,35 +133,11 @@ class AsyncEventEngine:
         try:
             # 分发给特定类型的处理器（并发执行）
             if event.type in self._handlers:
-                tasks = []
-                for handler in self._handlers[event.type]:
-                    if asyncio.iscoroutinefunction(handler):
-                        tasks.append(asyncio.create_task(handler(event.data)))
-                    else:
-                        # 同步处理器直接调用
-                        try:
-                            handler(event.data)
-                        except Exception as e:
-                            logger.exception(f"[{self._name}] 同步处理器执行失败: {e}")
-
-                if tasks:
-                    # 等待所有异步任务完成
-                    await asyncio.gather(*tasks, return_exceptions=True)
+                await self._dispatch(self._handlers[event.type], event.data)
 
             # 分发给通用处理器（并发执行）
             if self._general_handlers:
-                tasks = []
-                for handler in self._general_handlers:
-                    if asyncio.iscoroutinefunction(handler):
-                        tasks.append(asyncio.create_task(handler(event.data)))
-                    else:
-                        try:
-                            handler(event.data)
-                        except Exception as e:
-                            logger.exception(f"[{self._name}] 同步处理器执行失败: {e}")
-
-                if tasks:
-                    await asyncio.gather(*tasks, return_exceptions=True)
+                await self._dispatch(self._general_handlers, event.data)
 
         except Exception as e:
             logger.exception(f"[{self._name}] 事件处理异常: {e}")
@@ -167,16 +180,25 @@ class AsyncEventEngine:
             self._process_task = asyncio.create_task(self._run())
             logger.info(f"[{self._name}] 异步事件引擎已启动")
 
-    async def stop(self) -> None:
+    async def stop(self, drain_timeout: float = 5.0) -> None:
         """
         停止事件引擎
 
-        停止事件处理并等待所有任务完成。
+        先限时排空队列中残留事件（避免事件丢失），再取消处理任务。
+
+        Args:
+            drain_timeout: 排空队列的超时时间（秒）
         """
         if not self._running:
             return
 
         self._running = False
+
+        # 排空队列中残留事件
+        try:
+            await asyncio.wait_for(self._drain(), timeout=drain_timeout)
+        except asyncio.TimeoutError:
+            logger.warning(f"[{self._name}] 排空事件队列超时，放弃剩余事件")
 
         # 取消处理任务
         if self._process_task:
@@ -188,6 +210,15 @@ class AsyncEventEngine:
 
         self._loop = None
         logger.info(f"[{self._name}] 异步事件引擎已停止")
+
+    async def _drain(self) -> None:
+        """处理队列中所有残留事件（由 stop 在 _running=False 后调用）"""
+        while True:
+            try:
+                event = self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            await self._process(event)
 
     def put(self, event_type: str, data: Any) -> None:
         """
@@ -210,13 +241,22 @@ class AsyncEventEngine:
 
         if current_loop is self._loop:
             # 同一线程：直接操作
-            try:
-                self._queue.put_nowait(event)
-            except asyncio.QueueFull:
-                logger.error(f"[{self._name}] 事件队列已满，丢弃事件: {event_type}")
+            self._safe_put(event)
         else:
             # 其他线程：通过 call_soon_threadsafe 安全投递
-            self._loop.call_soon_threadsafe(self._queue.put_nowait, event)
+            self._loop.call_soon_threadsafe(self._safe_put, event)
+
+    def _safe_put(self, event: Event) -> None:
+        """非阻塞投递事件（队列满时丢弃并计数，日志按频率采样避免刷屏）"""
+        try:
+            self._queue.put_nowait(event)
+        except asyncio.QueueFull:
+            self._drop_count += 1
+            if self._drop_count == 1 or self._drop_count % 100 == 0:
+                logger.error(
+                    f"[{self._name}] 事件队列已满，累计丢弃 {self._drop_count} 个事件"
+                    f"（最近丢弃: {event.type}）"
+                )
 
     async def put_async(self, event_type: str, data: Any) -> None:
         """
@@ -241,7 +281,7 @@ class AsyncEventEngine:
             await self._queue.put(event)
         else:
             # 跨线程：通过 call_soon_threadsafe 投递
-            self._loop.call_soon_threadsafe(self._queue.put_nowait, event)
+            self._loop.call_soon_threadsafe(self._safe_put, event)
 
     def register(self, event_type: str, handler: HandlerType) -> None:
         """

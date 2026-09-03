@@ -40,6 +40,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
         "/static/",
     ]
 
+    # guest（只读角色）允许执行的写操作
+    GUEST_WRITE_ALLOWED: list[str] = [
+        "/api/auth/logout",  # 登出自身
+    ]
+
     def __init__(self, app: ASGIApp):
         super().__init__(app)
 
@@ -127,6 +132,22 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
             # Token有效，将用户信息存入请求状态
             request.state.user = {"user_id": payload.get("sub"), "role": payload.get("role")}
+
+            # 写操作权限控制：guest 角色只读（下单/撤单/平仓/启停 Trader 等需 admin 或 trader）
+            if (
+                request.method.upper() not in ("GET", "HEAD", "OPTIONS")
+                and payload.get("role") not in ("admin", "trader")
+                and path not in self.GUEST_WRITE_ALLOWED
+            ):
+                logger.warning(
+                    f"权限不足: {payload.get('sub')}({payload.get('role')}) "
+                    f"尝试写操作 {request.method} {path}"
+                )
+                return Response(
+                    content='{"code": 403, "message": "权限不足：只读账户无法执行此操作", "data": null}',
+                    status_code=403,
+                    media_type="application/json",
+                )
 
             logger.debug(f"鉴权成功: {payload.get('sub')} - {path}")
 

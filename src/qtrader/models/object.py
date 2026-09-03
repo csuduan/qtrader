@@ -166,6 +166,7 @@ class TickData(BaseModel):
     high_price: float | None = Field(None, description="最高价")
     low_price: float | None = Field(None, description="最低价")
     pre_close: float | None = Field(None, description="昨收价")
+    trading_day: str | None = Field(None, description="交易日（YYYYMMDD，夜盘归属下一交易日）")
 
     # 涨跌停
     limit_up: float | None = Field(None, description="涨停价")

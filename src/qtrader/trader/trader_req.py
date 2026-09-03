@@ -92,16 +92,19 @@ class TraderReqHandler:
             volume = data["volume"]
             price = data.get("price", 0)
 
-            order_id = self.trader.trading_engine.insert_order(
+            order_data = self.trader.trading_engine.insert_order(
                 symbol=symbol,
                 direction=direction.value,
                 offset=offset.value,
                 volume=volume,
                 price=price,
             )
+            if order_data is None:
+                logger.error(f"Trader [{self.account_id}] 下单失败: 返回空订单")
+                return None
 
-            logger.info(f"Trader [{self.account_id}] 下单成功: {order_id}")
-            return order_id
+            logger.info(f"Trader [{self.account_id}] 下单成功: {order_data.order_id}")
+            return order_data.order_id
 
         except Exception as e:
             logger.exception(f"Trader [{self.account_id}] 下单失败: {e}")
@@ -170,8 +173,12 @@ class TraderReqHandler:
         """处理获取活动订单请求"""
         if self.trader.trading_engine is None:
             return []
+        from qtrader.models.object import OrderStatus
+
         orders = self.trader.trading_engine.orders
-        return [order.model_dump() for order in orders.values() if order.status == "ACTIVE"]
+        return [
+            order.model_dump() for order in orders.values() if order.status == OrderStatus.PENDING
+        ]
 
     @request("get_trade")
     async def _req_get_trade(self, data: dict) -> dict | None:
@@ -231,9 +238,11 @@ class TraderReqHandler:
         # 获取持仓列表
         positions = self.trader.trading_engine.positions
 
-        # 获取挂单列表（状态为ALIVE/PENDING的订单）
+        # 获取挂单列表（未终态订单）
+        from qtrader.models.object import OrderStatus
+
         orders = self.trader.trading_engine.orders
-        active_orders = [o for o in orders.values() if o.status in ("ALIVE", "PENDING")]
+        active_orders = [o for o in orders.values() if o.status == OrderStatus.PENDING]
 
         # 获取成交列表（今日）
         trades = self.trader.trading_engine.trades
@@ -1419,81 +1428,88 @@ class TraderReqHandler:
         self.trader.trading_engine.paused = False
         return True
 
+    @request("reload_risk_config")
+    async def _req_reload_risk_config(self, data: dict) -> dict:
+        """处理重载风控配置请求（从共享数据库重新读取）"""
+        if self.trader.trading_engine is None:
+            logger.error(f"Trader [{self.account_id}] 交易引擎未初始化")
+            return {"success": False}
+        self.trader.trading_engine.reload_risk_control_config()
+        return {"success": True}
+
     @request("update_alert_wechat")
     async def _req_update_alert_wechat(self, data: dict) -> dict:
-        """处理更新微信告警配置请求（已废弃，请使用 update_alert_config）"""
+        """处理更新微信告警配置请求（已废弃，映射到通知告警开关）"""
         alert_wechat = data.get("alert_wechat", False)
-        self.trader.account_config.alert.immediate = alert_wechat
-        self.trader.account_config.alert.threshold = alert_wechat
+        self.trader.account_config.alert.notification.enabled = alert_wechat
         logger.warning(
             f"Trader [{self.account_id}] update_alert_wechat 已废弃，请使用 update_alert_config"
         )
-        logger.info(
-            f"Trader [{self.account_id}] 告警配置已更新: immediate={alert_wechat}, threshold={alert_wechat}"
-        )
+        logger.info(f"Trader [{self.account_id}] 通知告警已更新: enabled={alert_wechat}")
         return {"alert_wechat": alert_wechat}
 
     @request("get_alert_wechat")
     async def _req_get_alert_wechat(self, data: dict) -> dict:
-        """处理获取微信告警配置请求（已废弃，请使用 get_alert_config）"""
+        """处理获取微信告警配置请求（已废弃，映射到通知告警开关）"""
         logger.warning(
             f"Trader [{self.account_id}] get_alert_wechat 已废弃，请使用 get_alert_config"
         )
-        legacy_value = (
-            self.trader.account_config.alert.immediate or self.trader.account_config.alert.threshold
-        )
-        return {"alert_wechat": legacy_value}
+        return {"alert_wechat": self.trader.account_config.alert.notification.enabled}
 
     @request("update_alert_config")
     async def _req_update_alert_config(self, data: dict) -> dict:
-        """处理更新告警配置请求"""
-        immediate = data.get("immediate")
-        threshold = data.get("threshold")
-        threshold_count = data.get("threshold_count")
-        threshold_window = data.get("threshold_window")
-        dnd_start = data.get("dnd_start")
-        dnd_end = data.get("dnd_end")
+        """
+        处理更新告警配置请求
 
-        if immediate is not None:
-            self.trader.account_config.alert.immediate = immediate
-        if threshold is not None:
-            self.trader.account_config.alert.threshold = threshold
-        if threshold_count is not None:
-            self.trader.account_config.alert.threshold_count = threshold_count
-        if threshold_window is not None:
-            self.trader.account_config.alert.threshold_window = threshold_window
-        if dnd_start is not None:
-            self.trader.account_config.alert.dnd_start = dnd_start
-        if dnd_end is not None:
-            self.trader.account_config.alert.dnd_end = dnd_end
+        data 结构（新）: {"notification": {...}, "exception": {...}}，
+        两字段均可选，内部字段均可部分更新。
+        """
+        alert = self.trader.account_config.alert
+
+        notification = data.get("notification") or {}
+        if "enabled" in notification:
+            alert.notification.enabled = bool(notification["enabled"])
+        if notification.get("dnd_start") is not None:
+            alert.notification.dnd_start = int(notification["dnd_start"])
+        if notification.get("dnd_end") is not None:
+            alert.notification.dnd_end = int(notification["dnd_end"])
+
+        exception = data.get("exception") or {}
+        if "enabled" in exception:
+            alert.exception.enabled = bool(exception["enabled"])
+        if exception.get("dnd_start") is not None:
+            alert.exception.dnd_start = int(exception["dnd_start"])
+        if exception.get("dnd_end") is not None:
+            alert.exception.dnd_end = int(exception["dnd_end"])
 
         logger.info(
             f"Trader [{self.account_id}] 告警配置已更新: "
-            f"immediate={self.trader.account_config.alert.immediate}, "
-            f"threshold={self.trader.account_config.alert.threshold}, "
-            f"threshold_count={self.trader.account_config.alert.threshold_count}, "
-            f"threshold_window={self.trader.account_config.alert.threshold_window}, "
-            f"dnd={self.trader.account_config.alert.dnd_start}-{self.trader.account_config.alert.dnd_end}"
+            f"notification(enabled={alert.notification.enabled}, "
+            f"dnd={alert.notification.dnd_start}-{alert.notification.dnd_end}), "
+            f"exception(enabled={alert.exception.enabled}, "
+            f"dnd={alert.exception.dnd_start}-{alert.exception.dnd_end})"
         )
-        return {
-            "immediate": self.trader.account_config.alert.immediate,
-            "threshold": self.trader.account_config.alert.threshold,
-            "threshold_count": self.trader.account_config.alert.threshold_count,
-            "threshold_window": self.trader.account_config.alert.threshold_window,
-            "dnd_start": self.trader.account_config.alert.dnd_start,
-            "dnd_end": self.trader.account_config.alert.dnd_end,
-        }
+        return self._dump_alert_config(alert)
 
     @request("get_alert_config")
     async def _req_get_alert_config(self, data: dict) -> dict:
         """处理获取告警配置请求"""
+        return self._dump_alert_config(self.trader.account_config.alert)
+
+    @staticmethod
+    def _dump_alert_config(alert) -> dict:
+        """将 AlertConfig 序列化为可过 IPC 的字典"""
         return {
-            "immediate": self.trader.account_config.alert.immediate,
-            "threshold": self.trader.account_config.alert.threshold,
-            "threshold_count": self.trader.account_config.alert.threshold_count,
-            "threshold_window": self.trader.account_config.alert.threshold_window,
-            "dnd_start": self.trader.account_config.alert.dnd_start,
-            "dnd_end": self.trader.account_config.alert.dnd_end,
+            "notification": {
+                "enabled": alert.notification.enabled,
+                "dnd_start": alert.notification.dnd_start,
+                "dnd_end": alert.notification.dnd_end,
+            },
+            "exception": {
+                "enabled": alert.exception.enabled,
+                "dnd_start": alert.exception.dnd_start,
+                "dnd_end": alert.exception.dnd_end,
+            },
         }
 
     @request("export_positions")

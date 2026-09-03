@@ -82,10 +82,6 @@ const routes: RouteRecordRaw[] = [
   },
   // 重定向：兼容旧路由
   {
-    path: '/setting',
-    redirect: '/account'
-  },
-  {
     path: '/account/detail',
     redirect: '/account'
   },
@@ -112,10 +108,6 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/trading',
     redirect: '/account'
-  },
-  {
-    path: '/rotation',
-    redirect: '/rotation'
   },
   {
     path: '/system',

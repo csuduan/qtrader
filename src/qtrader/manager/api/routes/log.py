@@ -5,6 +5,7 @@
 """
 
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -16,6 +17,25 @@ from qtrader.utils.logger import get_logger
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/log", tags=["日志"])
+
+# 账户ID与日志文件名的合法字符（防路径穿越）
+_SAFE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _validate_safe_name(value: str, field: str) -> str | None:
+    """
+    校验路径组成部分只含安全字符
+
+    Args:
+        value: 待校验的值
+        field: 字段名（用于错误信息）
+
+    Returns:
+        非法时返回错误信息，合法返回 None
+    """
+    if not value or not _SAFE_NAME_PATTERN.match(value):
+        return f"非法的{field}: 仅允许字母、数字、下划线和短横线"
+    return None
 
 
 def get_log_dir() -> Path:
@@ -42,6 +62,10 @@ async def get_log(
 
     返回日志行列表、新的偏移量和是否还有更多内容
     """
+    for value, field in ((account_id, "账户ID"), (filename, "日志文件名")):
+        if err := _validate_safe_name(value, field):
+            return error_response(code=400, message=err)
+
     try:
         log_dir = get_log_dir()
         # 日志文件路径: logs/{account_id}/trader-{account_id}_{filename}.log
@@ -135,6 +159,9 @@ async def get_log_files(
 
     返回可用的日志文件列表，包括文件名、大小和修改时间
     """
+    if err := _validate_safe_name(account_id, "账户ID"):
+        return error_response(code=400, message=err)
+
     try:
         log_dir = get_log_dir()
         account_log_dir = log_dir / account_id
@@ -176,6 +203,10 @@ async def download_log(
 
     返回日志文件内容
     """
+    for value, field in ((account_id, "账户ID"), (filename, "日志文件名")):
+        if err := _validate_safe_name(value, field):
+            return error_response(code=400, message=err)
+
     try:
         log_dir = get_log_dir()
         log_file = log_dir / account_id / f"trader-{account_id}_{filename}.log"

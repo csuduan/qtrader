@@ -2,6 +2,7 @@
 成交数据持久化DAO
 """
 
+from datetime import datetime
 from decimal import Decimal
 
 from qtrader.models.object import TradeData
@@ -42,7 +43,11 @@ class TradeDao:
             offset=data.offset.value if hasattr(data, "offset") else "",
             price=Decimal(str(data.price)) if hasattr(data, "price") else Decimal("0"),
             volume=data.volume if hasattr(data, "volume") else 0,
-            trade_date_time=data.trade_time if hasattr(data, "trade_time") else 0,
+            trade_date_time=(
+                data.trade_time
+                if hasattr(data, "trade_time") and data.trade_time
+                else datetime.now()
+            ),
             order_price=(
                 Decimal(str(data.order_price))
                 if hasattr(data, "order_price") and data.order_price is not None

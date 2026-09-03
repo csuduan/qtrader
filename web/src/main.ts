@@ -6,7 +6,6 @@ import 'element-plus/dist/index.css'
 import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import App from './App.vue'
 import router from './router'
-import wsManager from './ws'
 import './style.css'
 import './styles/responsive.scss'
 
@@ -27,8 +26,4 @@ app.use(ElementPlus)
 
 app.mount('#app')
 
-// 初始化WebSocket连接
-const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-const wsUrl = `${protocol}//${window.location.host}/ws`
-console.log('Connecting to WebSocket:', wsUrl)
-wsManager.connect(wsUrl)
+// WebSocket 在登录成功后由 store.initWebSocket() 发起连接（需携带 token 鉴权），此处不再提前连接

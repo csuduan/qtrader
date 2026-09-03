@@ -773,11 +773,15 @@ onMounted(async () => {
     await loadTasks()
   }
 
-  wsManager.onTickUpdate(handleTickUpdate)
+  unsubscribeTick = wsManager.onTickUpdate(handleTickUpdate)
 })
 
+// 保存取消函数，卸载时正确移除该回调（旧写法"再注册一次再调用"会残留一个订阅导致泄漏）
+let unsubscribeTick: (() => void) | null = null
+
 onUnmounted(() => {
-  wsManager.onTickUpdate(handleTickUpdate)()
+  unsubscribeTick?.()
+  unsubscribeTick = null
   wsManager.unsubscribeQuotes()
 })
 </script>

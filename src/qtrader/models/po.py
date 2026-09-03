@@ -12,11 +12,13 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
 
@@ -92,6 +94,15 @@ class PositionPo(Base):
 
     __table_args__ = (
         UniqueConstraint("account_id", "strategy_id", "symbol", name="uq_account_strategy_symbol"),
+        # strategy_id 为 NULL 时上述唯一约束不生效（PG 中 NULL≠NULL），补充账户级部分唯一索引
+        Index(
+            "uq_position_account_symbol",
+            "account_id",
+            "symbol",
+            unique=True,
+            postgresql_where=text("strategy_id IS NULL"),
+            sqlite_where=text("strategy_id IS NULL"),
+        ),
     )
 
     account = relationship("AccountPo", back_populates="positions")
