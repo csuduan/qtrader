@@ -86,6 +86,7 @@ async def lifespan(app: FastAPI):
 
     # 初始化统一共享数据库（PostgreSQL）
     db_config = _app_config.data_base
+    assert db_config is not None, "数据库配置缺失"
     db_url = build_db_url(db_config)
     _manager_db: Database = init_database(
         db_url,
@@ -228,8 +229,8 @@ def create_app() -> FastAPI:
 
     # 注册全局异常处理器
     app.add_exception_handler(Exception, global_exception_handler)
-    app.add_exception_handler(StarletteHTTPException, http_exception_handler)
-    app.add_exception_handler(RequestValidationError, validation_exception_handler)
+    app.add_exception_handler(StarletteHTTPException, http_exception_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(RequestValidationError, validation_exception_handler)  # type: ignore[arg-type]
 
     # 动态注册路由
     _register_routes(app)

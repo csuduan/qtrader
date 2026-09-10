@@ -51,6 +51,7 @@
                 size="large"
                 :prefix-icon="User"
                 clearable
+                data-testid="username-input"
               />
             </el-form-item>
             
@@ -63,6 +64,7 @@
                 :prefix-icon="Lock"
                 show-password
                 clearable
+                data-testid="password-input"
               />
             </el-form-item>
             

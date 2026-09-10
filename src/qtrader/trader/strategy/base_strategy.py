@@ -267,6 +267,8 @@ class BaseStrategy:
         if symbol not in self._positions:
             from qtrader.models.object import Exchange
 
+            if self.trading_engine is None:
+                raise Exception(f"策略 [{self.strategy_id}] 交易引擎未初始化")
             contract = self.trading_engine.get_contract(symbol)
             if not contract:
                 logger.error(f"策略 [{self.strategy_id}] 未找到合约信息: {symbol}")
@@ -383,7 +385,7 @@ class BaseStrategy:
         pos = position.pos_long if signal.side == 1 else position.pos_short
         if pos > 0:
             exit_cmd = OrderCmd(
-                symbol=self.param.symbol,
+                symbol=self.symbol,
                 offset=Offset.CLOSE,
                 direction=Direction.SELL if signal.side == 1 else Direction.BUY,
                 volume=pos,
@@ -402,7 +404,7 @@ class BaseStrategy:
         if pos_net > 0:
             # 锁仓：净头寸为多，需要开空
             lock_cmd = OrderCmd(
-                symbol=self.param.symbol,
+                symbol=self.symbol,
                 offset=Offset.OPEN,
                 direction=Direction.SELL,
                 volume=pos_net,
@@ -412,7 +414,7 @@ class BaseStrategy:
         elif pos_net < 0:
             # 锁仓：净头寸为空，需要开多
             lock_cmd = OrderCmd(
-                symbol=self.param.symbol,
+                symbol=self.symbol,
                 offset=Offset.OPEN,
                 direction=Direction.BUY,
                 volume=-pos_net,
@@ -450,7 +452,7 @@ class BaseStrategy:
             if pos_net > self.volume:
                 # 净多超过目标手数了，优先平多(昨)，剩余开空
                 target_volume = pos_net - self.volume
-                close_volume = min(target_volume, position.pos_long_yd)
+                close_volume = min(target_volume, position.pos_long_yd or 0)
                 open_volume = target_volume - close_volume
                 logger.info(
                     f"开多，净多头[{pos_net}]超过目标手数[{self.volume}]，优先平多(昨)[{close_volume}]手，剩余开空[{open_volume}]手"
@@ -479,7 +481,7 @@ class BaseStrategy:
             elif position.pos < self.volume:
                 # 净多不足目标手数了，优先平空(昨)，剩余开多
                 target_volume = self.volume - position.pos
-                close_volume = min(target_volume, position.pos_short_yd)
+                close_volume = min(target_volume, position.pos_short_yd or 0)
                 open_volume = target_volume - close_volume
                 logger.info(
                     f"开多，净多头[{position.pos}]不足目标手数[{self.volume}]，优先平空(昨)[{close_volume}]手，剩余开多[{open_volume}]手"
@@ -509,7 +511,7 @@ class BaseStrategy:
             if pos_net > self.volume:
                 # 净空超过目标手数了，优先平空(昨)，剩余开多
                 target_volume = pos_net - self.volume
-                close_volume = min(target_volume, position.pos_short_yd)
+                close_volume = min(target_volume, position.pos_short_yd or 0)
                 open_volume = target_volume - close_volume
                 logger.info(
                     f"开空，净空头[{pos_net}]超过目标手数[{self.volume}]，优先平空(昨)[{close_volume}]手，剩余开多[{open_volume}]手"
@@ -537,7 +539,7 @@ class BaseStrategy:
             elif position.pos > -self.volume:
                 # 净空不足目标手数了，优先平多(昨)，剩余开空
                 target_volume = self.volume - (-position.pos)
-                close_volume = min(target_volume, position.pos_long_yd)
+                close_volume = min(target_volume, position.pos_long_yd or 0)
                 open_volume = target_volume - close_volume
                 logger.info(
                     f"开空，净空头[{pos_net}]不足目标手数[{self.volume}]，优先平多(昨)[{close_volume}]手，剩余开空[{open_volume}]手"
@@ -651,13 +653,17 @@ class BaseStrategy:
 
         # 计算多头持仓盈亏
         long_profit = 0.0
-        if position.pos_long > 0 and position.hold_price_long > 0:
-            long_profit = (last_price - position.hold_price_long) * position.pos_long * multiple
+        if position.pos_long > 0 and (position.hold_price_long or 0) > 0:
+            long_profit = (
+                (last_price - (position.hold_price_long or 0)) * position.pos_long * multiple
+            )
 
         # 计算空头持仓盈亏
         short_profit = 0.0
-        if position.pos_short > 0 and position.hold_price_short > 0:
-            short_profit = (position.hold_price_short - last_price) * position.pos_short * multiple
+        if position.pos_short > 0 and (position.hold_price_short or 0) > 0:
+            short_profit = (
+                ((position.hold_price_short or 0) - last_price) * position.pos_short * multiple
+            )
 
         return long_profit + short_profit
 

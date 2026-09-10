@@ -90,7 +90,7 @@ class TestRiskControl:
         assert status["remaining_orders"] == risk_config.max_daily_orders - 10
         assert status["remaining_cancels"] == risk_config.max_daily_cancels - 5
     
-    @patch('src.trader.risk_control.datetime')
+    @patch('qtrader.trader.risk_control.datetime')
     def test_reset_on_new_day(self, mock_datetime, risk_control):
         """测试新的一天自动重置计数器"""
         today = datetime(2024, 1, 1)
@@ -138,7 +138,7 @@ class TestRiskControl:
         
         assert risk_control._last_reset_date is not None
     
-    @patch('src.trader.risk_control.logger')
+    @patch('qtrader.trader.risk_control.logger')
     def test_order_rejection_logged(self, mock_logger, risk_control):
         """测试订单拒绝日志"""
         risk_control.daily_order_count = 100
@@ -147,7 +147,7 @@ class TestRiskControl:
         
         mock_logger.warning.assert_called()
     
-    @patch('src.trader.risk_control.logger')
+    @patch('qtrader.trader.risk_control.logger')
     def test_cancel_rejection_logged(self, mock_logger, risk_control):
         """测试撤单拒绝日志"""
         risk_control.daily_cancel_count = 50
@@ -156,7 +156,7 @@ class TestRiskControl:
         
         mock_logger.warning.assert_called()
     
-    @patch('src.trader.risk_control.logger')
+    @patch('qtrader.trader.risk_control.logger')
     def test_new_day_reset_logged(self, mock_logger, risk_control):
         """测试新的一天重置日志"""
         today = datetime.now()
@@ -164,7 +164,7 @@ class TestRiskControl:
         
         risk_control._last_reset_date = today
         
-        with patch('src.trader.risk_control.datetime') as mock_datetime:
+        with patch('qtrader.trader.risk_control.datetime') as mock_datetime:
             mock_datetime.now.return_value = tomorrow
             risk_control.check_order(volume=5)
         

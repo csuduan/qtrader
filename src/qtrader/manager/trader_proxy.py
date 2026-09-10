@@ -190,7 +190,7 @@ class TraderProxy:
             sys.executable,
             "run_trader.py",
             "--account-id",
-            self.account_id,
+            self.account_id or "",
         ]
 
         # 根据账户配置决定是否添加debug参数
@@ -276,7 +276,9 @@ class TraderProxy:
         """
         # 创建Socket客户端
         self.start_time = datetime.now()
-        self.socket_client = SocketClient(self.socket_path, self.account_id, self._on_msg_callback)
+        self.socket_client = SocketClient(
+            self.socket_path, self.account_id or "", self._on_msg_callback
+        )
         check_interval = 5
         attempt = 0
         while self._running:
@@ -386,111 +388,6 @@ class TraderProxy:
                     logger.info(f"TraderProxy [{self.account_id}] 从DB加载账户数据成功")
         except Exception as e:
             logger.warning(f"TraderProxy [{self.account_id}] 从DB加载账户数据失败: {e}")
-
-    async def _sync_account_from_trader(self) -> None:
-        """连接Trader成功后，查询完整账户信息并更新缓存"""
-        try:
-            if not self.socket_client or not self.socket_client.is_connected():
-                return
-
-            data = await self.socket_client.request("get_account", {}, timeout=10.0)
-            if data and isinstance(data, dict):
-                # 更新缓存（保留Trader未返回的字段）
-                if self._account_cache:
-                    merged = self._account_cache.model_dump()
-                    merged.update(data)
-                    self._account_cache = AccountData.model_validate(merged)
-                else:
-                    self._account_cache = AccountData.model_validate(data)
-                logger.info(
-                    f"TraderProxy [{self.account_id}] 已从Trader同步账户数据, "
-                    f"md={data.get('md_connected')}, td={data.get('td_connected')}"
-                )
-        except Exception as e:
-            logger.warning(f"TraderProxy [{self.account_id}] 从Trader同步账户数据失败: {e}")
-
-    async def _sync_data_from_trader(self) -> None:
-        """连接Trader成功后，同步全量持仓/订单/成交数据到内存缓存"""
-        try:
-            if not self.socket_client or not self.socket_client.is_connected():
-                return
-
-            # 并行查询持仓、订单、成交
-            import asyncio
-
-            results = await asyncio.gather(
-                self.socket_client.request("get_positions", {}, timeout=10.0),
-                self.socket_client.request("get_orders", {}, timeout=10.0),
-                self.socket_client.request("get_trades", {}, timeout=10.0),
-                return_exceptions=True,
-            )
-
-            # 持仓
-            positions_data = results[0]
-            if isinstance(positions_data, list):
-                self._position_cache.clear()
-                for pos in positions_data:
-                    if isinstance(pos, dict) and pos.get("symbol"):
-                        self._position_cache[pos["symbol"]] = PositionData.model_validate(pos)
-                logger.info(
-                    f"TraderProxy [{self.account_id}] 已同步 {len(self._position_cache)} 个持仓"
-                )
-
-            # 订单
-            orders_data = results[1]
-            if isinstance(orders_data, list):
-                self._order_cache.clear()
-                for order in orders_data:
-                    if isinstance(order, dict) and order.get("order_id"):
-                        self._order_cache[order["order_id"]] = OrderData.model_validate(order)
-                logger.info(
-                    f"TraderProxy [{self.account_id}] 已同步 {len(self._order_cache)} 个订单"
-                )
-
-            # 成交
-            trades_data = results[2]
-            if isinstance(trades_data, list):
-                self._trade_cache.clear()
-                for trade in trades_data:
-                    if isinstance(trade, dict) and trade.get("trade_id"):
-                        self._trade_cache[trade["trade_id"]] = TradeData.model_validate(trade)
-                logger.info(
-                    f"TraderProxy [{self.account_id}] 已同步 {len(self._trade_cache)} 个成交"
-                )
-
-        except Exception as e:
-            logger.warning(f"TraderProxy [{self.account_id}] 从Trader同步数据失败: {e}")
-
-    async def _check_and_sync_if_ready(self) -> None:
-        """
-        检查Trader是否已就绪，如果已就绪则立即同步
-
-        用于连接成功后判断Trader状态：
-        - 如果Trader已就绪（TD/MD连接成功），立即全量同步
-        - 如果Trader未就绪，等待 trader_ready 通知后再同步
-        """
-        try:
-            if not self.socket_client or not self.socket_client.is_connected():
-                return
-
-            # 查询账户状态，检查TD/MD是否已连接
-            data = await self.socket_client.request("get_account", {}, timeout=5.0)
-            if data and isinstance(data, dict):
-                md_connected = data.get("md_connected", False)
-                td_connected = data.get("td_connected", False)
-
-                if md_connected and td_connected:
-                    # Trader已就绪，立即全量同步
-                    logger.info(f"Trader [{self.account_id}] 已就绪，立即同步数据")
-                    await self._sync_account_detail()
-                else:
-                    # Trader未就绪，等待 trader_ready 通知
-                    logger.info(
-                        f"Trader [{self.account_id}] 未就绪 "
-                        f"(md={md_connected}, td={td_connected})，等待就绪通知..."
-                    )
-        except Exception as e:
-            logger.warning(f"检查Trader就绪状态失败: {e}")
 
     async def _sync_account_detail(self) -> None:
         """
@@ -645,8 +542,7 @@ class TraderProxy:
         """
         try:
             # 直接用推送数据更新缓存
-            if self._account_cache:
-                self._account_cache = AccountData.model_validate(data)
+            self._account_cache = AccountData.model_validate(data)
             # 推送给前端
             self._emit_data("account", self._account_cache.model_dump())
             md = data.get("md_connected", False)
@@ -688,18 +584,20 @@ class TraderProxy:
                 logger.warning("应用上下文未初始化，无法处理通知")
                 return
 
-            alarm_service: AlarmService = ctx.get_alarm_service()
+            alarm_service = ctx.get_alarm_service()
             if not alarm_service:
                 logger.warning("告警服务未初始化，无法处理通知")
                 return
 
-            # 异步处理通知
+            # 异步处理通知（notify_alarm 为同步方法，放线程池避免阻塞事件循环）
             import asyncio
 
             account_id = data.get("account_id", "SYSTEM")
             title = data.get("title", "")
             detail = data.get("detail", "")
-            asyncio.create_task(alarm_service.notify_alarm(account_id, "Trader", title, detail))
+            asyncio.create_task(
+                asyncio.to_thread(alarm_service.notify_alarm, account_id, "Trader", title, detail)
+            )
         except Exception as e:
             logger.exception(f"处理通知推送失败: {e}")
 
@@ -929,7 +827,7 @@ class TraderProxy:
             )
             return account_data
         return AccountData.model_construct(
-            account_id=self.account_id,
+            account_id=self.account_id or "",
             status=TraderState.CONNECTED if self._is_state(TraderState.CONNECTED) else self._state,
         )
 
@@ -942,7 +840,7 @@ class TraderProxy:
             )
             return account_data
         return AccountData.model_construct(
-            account_id=self.account_id,
+            account_id=self.account_id or "",
             status=TraderState.CONNECTED if self._is_state(TraderState.CONNECTED) else self._state,
         )
 
@@ -1082,8 +980,10 @@ class TraderProxy:
             return None
 
         except Exception as e:
+            # 记录后重新抛出：异常消息即 Trader 回传的真实失败原因（如非交易时段拦截），
+            # 由路由层转换为前端错误提示
             logger.exception(f"TraderProxy [{self.account_id}] 下单请求失败: {e}")
-            return None
+            raise
 
     async def send_cancel_request(self, order_id: str) -> bool:
         """
@@ -1106,8 +1006,9 @@ class TraderProxy:
             return bool(response)
 
         except Exception as e:
+            # 记录后重新抛出，由路由层转换为前端错误提示
             logger.exception(f"TraderProxy [{self.account_id}] 撤单请求失败: {e}")
-            return False
+            raise
 
     async def subscribe(self, request_data):
         """
@@ -1125,8 +1026,9 @@ class TraderProxy:
             return bool(response)
 
         except Exception as e:
+            # 记录后重新抛出，由路由层转换为前端错误提示
             logger.exception(f"TraderProxy [{self.account_id}] 订阅请求失败: {e}")
-            return False
+            raise
 
     # ==================== 网关控制接口 ====================
 
@@ -1147,8 +1049,9 @@ class TraderProxy:
             response = await self.socket_client.request("connect_gateway", {}, timeout=10.0)
             return bool(response)
         except Exception as e:
+            # 记录后重新抛出，由路由层转换为前端错误提示
             logger.error(f"TraderProxy [{self.account_id}] 连接网关请求失败: {e}")
-            return False
+            raise
 
     async def disconnect(self) -> bool:
         """
@@ -1167,8 +1070,9 @@ class TraderProxy:
             response = await self.socket_client.request("disconnect_gateway", {}, timeout=10.0)
             return bool(response)
         except Exception as e:
+            # 记录后重新抛出，由路由层转换为前端错误提示
             logger.error(f"TraderProxy [{self.account_id}] 断开网关请求失败: {e}")
-            return False
+            raise
 
     async def pause(self) -> bool:
         """
@@ -1261,7 +1165,7 @@ class TraderProxy:
         logger.warning("get_alert_wechat 已废弃，请使用 get_alert_config")
         config = await self.get_alert_config()
         if config:
-            return config.get("immediate", False) or config.get("threshold", False)
+            return bool(config.get("immediate", False) or config.get("threshold", False))
         return None
 
     async def update_alert_config(self, config: dict[str, Any]) -> bool:

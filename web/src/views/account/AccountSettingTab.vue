@@ -130,7 +130,14 @@
           </template>
 
           <div class="table-wrapper">
-            <el-table :data="tasks" stripe v-loading="loadingTasks" table-layout="fixed" :size="isMobile ? 'small' : 'default'">
+            <el-table
+              :data="tasks"
+              data-testid="jobs-table"
+              stripe
+              v-loading="loadingTasks"
+              table-layout="fixed"
+              :size="isMobile ? 'small' : 'default'"
+            >
               <template #empty>
                 <el-empty description="暂无定时任务" />
               </template>

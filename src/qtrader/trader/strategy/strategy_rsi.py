@@ -194,7 +194,7 @@ class RsiStrategy(BaseStrategy):
         except Exception as e:
             logger.exception(f"策略 [{self.strategy_id}] on_bar 异常: {e}")
 
-    def _resample_kline(self, bar: BarData) -> tuple[BarData, BarData]:
+    def _resample_kline(self, bar: BarData) -> tuple[BarData | None, BarData | None]:
         """
         K线重采样（09:30锚定）
         只有在收集齐该时间段内所有M1 bar后才产生新的重采样bar。
@@ -336,7 +336,7 @@ class RsiStrategy(BaseStrategy):
 
         return ext_signal != 0 and ext_signal == side
 
-    def _check_exit_conditions(self, current_price: float, signal: Signal) -> str:
+    def _check_exit_conditions(self, current_price: float, signal: Signal) -> str | None:
         """
         检查止盈止损条件
 
@@ -386,7 +386,7 @@ def roll_mean_right(values: list, n: int) -> float:
     if n <= 0 or L < n:
         return np.nan
     if n == 1:
-        return a[-1]
+        return float(a[-1])
 
     # 识别有效（有限）值
     finite_mask = np.isfinite(a)
@@ -402,7 +402,7 @@ def roll_mean_right(values: list, n: int) -> float:
 
     if k <= 0:
         return np.nan
-    return s / k
+    return float(s / k)
 
 
 def calc_rsi_sma(values: list, n: int) -> float:

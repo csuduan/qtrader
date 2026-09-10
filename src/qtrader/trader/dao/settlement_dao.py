@@ -22,14 +22,24 @@ def _to_decimal(value: float | None) -> Decimal | None:
 class SettlementDao:
     """每日结算快照数据访问对象"""
 
-    def save_settlement(self, account_id: str, settle_date: date, account: AccountData) -> None:
+    def save_settlement_snapshot(
+        self,
+        account_id: str,
+        settle_date: date,
+        account: AccountData,
+        positions: dict[str, PositionData],
+    ) -> None:
         """
-        保存账户每日结算权益快照（同日重复保存则覆盖）
+        在同一事务中保存账户结算权益快照与账户级持仓快照
+
+        权益快照同日重复保存则覆盖；持仓快照先删除当日旧记录再写入，空仓跳过。
+        两步写入共用同一事务，避免权益已更新而持仓快照缺失的半完成状态。
 
         Args:
             account_id: 账户ID
             settle_date: 结算日期
             account: 账户数据
+            positions: 账户级持仓字典（symbol -> PositionData）
         """
         with session_scope() as session:
             po = (
@@ -40,32 +50,19 @@ class SettlementDao:
             if not po:
                 po = AccountHistoryPo(account_id=account_id, settle_date=settle_date)
 
-            po.balance = Decimal(str(account.balance))
-            po.available = Decimal(str(account.available))
-            po.pre_balance = _to_decimal(account.pre_balance)
-            po.static_balance = _to_decimal(account.static_balance)
-            po.deposit = _to_decimal(account.deposit)
-            po.withdraw = _to_decimal(account.withdraw)
-            po.close_profit = _to_decimal(account.close_profit)
-            po.hold_profit = _to_decimal(account.hold_profit)
-            po.margin = _to_decimal(account.margin)
-            po.risk_ratio = _to_decimal(account.risk_ratio)
+            po.balance = Decimal(str(account.balance))  # type: ignore[assignment]
+            po.available = Decimal(str(account.available))  # type: ignore[assignment]
+            po.pre_balance = _to_decimal(account.pre_balance)  # type: ignore[assignment]
+            po.static_balance = _to_decimal(account.static_balance)  # type: ignore[assignment]
+            po.deposit = _to_decimal(account.deposit)  # type: ignore[assignment]
+            po.withdraw = _to_decimal(account.withdraw)  # type: ignore[assignment]
+            po.close_profit = _to_decimal(account.close_profit)  # type: ignore[assignment]
+            po.hold_profit = _to_decimal(account.hold_profit)  # type: ignore[assignment]
+            po.margin = _to_decimal(account.margin)  # type: ignore[assignment]
+            po.risk_ratio = _to_decimal(account.risk_ratio)  # type: ignore[assignment]
 
             session.add(po)
-        logger.info(f"结算权益快照已保存: {account_id} {settle_date} 权益={account.balance}")
 
-    def save_positions(
-        self, account_id: str, settle_date: date, positions: dict[str, PositionData]
-    ) -> None:
-        """
-        保存账户每日结算持仓快照（先删除当日旧记录再写入，空仓跳过）
-
-        Args:
-            account_id: 账户ID
-            settle_date: 结算日期
-            positions: 账户级持仓字典（symbol -> PositionData）
-        """
-        with session_scope() as session:
             session.query(PositionHistoryPo).filter_by(
                 account_id=account_id, settle_date=settle_date
             ).delete()
@@ -77,7 +74,7 @@ class SettlementDao:
                 if pos_long == 0 and pos_short == 0:
                     continue
 
-                po = PositionHistoryPo(
+                position_po = PositionHistoryPo(
                     account_id=account_id,
                     settle_date=settle_date,
                     symbol=position.symbol,
@@ -92,9 +89,12 @@ class SettlementDao:
                     margin_short=_to_decimal(position.margin_short),
                     last_price=_to_decimal(position.last_price),
                 )
-                session.add(po)
+                session.add(position_po)
                 count += 1
-        logger.info(f"结算持仓快照已保存: {account_id} {settle_date} 共{count}条")
+
+        logger.info(
+            f"结算快照已保存: {account_id} {settle_date} " f"权益={account.balance} 持仓{count}条"
+        )
 
     def query_settlements(
         self, account_ids: list[str] | None, start_date: date, end_date: date

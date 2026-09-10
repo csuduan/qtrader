@@ -2,6 +2,8 @@
 委托单相关API路由
 """
 
+from datetime import date, datetime, timedelta
+
 from fastapi import APIRouter, Depends, Query
 
 from qtrader.manager.api.dependencies import get_trading_manager
@@ -9,7 +11,6 @@ from qtrader.manager.api.responses import error_response, success_response
 from qtrader.manager.api.schemas import ManualOrderReq, OrderRes
 from qtrader.manager.manager import TradingManager
 from qtrader.utils.logger import get_logger
-from datetime import date,datetime, timedelta
 
 logger = get_logger(__name__)
 
@@ -48,7 +49,7 @@ def _query_orders_from_db(
             )
 
         # 默认最近2天的数据
-        last_day= date.today() - timedelta(days=1)
+        last_day = date.today() - timedelta(days=1)
         query = query.filter(func.date(OrderPo.insert_date_time) >= last_day)
 
         query = query.order_by(OrderPo.insert_date_time.desc())
@@ -247,17 +248,21 @@ async def create_manual_order(
     if not trader:
         return error_response(code=404, message=f"账户 [{account_id}] 不存在")
 
-    # 通过 trader 下单
-    order_id = await trader.send_order_request(
-        symbol=request.symbol,
-        direction=request.direction,
-        offset=request.offset,
-        volume=request.volume,
-        price=request.price or 0,
-    )
+    # 通过 trader 下单（异常含 Trader 回传的真实失败原因，透传给前端）
+    try:
+        order_id = await trader.send_order_request(
+            symbol=request.symbol,
+            direction=request.direction,
+            offset=request.offset,
+            volume=request.volume,
+            price=request.price or 0,
+        )
+    except Exception as e:
+        logger.error(f"下单失败 [{account_id}]: {e}", exc_info=True)
+        return error_response(code=500, message=f"下单失败: {str(e)}")
 
     if not order_id:
-        return error_response(code=500, message="下单失败")
+        return error_response(code=500, message="下单失败: 未获取到订单号")
 
     return success_response(data={"order_id": order_id}, message="下单成功")
 
@@ -280,20 +285,29 @@ async def cancel_order(
         if not trader:
             return error_response(code=404, message=f"账户 [{account_id}] 不存在")
 
-        success = await trader.send_cancel_request(order_id)
+        try:
+            success = await trader.send_cancel_request(order_id)
+        except Exception as e:
+            # 异常含 Trader 回传的真实失败原因，透传给前端
+            logger.error(f"撤单失败 [{account_id}] {order_id}: {e}", exc_info=True)
+            return error_response(code=500, message=f"撤单失败: {str(e)}")
     else:
-        # 从所有账户中查找并撤销订单
+        # 从所有账户中查找并撤销订单（单账户失败不中断查找）
         success = False
         for acc_id in trading_manager.get_all_account_ids():
             trader = trading_manager.get_trader(acc_id)
             if trader:
-                result = await trader.send_cancel_request(order_id)
+                try:
+                    result = await trader.send_cancel_request(order_id)
+                except Exception as e:
+                    logger.warning(f"撤单失败 [{acc_id}] {order_id}: {e}")
+                    continue
                 if result:
                     success = True
                     break
 
     if not success:
-        return error_response(code=500, message="撤单失败")
+        return error_response(code=500, message="撤单失败: 未找到可撤订单或撤单被拒")
 
     return success_response(data={"order_id": order_id}, message="撤单请求已发送")
 
@@ -323,13 +337,20 @@ async def cancel_batch_orders(
         if account_id:
             trader = trading_manager.get_trader(account_id)
             if trader:
-                success = await trader.send_cancel_request(order_id)
+                try:
+                    success = await trader.send_cancel_request(order_id)
+                except Exception as e:
+                    logger.warning(f"批量撤单失败 [{account_id}] {order_id}: {e}")
         else:
-            # 从所有账户中查找并撤销订单
+            # 从所有账户中查找并撤销订单（单账户失败不中断查找）
             for acc_id in trading_manager.get_all_account_ids():
                 trader = trading_manager.get_trader(acc_id)
                 if trader:
-                    result = await trader.send_cancel_request(order_id)
+                    try:
+                        result = await trader.send_cancel_request(order_id)
+                    except Exception as e:
+                        logger.warning(f"批量撤单失败 [{acc_id}] {order_id}: {e}")
+                        continue
                     if result:
                         success = True
                         break

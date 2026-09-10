@@ -21,6 +21,7 @@ import pytest
 
 from qtrader.models.object import (
     BarData,
+    ContractData,
     Direction,
     Exchange,
     Offset,
@@ -85,6 +86,10 @@ def strategy(strategy_config: StrategyConfig) -> BaseStrategy:
     strategy.strategy_manager.get_position = Mock(return_value=None)
     strategy.strategy_manager.load_hist_bars = AsyncMock(return_value=[])
     strategy.strategy_manager.trading_engine = MagicMock()
+    strategy.trading_engine = MagicMock()
+    strategy.trading_engine.get_contract.return_value = ContractData(
+        symbol="rb2505", exchange=Exchange.SHFE, name="螺纹钢", multiple=10, pricetick=1.0
+    )
     return strategy
 
 
@@ -218,8 +223,7 @@ class TestBaseStrategyInitialization:
     def test_signal_and_position_initialization(self, strategy: BaseStrategy):
         """测试信号和持仓初始化为空"""
         assert strategy.signal is None
-        assert strategy.pos_long == 0
-        assert strategy.pos_price == 0.0
+        assert strategy._positions == {}
 
     def test_pause_state_initial_values(self, strategy: BaseStrategy):
         """测试暂停状态初始值"""
@@ -261,15 +265,17 @@ class TestBaseStrategyInit:
         assert strategy._hist_cmds == {}
         assert strategy.signal is None
 
-    def test_init_resets_position(self, strategy: BaseStrategy):
-        """测试重置持仓 (pos_long=0, pos_price=0.0)"""
-        strategy.pos_long = 10
-        strategy.pos_price = 3500.0
+    def test_init_positions_replaces_cache(self, strategy: BaseStrategy):
+        """测试 init_positions 清空并以数据库持仓重建缓存"""
+        strategy._positions["SHFE.rb2505"] = PositionData(
+            symbol="SHFE.rb2505", exchange=Exchange.SHFE
+        )
+        loaded = PositionData(symbol="SHFE.hc2505", exchange=Exchange.SHFE, pos_long_td=3)
 
-        asyncio.run(strategy.init(datetime.now()))
+        strategy.init_positions([loaded])
 
-        assert strategy.pos_long == 0
-        assert strategy.pos_price == 0.0
+        assert set(strategy._positions) == {"SHFE.hc2505"}
+        assert strategy._positions["SHFE.hc2505"].pos_long == 3
 
     def test_init_parses_params_from_config(self, strategy: BaseStrategy):
         """测试参数解析从 config.params"""
@@ -388,7 +394,9 @@ class TestBaseStrategyExecuteSignal:
     async def test_execute_signal_with_exit_signal(self, strategy: BaseStrategy):
         """测试平仓信号：发送平仓指令"""
         await strategy.init(datetime.now())
-        strategy.pos_long = 5
+        strategy._positions["SHFE.rb2505"] = PositionData(
+            symbol="SHFE.rb2505", exchange=Exchange.SHFE, pos_long_td=5
+        )
         strategy.signal = Signal(side=1, exit_time=datetime.now().time())
 
         await strategy.execute_signal()
@@ -414,13 +422,16 @@ class TestBaseStrategyExecuteSignal:
         assert order_cmd.offset == Offset.OPEN
 
     @pytest.mark.asyncio
-    async def test_execute_signal_with_pending_open_order(self, strategy: BaseStrategy):
-        """测试有进行中开仓指令时的行为"""
+    async def test_execute_signal_with_pending_close_cmd(self, strategy: BaseStrategy):
+        """测试已有进行中平仓指令时不再重复发平仓"""
         await strategy.init(datetime.now())
+        strategy._positions["SHFE.rb2505"] = PositionData(
+            symbol="SHFE.rb2505", exchange=Exchange.SHFE, pos_long_td=5
+        )
         pending_cmd = OrderCmd(
             symbol="SHFE.rb2505",
-            direction=Direction.BUY,
-            offset=Offset.OPEN,
+            direction=Direction.SELL,
+            offset=Offset.CLOSE,
             volume=5,
         )
         strategy._pending_cmds = [pending_cmd]
@@ -428,14 +439,16 @@ class TestBaseStrategyExecuteSignal:
 
         await strategy.execute_signal()
 
-        # 应该取消当前指令
-        strategy.strategy_manager.cancel_order_cmd.assert_awaited_once()
+        # 已有进行中的平仓指令，直接返回
+        strategy.strategy_manager.send_order_cmd.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_execute_signal_respects_position_volume(self, strategy: BaseStrategy):
         """测试持仓数量检查"""
         await strategy.init(datetime.now())
-        strategy.pos_long = 5
+        strategy._positions["SHFE.rb2505"] = PositionData(
+            symbol="SHFE.rb2505", exchange=Exchange.SHFE, pos_long_td=5
+        )
         strategy.signal = Signal(side=1, entry_time=datetime.now().time())
 
         await strategy.execute_signal()
@@ -465,14 +478,16 @@ class TestBaseStrategyOnCmdChange:
 
         strategy._on_cmd_change(cmd)
 
-        assert strategy.pos_long == 5
-        assert strategy.pos_price == 3500.0
+        position = strategy._positions["SHFE.rb2505"]
+        assert position.pos_long == 5
+        assert position.hold_price_long == 3500.0
         assert cmd not in strategy._pending_cmds
 
     def test_on_cmd_change_close_order_reduces_position(self, strategy: BaseStrategy):
         """测试平仓指令完成减少持仓"""
-        strategy.pos_long = 10
-        strategy.pos_price = 3500.0
+        strategy._positions["SHFE.rb2505"] = PositionData(
+            symbol="SHFE.rb2505", exchange=Exchange.SHFE, pos_long_td=10
+        )
 
         cmd = OrderCmd(
             symbol="SHFE.rb2505",
@@ -487,7 +502,7 @@ class TestBaseStrategyOnCmdChange:
 
         strategy._on_cmd_change(cmd)
 
-        assert strategy.pos_long == 5
+        assert strategy._positions["SHFE.rb2505"].pos_long == 5
         assert cmd not in strategy._pending_cmds
 
     def test_on_cmd_change_rejected_sets_pause(self, strategy: BaseStrategy):
@@ -522,7 +537,9 @@ class TestBaseStrategyOnCmdChange:
 
     def test_on_cmd_change_ignores_non_pending_cmd(self, strategy: BaseStrategy):
         """测试非pending列表中的指令也会处理（新行为：处理所有完成的指令）"""
-        strategy.pos_long = 5
+        strategy._positions["SHFE.rb2505"] = PositionData(
+            symbol="SHFE.rb2505", exchange=Exchange.SHFE, pos_long_td=5
+        )
         other_cmd = OrderCmd(
             symbol="SHFE.rb2505",
             direction=Direction.BUY,
@@ -536,7 +553,7 @@ class TestBaseStrategyOnCmdChange:
         strategy._on_cmd_change(other_cmd)
 
         # 新行为：即使指令不在 pending_cmds 中，也会更新持仓
-        assert strategy.pos_long == 10
+        assert strategy._positions["SHFE.rb2505"].pos_long == 10
 
 
 # ==================== TestBaseStrategyTradingStatus ====================
@@ -764,37 +781,23 @@ class TestBaseStrategySetPaused:
 class TestBaseStrategyGetPosition:
     """BaseStrategy 获取持仓测试"""
 
-    def test_get_position_calls_manager(self, strategy: BaseStrategy):
-        """测试通过 manager 获取持仓"""
-        strategy.get_position("SHFE.rb2505")
+    def test_get_position_reads_local_cache(self, strategy: BaseStrategy):
+        """测试从本地持仓缓存获取"""
+        expected = PositionData(symbol="SHFE.rb2505", exchange=Exchange.SHFE, pos_long_td=5)
+        strategy._positions["SHFE.rb2505"] = expected
 
-        strategy.strategy_manager.get_position.assert_called_once_with("SHFE.rb2505")
+        assert strategy.get_position("SHFE.rb2505") is expected
 
-    def test_get_position_returns_manager_result(
-        self, strategy: BaseStrategy, mock_strategy_manager
-    ):
-        """测试返回 manager 的结果"""
-        expected_position = PositionData(
-            symbol="SHFE.rb2505",
-            exchange="SHFE",
-            pos=5,
-            pos_long=5,
-            pos_short=0,
-        )
-        strategy.strategy_manager = mock_strategy_manager
-        mock_strategy_manager.get_position.return_value = expected_position
+    def test_get_position_defaults_to_main_symbol(self, strategy: BaseStrategy):
+        """测试不传symbol时返回主合约持仓"""
+        expected = PositionData(symbol="SHFE.rb2505", exchange=Exchange.SHFE, pos_long_td=5)
+        strategy._positions["SHFE.rb2505"] = expected
 
-        result = strategy.get_position("SHFE.rb2505")
+        assert strategy.get_position() is expected
 
-        assert result == expected_position
-
-    def test_get_position_manager_none_returns_none(self, strategy: BaseStrategy):
-        """测试 manager 未初始化返回 None"""
-        strategy.strategy_manager = None
-
-        result = strategy.get_position("SHFE.rb2505")
-
-        assert result is None
+    def test_get_position_unknown_symbol_returns_none(self, strategy: BaseStrategy):
+        """测试未持有合约返回 None"""
+        assert strategy.get_position("SHFE.hc2505") is None
 
 
 # ==================== TestBaseStrategyCallbacks ====================

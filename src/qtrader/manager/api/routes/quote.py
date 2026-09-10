@@ -73,8 +73,12 @@ async def subscribe_symbol(
     if not trader:
         return error_response(code=404, message=f"账户 [{account_id}] 不存在")
 
-    # 检查 trader 是否支持订阅
-    success = await trader.subscribe(request)
+    # 检查 trader 是否支持订阅（异常含 Trader 回传的真实失败原因，透传给前端）
+    try:
+        success = await trader.subscribe(request)
+    except Exception as e:
+        logger.error(f"订阅 {symbol} 失败 [{account_id}]: {e}", exc_info=True)
+        return error_response(code=500, message=f"订阅 {symbol} 失败: {str(e)}")
 
     if not success:
         return error_response(code=500, message=f"订阅 {symbol} 失败")

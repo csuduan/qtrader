@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Q-Trader 新布局效果图 · Naive UI 风格</title>
+<style>
+  /* ===== Naive UI light 主题设计变量 ===== */
+  :root {
+    --primary: #18a058;
+    --primary-hover: #36ad6a;
+    --primary-pressed: #0c7a43;
+    --bg: #f7f7fa;            /* n-config-provider 默认页面底 */
+    --card-bg: #ffffff;
+    --border: #efeff5;        /* n-card / n-divider 边框 */
+    --text-1: #333639;        /* n-text 默认 */
+    --text-2: rgba(51,54,57,.82);
+    --text-3: rgba(51,54,57,.45);
+    --info: #2080f0;
+    --success: #18a058;
+    --warning: #f0a020;
+    --error: #d03050;
+    --radius: 3px;            /* naive 默认小圆角 */
+    --tbl-head-bg: #fafafc;
+    --tbl-hover: #f7f7fa;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; color:var(--text-1); background:var(--bg); font-size:14px; }
+
+  /* ===== n-layout / 顶栏 ===== */
+  .topbar { height:64px; background:#fff; border-bottom:1px solid var(--border); display:flex; align-items:center; padding:0 24px; gap:28px; position:sticky; top:0; z-index:10; }
+  .logo { display:flex; align-items:center; gap:10px; font-size:18px; font-weight:600; }
+  .logo-mark { width:32px; height:32px; border-radius:var(--radius); background:var(--primary); color:#fff; display:flex; align-items:center; justify-content:center; font-weight:700; }
+  .top-menu { display:flex; gap:20px; flex:1; }
+  .top-menu .item { font-size:14px; color:var(--text-2); cursor:pointer; padding:19px 2px; position:relative; }
+  .top-menu .item:hover { color:var(--primary); }
+  .top-menu .item.active { color:var(--primary); font-weight:500; }
+  .top-menu .item.active::after { content:""; position:absolute; left:0; right:0; bottom:0; height:2px; background:var(--primary); }
+  .top-right { display:flex; align-items:center; gap:16px; color:var(--text-2); font-size:14px; }
+  .avatar { width:28px; height:28px; border-radius:50%; background:var(--primary); color:#fff; display:flex; align-items:center; justify-content:center; font-size:13px; }
+
+  /* ===== 账户上下文条 ===== */
+  .acct-bar { background:#fff; border-bottom:1px solid var(--border); padding:9px 24px; display:flex; align-items:center; gap:12px; font-size:14px; color:var(--text-2); }
+  .acct-sel { display:flex; align-items:center; gap:6px; padding:3px 10px; border:1px solid var(--border); border-radius:var(--radius); cursor:pointer; color:var(--text-1); background:#fff; font-size:13px; }
+  .acct-sel:hover { border-color:var(--primary); color:var(--primary); }
+  .dot { width:7px; height:7px; border-radius:50%; display:inline-block; }
+  .dot.g { background:var(--success); } .dot.y { background:var(--warning); } .dot.gr { background:#c2c2c2; }
+  .num { color:var(--text-1); font-weight:500; font-variant-numeric:tabular-nums; }
+  .up { color:var(--error); } .down { color:var(--success); }  /* 期货习惯：红涨绿跌 */
+
+  /* n-tag */
+  .n-tag { display:inline-flex; align-items:center; font-size:12px; padding:0 8px; height:22px; border-radius:var(--radius); border:1px solid; gap:4px; white-space:nowrap; }
+  .n-tag.ok    { color:var(--success); background:rgba(24,160,88,.12); border-color:rgba(24,160,88,.3); }
+  .n-tag.warn  { color:var(--warning); background:rgba(240,160,32,.12); border-color:rgba(240,160,32,.3); }
+  .n-tag.info  { color:var(--info);    background:rgba(32,128,240,.10); border-color:rgba(32,128,240,.3); }
+  .n-tag.error { color:var(--error);   background:rgba(208,48,80,.10); border-color:rgba(208,48,80,.3); }
+  .n-tag.default { color:var(--text-2); background:rgba(51,54,57,.06); border-color:rgba(51,54,57,.14); }
+
+  /* ===== n-card ===== */
+  .content { max-width:1280px; margin:0 auto; padding:20px 24px 40px; }
+  .page { display:none; } .page.show { display:block; }
+  .n-card { background:var(--card-bg); border-radius:var(--radius); border:1px solid var(--border); padding:20px; margin-bottom:16px; }
+  .n-card .n-card__title { font-size:16px; font-weight:500; display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
+  .card-title-txt { font-weight:500; }
+  .sub { font-size:12px; color:var(--text-3); font-weight:400; margin-left:8px; }
+
+  .grid { display:grid; gap:16px; }
+  .g2 { grid-template-columns:1fr 1fr; }
+  .g3 { grid-template-columns:repeat(3,1fr); }
+  .g4 { grid-template-columns:repeat(4,1fr); }
+
+  /* n-button */
+  .n-btn { display:inline-flex; align-items:center; gap:5px; padding:0 14px; height:32px; border-radius:var(--radius); border:1px solid var(--border); background:#fff; font-size:14px; cursor:pointer; color:var(--text-1); transition:.1s; }
+  .n-btn:hover { color:var(--primary); border-color:var(--primary); }
+  .n-btn.tiny { height:26px; padding:0 10px; font-size:12px; }
+  .n-btn.primary { background:var(--primary); border-color:var(--primary); color:#fff; }
+  .n-btn.primary:hover { background:var(--primary-hover); border-color:var(--primary-hover); color:#fff; }
+  .n-btn.error { color:var(--error); border-color:rgba(208,48,80,.4); }
+  .n-btn.error:hover { background:rgba(208,48,80,.08); border-color:var(--error); color:var(--error); }
+
+  /* n-input */
+  .n-input { display:inline-flex; align-items:center; gap:6px; border:1px solid var(--border); border-radius:var(--radius); padding:0 10px; height:32px; font-size:14px; color:var(--text-3); width:200px; background:#fff; }
+  .n-input:hover { border-color:var(--primary); }
+
+  /* n-tabs（下划线式） */
+  .n-tabs { display:flex; gap:28px; margin-bottom:4px; border-bottom:1px solid var(--border); padding:0 4px; }
+  .n-tabs .t { font-size:14px; color:var(--text-2); cursor:pointer; padding:8px 0 10px; position:relative; }
+  .n-tabs .t:hover { color:var(--primary); }
+  .n-tabs .t.active { color:var(--primary); font-weight:500; }
+  .n-tabs .t.active::after { content:""; position:absolute; left:0; right:0; bottom:-1px; height:2px; background:var(--primary); }
+
+  /* n-data-table */
+  .tbl-wrap { border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; }
+  table.tbl { width:100%; border-collapse:collapse; font-size:14px; }
+  .tbl th { text-align:left; font-weight:500; color:var(--text-2); padding:9px 12px; background:var(--tbl-head-bg); border-bottom:1px solid var(--border); white-space:nowrap; }
+  .tbl td { padding:10px 12px; border-bottom:1px solid var(--border); color:var(--text-2); font-variant-numeric:tabular-nums; }
+  .tbl tbody tr:last-child td { border-bottom:none; }
+  .tbl tbody tr:hover td { background:var(--tbl-hover); }
+  .tbl .num { text-align:right; }
+  .toolbar { display:flex; align-items:center; gap:10px; margin-bottom:12px; flex-wrap:wrap; }
+
+  /* KPI */
+  .kpi .label { font-size:13px; color:var(--text-3); margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; }
+  .kpi .value { font-size:24px; font-weight:500; font-variant-numeric:tabular-nums; color:var(--text-1); }
+  .kpi .delta { font-size:12px; color:var(--text-3); margin-top:6px; }
+
+  /* 环形图 */
+  .donut-wrap { display:flex; align-items:center; gap:28px; }
+  .donut { width:150px; height:150px; border-radius:50%; position:relative; flex-shrink:0; }
+  .donut::after { content:""; position:absolute; inset:26px; background:#fff; border-radius:50%; }
+  .legend { flex:1; }
+  .lg-row { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text-2); padding:6px 0; border-bottom:1px solid var(--border); }
+  .lg-row:last-child { border-bottom:none; }
+  .lg-swatch { width:10px; height:10px; border-radius:2px; flex-shrink:0; }
+  .lg-name { flex:1; }
+  .lg-val { font-variant-numeric:tabular-nums; color:var(--text-1); font-weight:500; }
+
+  /* 日期范围 */
+  .range { display:flex; align-items:center; gap:6px; font-size:13px; color:var(--text-3); }
+  .range .field { border:1px solid var(--border); border-radius:var(--radius); padding:4px 10px; background:#fff; display:flex; align-items:center; gap:6px; min-width:116px; height:30px; }
+
+  .chart-ph { border-radius:var(--radius); height:200px; display:flex; align-items:center; justify-content:center; color:var(--text-3); font-size:13px; background:linear-gradient(180deg,#fbfbfd,#f5f6fa); border:1px dashed #dcdce4; }
+
+  .acc-mini { border:1px solid var(--border); border-radius:var(--radius); padding:14px 18px; background:#fff; cursor:pointer; transition:.15s; }
+  .acc-mini:hover { border-color:var(--primary-hover); }
+  .acc-mini.current { border-color:var(--primary); box-shadow:0 0 0 1px var(--primary) inset; }
+  .acc-mini .top { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; font-size:14px; font-weight:500; }
+  .acc-mini .row { display:flex; gap:22px; font-size:13px; color:var(--text-3); }
+  .acc-mini .row b { color:var(--text-1); font-variant-numeric:tabular-nums; font-weight:500; }
+
+  .empty { text-align:center; color:var(--text-3); font-size:13px; padding:60px 0; }
+  .float-tip { position:fixed; bottom:16px; right:16px; background:#333639; color:#fff; padding:10px 16px; border-radius:var(--radius); font-size:12px; box-shadow:0 4px 16px rgba(0,0,0,.25); z-index:99; }
+</style>
+</head>
+<body>
+
+<!-- n-layout-header -->
+<div class="topbar">
+  <div class="logo"><div class="logo-mark">Q</div>Q-Trader</div>
+  <div class="top-menu">
+    <div class="item active" onclick="go('dashboard',this)">总览</div>
+    <div class="item" onclick="go('account',this)">账户</div>
+    <div class="item" onclick="go('rotation',this)">换仓</div>
+    <div class="item" onclick="go('strategy',this)">策略</div>
+    <div class="item" onclick="go('market',this)">行情</div>
+    <div class="item" onclick="go('alarm',this)">监控</div>
+    <div class="item" onclick="go('admin',this)">安全中心</div>
+  </div>
+  <div class="top-right">
+    <span>🌙</span><span>中文 ▾</span>
+    <span style="display:flex;align-items:center;gap:6px;cursor:pointer"><span class="avatar">张</span> zhang ▾</span>
+  </div>
+</div>
+
+<!-- 账户上下文条 -->
+<div class="acct-bar" id="acctBar">
+  <div class="acct-sel"><span class="dot g"></span> CTP模拟账户 <span style="color:#c2c2c2">▾</span></div>
+  <span class="n-tag ok">行情</span><span class="n-tag ok">交易</span>
+  <span style="margin-left:auto">总资产 <span class="num">¥1,286,420.55</span></span>
+  <span>今日盈亏 <span class="num up">+¥12,830.00 (+1.01%)</span></span>
+  <span class="n-btn tiny">↻ 同步</span>
+  <span class="n-btn tiny">账户操作 ▾</span>
+</div>
+
+<div class="content">
+
+  <!-- ============ 总览 ============ -->
+  <div class="page show" id="page-dashboard">
+    <div class="n-card">
+      <div class="n-card__title"><span class="card-title-txt">账户概览<span class="sub">点击卡片切换当前账户</span></span><span class="n-btn tiny">＋ 接入账户</span></div>
+      <div class="grid g3">
+        <div class="acc-mini current">
+          <div class="top">CTP模拟账户 <span class="dot g"></span></div>
+          <div class="row"><span>总资产 <b>¥1,286,420</b></span><span>今日盈亏 <b class="up">+12,830</b></span><span>持仓 <b>11</b></span></div>
+        </div>
+        <div class="acc-mini">
+          <div class="top">实盘-A <span class="dot y"></span> <span class="n-tag warn">连接中</span></div>
+          <div class="row"><span>总资产 <b>¥864,200</b></span><span>今日盈亏 <b class="down">-3,150</b></span><span>持仓 <b>4</b></span></div>
+        </div>
+        <div class="acc-mini" style="opacity:.7">
+          <div class="top">回测账户 <span class="dot gr"></span> <span class="n-tag default">已停止</span></div>
+          <div class="row"><span>总资产 <b>¥500,000</b></span><span>今日盈亏 <b>—</b></span><span>持仓 <b>—</b></span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid g4" style="margin-bottom:16px">
+      <div class="n-card kpi" style="margin-bottom:0"><div class="label">可用资金 <span class="n-tag ok">占比 41%</span></div><div class="value">¥527,430</div><div class="delta">保证金占用 ¥758,990</div></div>
+      <div class="n-card kpi" style="margin-bottom:0"><div class="label">持仓盈亏</div><div class="value up">+¥8,420</div><div class="delta">11 个合约</div></div>
+      <div class="n-card kpi" style="margin-bottom:0"><div class="label">平仓盈亏</div><div class="value up">+¥4,410</div><div class="delta">今日成交 23 笔</div></div>
+      <div class="n-card kpi" style="margin-bottom:0"><div class="label">活跃委托 / 风险度</div><div class="value">3 笔 · 59%</div><div class="delta">今日委托 31 · 撤单 8</div></div>
+    </div>
+
+    <div class="grid g2">
+      <div class="n-card" style="margin-bottom:0">
+        <div class="n-card__title"><span class="card-title-txt">委托状态统计</span>
+          <div class="range"><span class="field">📅 2026-09-10</span>→<span class="field">📅 2026-09-10</span></div>
+        </div>
+        <div class="donut-wrap">
+          <div class="donut" style="background:conic-gradient(#2080f0 0 34%, #18a058 34% 56%, #f0a020 56% 70%, #d03050 70% 82%, #9254de 82% 100%)"></div>
+          <div class="legend">
+            <div class="lg-row"><span class="lg-swatch" style="background:#2080f0"></span><span class="lg-name">全部成交</span><span class="lg-val">18</span></div>
+            <div class="lg-row"><span class="lg-swatch" style="background:#18a058"></span><span class="lg-name">部分成交</span><span class="lg-val">1</span></div>
+            <div class="lg-row"><span class="lg-swatch" style="background:#f0a020"></span><span class="lg-name">已提交</span><span class="lg-val">2</span></div>
+            <div class="lg-row"><span class="lg-swatch" style="background:#d03050"></span><span class="lg-name">已拒绝</span><span class="lg-val">2</span></div>
+            <div class="lg-row"><span class="lg-swatch" style="background:#9254de"></span><span class="lg-name">已撤单</span><span class="lg-val">8</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="n-card" style="margin-bottom:0">
+        <div class="n-card__title"><span class="card-title-txt">账户资金分布</span>
+          <div class="range"><span class="field">📅 2026-09-10</span>→<span class="field">📅 2026-09-10</span></div>
+        </div>
+        <div class="donut-wrap">
+          <div class="donut" style="background:conic-gradient(#2080f0 0 59%, #18a058 59% 78%, #f0a020 78% 92%, #d03050 92% 100%)"></div>
+          <div class="legend">
+            <div class="lg-row"><span class="lg-swatch" style="background:#2080f0"></span><span class="lg-name">保证金占用</span><span class="lg-val">¥758,990</span></div>
+            <div class="lg-row"><span class="lg-swatch" style="background:#18a058"></span><span class="lg-name">可用资金</span><span class="lg-val">¥527,430</span></div>
+            <div class="lg-row"><span class="lg-swatch" style="background:#f0a020"></span><span class="lg-name">持仓盈亏</span><span class="lg-val">+¥8,420</span></div>
+            <div class="lg-row"><span class="lg-swatch" style="background:#d03050"></span><span class="lg-name">平仓盈亏</span><span class="lg-val">+¥4,410</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="n-card">
+      <div class="n-card__title"><span class="card-title-txt">权益与每日盈亏<span class="sub">近 30 日</span></span>
+        <span><span class="n-btn tiny">日</span> <span class="n-btn tiny">周</span> <span class="n-btn tiny">月</span></span>
+      </div>
+      <div class="chart-ph">📊 权益曲线 + 每日盈亏柱状图（ECharts 5）</div>
+    </div>
+  </div>
+
+  <!-- ============ 账户 ============ -->
+  <div class="page" id="page-account">
+    <div class="n-tabs">
+      <div class="t active" onclick="go('account',null,'ad',this)">账户详情</div>
+      <div class="t" onclick="go('account',null,'at',this)">交易</div>
+      <div class="t" onclick="go('account',null,'ar',this)">成交记录</div>
+    </div>
+    <div id="ad">
+      <div class="grid g2" style="margin-bottom:16px">
+        <div class="n-card kpi" style="margin-bottom:0"><div class="label">总资产 / 静态权益</div><div class="value">¥1,286,420.55</div><div class="delta">静态权益 ¥1,273,590 · 更新于 21:15:30</div></div>
+        <div class="n-card kpi" style="margin-bottom:0"><div class="label">保证金 / 可用 / 风险度</div><div class="value">¥758,990 / ¥527,430</div><div class="delta">风险度 59%</div></div>
+      </div>
+      <div class="n-card">
+        <div class="n-card__title"><span class="card-title-txt">持仓明细</span>
+          <span style="display:flex;gap:8px"><span class="n-btn tiny">同步数据</span><span class="n-btn tiny error">平仓</span></span>
+        </div>
+        <div class="toolbar"><span class="n-input">🔍 搜索合约…</span></div>
+        <div class="tbl-wrap">
+        <table class="tbl">
+          <thead><tr><th><input type="checkbox"></th><th>合约</th><th>方向</th><th class="num">持仓</th><th class="num">均价</th><th class="num">最新价</th><th class="num">盈亏</th><th class="num">保证金</th></tr></thead>
+          <tbody>
+            <tr><td><input type="checkbox"></td><td>rb2510</td><td><span class="n-tag error">多</span></td><td class="num">12</td><td class="num">3,215</td><td class="num">3,248</td><td class="num up">+3,960</td><td class="num">61,728</td></tr>
+            <tr><td><input type="checkbox"></td><td>cu2512</td><td><span class="n-tag ok">空</span></td><td class="num">4</td><td class="num">78,540</td><td class="num">78,210</td><td class="num up">+5,440</td><td class="num">125,664</td></tr>
+            <tr><td><input type="checkbox"></td><td>ag2512</td><td><span class="n-tag error">多</span></td><td class="num">8</td><td class="num">8,120</td><td class="num">8,105</td><td class="num down">-960</td><td class="num">51,968</td></tr>
+          </tbody>
+        </table>
+        </div>
+      </div>
+    </div>
+    <div id="at" style="display:none" class="n-card">
+      <div class="n-card__title"><span class="card-title-txt">委托</span>
+        <span style="display:flex;gap:8px"><span class="n-btn tiny primary">＋ 报单</span><span class="n-btn tiny">撤单</span></span>
+      </div>
+      <div class="toolbar"><span class="n-input">🔍 合约 / 编号</span><span class="n-tag info">全部状态 ▾</span><span class="n-tag info">全部类型 ▾</span></div>
+      <div class="tbl-wrap">
+      <table class="tbl">
+        <thead><tr><th><input type="checkbox"></th><th>时间</th><th>合约</th><th>方向</th><th class="num">价格</th><th class="num">数量</th><th>状态</th></tr></thead>
+        <tbody>
+          <tr><td><input type="checkbox"></td><td>09:31:05</td><td>rb2510</td><td>开多</td><td class="num">3,250</td><td class="num">2</td><td><span class="n-tag warn">部分成交</span></td></tr>
+          <tr><td><input type="checkbox"></td><td>09:30:44</td><td>cu2512</td><td>开空</td><td class="num">78,200</td><td class="num">1</td><td><span class="n-tag ok">已成交</span></td></tr>
+          <tr><td><input type="checkbox"></td><td>09:28:11</td><td>ag2512</td><td>平多</td><td class="num">8,130</td><td class="num">4</td><td><span class="n-tag default">已撤单</span></td></tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+    <div id="ar" style="display:none" class="n-card">
+      <div class="n-card__title"><span class="card-title-txt">成交记录</span><span class="n-btn tiny">导出</span></div>
+      <div class="toolbar"><span class="n-input">📅 2026-09-10</span></div>
+      <div class="tbl-wrap">
+      <table class="tbl">
+        <thead><tr><th>成交时间</th><th>合约</th><th>方向</th><th class="num">价格</th><th class="num">数量</th><th>委托号</th></tr></thead>
+        <tbody>
+          <tr><td>21:05:32</td><td>ag2512</td><td>开多</td><td class="num">8,118</td><td class="num">4</td><td>ORD-1024</td></tr>
+          <tr><td>09:31:06</td><td>rb2510</td><td>开多</td><td class="num">3,250</td><td class="num">2</td><td>ORD-1023</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 行情 ============ -->
+  <div class="page" id="page-market">
+    <div class="n-tabs">
+      <div class="t active" onclick="go('market',null,'mq',this)">实时行情</div>
+      <div class="t" onclick="go('market',null,'mc',this)">合约信息</div>
+    </div>
+    <div id="mq" class="n-card">
+      <div class="n-card__title"><span class="card-title-txt">订阅列表</span><span class="n-btn tiny primary">＋ 订阅合约</span></div>
+      <div class="toolbar"><span class="n-input">🔍 搜索合约…</span></div>
+      <div class="tbl-wrap">
+      <table class="tbl">
+        <thead><tr><th>合约</th><th class="num">最新价</th><th class="num">买一</th><th class="num">卖一</th><th class="num">涨跌幅</th><th class="num">成交量</th><th class="num">持仓量</th></tr></thead>
+        <tbody>
+          <tr><td>rb2510</td><td class="num">3,248</td><td class="num">3,247</td><td class="num">3,248</td><td class="num up">+1.03%</td><td class="num">412,553</td><td class="num">1,842,110</td></tr>
+          <tr><td>cu2512</td><td class="num">78,210</td><td class="num">78,200</td><td class="num">78,210</td><td class="num down">-0.42%</td><td class="num">52,340</td><td class="num">198,760</td></tr>
+          <tr><td>ag2512</td><td class="num">8,105</td><td class="num">8,104</td><td class="num">8,105</td><td class="num down">-0.18%</td><td class="num">88,201</td><td class="num">612,340</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+    <div id="mc" style="display:none" class="n-card">
+      <div class="n-card__title"><span class="card-title-txt">合约信息<span class="sub">原「账户页-合约信息」移入此处</span></span><span class="n-btn tiny">↻ 刷新</span></div>
+      <div class="toolbar"><span class="n-input">🔍 搜索合约 / 交易所</span><span class="n-tag info">全部交易所 ▾</span></div>
+      <div class="tbl-wrap">
+      <table class="tbl">
+        <thead><tr><th>合约代码</th><th>名称</th><th>交易所</th><th class="num">乘数</th><th class="num">最小变动</th><th>期权类型</th><th>更新日期</th></tr></thead>
+        <tbody>
+          <tr><td>rb2510</td><td>螺纹钢</td><td>SHFE</td><td class="num">10</td><td class="num">1</td><td>—</td><td>2026-08-16</td></tr>
+          <tr><td>cu2512</td><td>沪铜</td><td>SHFE</td><td class="num">5</td><td class="num">10</td><td>—</td><td>2026-08-16</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="page" id="page-rotation"><div class="n-card empty">换仓 — 指令换仓 / 持仓对比 双 Tab，套用统一卡片骨架（略）</div></div>
+  <div class="page" id="page-strategy"><div class="n-card empty">策略 — 卡片网格 + 详情页（略）</div></div>
+  <div class="page" id="page-alarm"><div class="n-card empty">监控 — 统一列表骨架 + 告警级别 tag（略）</div></div>
+  <div class="page" id="page-admin"><div class="n-card empty">安全中心 — 日志 / 系统 子页，仅 admin 可见（略）</div></div>
+
+</div>
+
+<div class="float-tip">🖱 顶部菜单和页内 Tab 可点击切换</div>
+
+<script>
+const tradePages = new Set(['account','rotation','strategy']);
+function go(page, navEl, sub, tabEl) {
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('show'));
+  document.getElementById('page-'+page).classList.add('show');
+  document.getElementById('acctBar').style.display = tradePages.has(page) ? 'flex' : 'none';
+  document.querySelectorAll('.top-menu .item').forEach(n=>n.classList.remove('active'));
+  (navEl || document.querySelector(`.top-menu .item[onclick="go('${page}',this)"]`))?.classList.add('active');
+  if (sub) {
+    document.querySelectorAll('#page-'+page+' .n-tabs .t').forEach(t=>t.classList.remove('active'));
+    if (tabEl) tabEl.classList.add('active');
+    const maps = {ad:['ad','at','ar'],at:['at','ad','ar'],ar:['ar','ad','at'],mq:['mq','mc'],mc:['mc','mq']};
+    if (maps[sub]) { document.getElementById(maps[sub][0]).style.display='block'; for(let i=1;i<maps[sub].length;i++) document.getElementById(maps[sub][i]).style.display='none'; }
+  }
+}
+</script>
+</body>
+</html>

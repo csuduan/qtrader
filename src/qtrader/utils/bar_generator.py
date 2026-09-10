@@ -3,7 +3,7 @@ K线生成器
 从tick数据合成多周期bar数据（M1/M5/M15/D1），支持回调通知
 """
 
-from collections import defaultdict
+from collections import defaultdict, deque
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
@@ -49,11 +49,16 @@ class BarGenerator:
         self.symbol = symbol
         self.std_symbol = f"{symbol}"
 
+        # 已完成bar缓存容量（保留最近N根，满足指标计算与查询即可）
+        self._max_completed_bars = 500
+
         # 当前正在生成的bar (key: interval_value)
         self._current_bars: dict[str, dict[str, Any]] = {}
 
-        # 已完成的bar缓存 (key: interval_value -> list of BarData)
-        self._completed_bars: dict[str, list[BarData]] = defaultdict(list)
+        # 已完成的bar缓存 (key: interval_value -> deque of BarData)，限制容量保留最近N根
+        self._completed_bars: dict[str, deque[BarData]] = defaultdict(
+            lambda: deque(maxlen=self._max_completed_bars)
+        )
 
         # 订阅的周期 (interval_value -> minutes)
         self._subscribed_intervals: dict[str, int] = {}
@@ -308,7 +313,7 @@ class BarGenerator:
         interval, _ = parsed
         interval_value = interval.value
 
-        bars = self._completed_bars.get(interval_value, [])
+        bars: list[BarData] = list(self._completed_bars.get(interval_value, ()))
         if len(bars) >= n:
             return sorted(bars, key=lambda b: b.datetime)[-n]
         return None
@@ -331,7 +336,7 @@ class BarGenerator:
         interval, _ = parsed
         interval_value = interval.value
 
-        bars = self._completed_bars.get(interval_value, [])
+        bars: list[BarData] = list(self._completed_bars.get(interval_value, ()))
         return sorted(bars, key=lambda b: b.datetime)[-count:]
 
 

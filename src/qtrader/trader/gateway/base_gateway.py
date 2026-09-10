@@ -6,11 +6,12 @@ Gateway适配器基类
 import re
 from abc import ABC, abstractmethod
 from datetime import date, datetime
-from qtrader.utils.async_event_engine import AsyncEventEngine
-from qtrader.app_context import get_app_context
 from typing import Any
 
 import pandas as pd
+
+from qtrader.app_context import get_app_context
+from qtrader.utils.async_event_engine import AsyncEventEngine
 
 ctx = get_app_context()
 
@@ -30,6 +31,7 @@ from qtrader.models.object import (
 from qtrader.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
 
 class BaseGateway(ABC):
     """
@@ -249,7 +251,6 @@ class BaseGateway(ABC):
 
         return loaded_count
 
-    
     def emit_event(self, event_type: str, data: Any) -> None:
         """
         触发事件
@@ -258,7 +259,8 @@ class BaseGateway(ABC):
             event_type: 事件类型
             data: 事件数据
         """
-        self._event_engine.put(event_type, data)
+        if self._event_engine:
+            self._event_engine.put(event_type, data)
 
     @abstractmethod
     async def connect(self) -> bool:

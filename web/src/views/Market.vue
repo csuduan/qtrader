@@ -5,6 +5,12 @@
         <!-- 合约 -->
         <el-tab-pane label="合约" name="contracts">
           <el-form :inline="true">
+            <el-form-item label="范围">
+              <el-radio-group v-model="contractScope" @change="loadContracts">
+                <el-radio-button value="main">主力</el-radio-button>
+                <el-radio-button value="all">全部</el-radio-button>
+              </el-radio-group>
+            </el-form-item>
             <el-form-item label="合约">
               <el-input
                 v-model="contractKeyword"
@@ -39,7 +45,14 @@
             size="small"
             max-height="560"
           >
-            <el-table-column prop="symbol" label="合约代码" width="120" sortable />
+            <el-table-column prop="symbol" label="合约代码" width="150" sortable>
+              <template #default="{ row }">
+                <span class="contract-symbol">
+                  {{ row.symbol }}
+                  <sup v-if="row.is_main" class="main-badge">M</sup>
+                </span>
+              </template>
+            </el-table-column>
             <el-table-column prop="name" label="名称" min-width="140" />
             <el-table-column prop="exchange_id" label="交易所" width="90" />
             <el-table-column prop="volume_multiple" label="乘数" width="70" align="right" />
@@ -100,6 +113,7 @@ const activeTab = ref('contracts')
 // ==================== 合约 ====================
 const contracts = ref<ContractInfo[]>([])
 const exchanges = ref<ExchangeInfo[]>([])
+const contractScope = ref<'main' | 'all'>('main')
 const contractKeyword = ref('')
 const contractExchange = ref('')
 const contractsLoading = ref(false)
@@ -111,6 +125,8 @@ async function loadContracts() {
     contracts.value = await contractApi.getContracts({
       symbol_keyword: contractKeyword.value || undefined,
       exchange_id: contractExchange.value || undefined,
+      // 主力范围仅过滤主力；全部范围不过滤（列表中仍以 tag 标注主力）
+      is_main: contractScope.value === 'main' ? true : undefined,
     })
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '查询合约失败')
@@ -168,5 +184,21 @@ onMounted(async () => {
   margin-top: 8px;
   color: #909399;
   font-size: 12px;
+}
+
+.contract-symbol {
+  position: relative;
+  display: inline-block;
+  padding-right: 12px;
+}
+
+.main-badge {
+  position: absolute;
+  top: -2px;
+  right: 0;
+  color: #f56c6c;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
 }
 </style>

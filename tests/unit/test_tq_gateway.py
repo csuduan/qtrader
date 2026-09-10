@@ -1,991 +1,567 @@
 """
 TqGateway 单元测试
 
-测试 TqGateway 实现的核心功能，包括：
-- 初始化
-- 连接/断开连接
-- 订阅行情
-- 下单/撤单
-- 数据转换
-- 时间间隔转换
+覆盖不依赖真实 TqSdk 连接的行为：初始化、订阅记账、
+tq 线程指令队列（_submit_to_tq_thread/_drain_cmds）、
+数据转换（账户/持仓/订单/成交/行情/K线）、订单状态映射、
+推送与查询接口。全部使用 mock，不启动 tq 线程。
 """
 
-import asyncio
+import math
+import queue
+import threading
 from datetime import datetime, timedelta
-from typing import Dict
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
 from qtrader.models.object import (
     AccountData,
-    BarData,
     CancelRequest,
-    Direction,
+    ContractData,
     Exchange,
     Offset,
-    OrderData,
     OrderRequest,
     OrderStatus,
-    OrderType,
-    PositionData,
     ProductType,
-    TickData,
-    TradeData,
 )
 from qtrader.trader.gateway.tq_gateway import TqGateway
-from qtrader.utils.config_loader import (
-    TraderConfig,
-    GatewayConfig,
-    TianqinConfig,
-    BrokerConfig,
-    SubsConfig,
-    TradingConfig,
-    RiskControlConfig,
-)
+from qtrader.utils.async_event_engine import EventTypes
 
 
-# ==================== Fixtures ====================
+class TqEntity(dict):
+    """模拟 tqsdk Entity 对象：同时支持属性访问与 .get()"""
+
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(name)
 
 
-@pytest.fixture
-def subs_config() -> SubsConfig:
-    """创建订阅配置"""
-    return SubsConfig(
-        subscribe_symbols=["SHFE.rb2505"],
-        subscribe_bars=["rb2505-M1"],
-    )
-
-
-@pytest.fixture
-def trader_config(subs_config: SubsConfig) -> TraderConfig:
-    """创建 TraderConfig 配置"""
-    config = TraderConfig(
-        account_id="test_account_001",
-        account_type="kq",
-        gateway=GatewayConfig(
-            account_id="test_account_001",
-            type="TQSDK",
-            tianqin=TianqinConfig(
-                username="test_user",
-                password="test_pass",
-            ),
-            broker=BrokerConfig(
-                type="sim",
-            ),
-        ),
-        trading=TradingConfig(
-            auto_trade=True,
-            paused=False,
-            risk_control=RiskControlConfig(),
-        ),
-        subs=subs_config,
-    )
+def make_config(symbol: str = "SHFE.rb2505") -> MagicMock:
+    config = MagicMock()
+    config.gateway.account_id = "DQ"
+    config.gateway.tianqin = None
+    config.gateway.broker = None
+    config.subs.subscribe_symbols = ["SHFE.rb2505"]
+    config.subs.subscribe_bars = []
     return config
 
 
-@pytest.fixture
-def gateway(trader_config: TraderConfig) -> TqGateway:
-    """创建 TqGateway 实例"""
-    return TqGateway(acct_config=trader_config)
+def make_contract(symbol: str = "rb2505") -> ContractData:
+    return ContractData(
+        symbol=symbol,
+        exchange=Exchange.SHFE,
+        name="螺纹钢",
+        product_type=ProductType.FUTURES,
+        multiple=10,
+        pricetick=1.0,
+    )
 
 
 @pytest.fixture
-def mock_tq_api():
-    """模拟 TqApi"""
-    api = MagicMock()
-    # 模拟账户数据
-    mock_account = MagicMock()
-    mock_account.balance = 1000000.0
-    mock_account.available = 900000.0
-    mock_account.margin = 100000.0
-    mock_account.pre_balance = 1000000.0
-    mock_account.position_profit = 0.0
-    mock_account.close_profit = 0.0
-    mock_account.risk_ratio = 0.1
-    api.get_account.return_value = mock_account
+def gateway() -> TqGateway:
+    with patch.object(TqGateway, "load_contracts", return_value=None):
+        gw = TqGateway(make_config())
+    gw._event_engine = MagicMock()
+    return gw
 
-    # 模拟持仓数据
-    mock_positions = {}
-    api.get_position.return_value = mock_positions
 
-    # 模拟订单数据
-    mock_orders = {}
-    api.get_order.return_value = mock_orders
-
-    # 模拟成交数据
-    mock_trades = {}
-    api.get_trade.return_value = mock_trades
-
-    # 模拟行情订阅
-    mock_quote = MagicMock()
-    mock_quote.instrument_id = "SHFE.rb2505"
-    mock_quote.exchange_id = "SHFE"
-    mock_quote.last_price = 3500.0
-    mock_quote.ask_price1 = 3501.0
-    mock_quote.bid_price1 = 3499.0
-    mock_quote.ask_volume1 = 100
-    mock_quote.bid_volume1 = 100
-    mock_quote.volume = 10000
-    mock_quote.turnover = 35000000
-    mock_quote.open_interest = 50000
-    mock_quote.open = 3480.0
-    mock_quote.highest = 3520.0
-    mock_quote.lowest = 3470.0
-    mock_quote.datetime = int(datetime.now().timestamp() * 1e9)
-    api.get_quote.return_value = mock_quote
-
-    # 模拟 K 线数据
-    import pandas as pd
-    mock_kline = pd.DataFrame({
-        "datetime": [int(datetime.now().timestamp() * 1e9)],
-        "open": [3500.0],
-        "high": [3510.0],
-        "low": [3490.0],
-        "close": [3505.0],
-        "volume": [1000],
-        "turnover": [3505000],
-        "open_interest": [50000],
-    })
-    api.get_kline_serial.return_value = mock_kline
-
-    # 模拟合约查询
-    api.query_quotes.return_value = ["SHFE.rb2505"]
-    api.query_symbol_info.return_value = pd.DataFrame({
-        "instrument_id": ["SHFE.rb2505"],
-        "exchange_id": ["SHFE"],
-        "instrument_name": ["螺纹钢2505"],
-        "volume_multiple": [10],
-        "price_tick": [1.0],
-    })
-
-    # 模拟 is_changing
-    api.is_changing.return_value = False
-    api.wait_update.return_value = True
-
-    # 模拟下单
-    mock_order = {
-        "order_id": "test_order_id",
+def make_order(status: str = "ALIVE", last_msg: str = "", **fields) -> TqEntity:
+    data = {
+        "order_id": "order_001",
         "instrument_id": "SHFE.rb2505",
         "exchange_id": "SHFE",
         "direction": "BUY",
         "offset": "OPEN",
         "volume_orign": 5,
-        "volume_left": 5,
+        "volume_left": 2,
+        "trade_price": 3500.5,
         "limit_price": 3500.0,
-        "status": "ALIVE",
-        "last_msg": "",
-        "insert_date_time": int(datetime.now().timestamp() * 1e9),
+        "status": status,
+        "last_msg": last_msg,
+        "exchange_order_id": "EX001",
+        "insert_date_time": 1756800000000000000,
     }
-    api.insert_order.return_value = mock_order
-
-    # 模拟撤单
-    api.cancel_order.return_value = None
-
-    # 模拟交易日历
-    trading_calendar = pd.DataFrame({
-        "date": ["2026-01-15"],
-        "trading": [True],
-    })
-    api.get_trading_calendar.return_value = trading_calendar
-
-    return api
+    data.update(fields)
+    return TqEntity(data)
 
 
-# ==================== TestTqGatewayInitialization ====================
+@pytest.mark.unit
+class TestInit:
+    """初始化"""
 
-
-class TestTqGatewayInitialization:
-    """TqGateway 初始化测试"""
-
-    def test_initialization_stores_config(self, gateway: TqGateway, trader_config: TraderConfig):
-        """测试配置正确存储"""
-        assert gateway.config == trader_config.gateway
-        assert gateway.account_id == trader_config.gateway.account_id
-
-    def test_initialization_internal_caches(self, gateway: TqGateway):
-        """测试内部缓存初始化"""
-        assert gateway._account is None
-        assert gateway._positions == {}
-        assert gateway._orders == {}
-        assert gateway._trades == {}
-        assert gateway._quotes == {}
-        assert gateway._klines == {}
-        assert gateway._pending_orders == {}
-        assert gateway.contracts == {}
-
-    def test_initialization_connection_status(self, gateway: TqGateway):
-        """测试连接状态初始为 False"""
-        assert gateway.connected is False
-        assert gateway._running is False
-
-    def test_initialization_subscribe_symbols(self, gateway: TqGateway, trader_config: TraderConfig):
-        """测试订阅符号初始化"""
-        assert gateway.hist_subs == set(trader_config.subs.subscribe_symbols)
-
-    def test_initialization_order_ref(self, gateway: TqGateway):
-        """测试订单引用计数初始化"""
-        assert gateway._order_ref == 0
-
-
-# ==================== TestTqGatewayConnect ====================
-
-
-class TestTqGatewayConnect:
-    """TqGateway 连接测试"""
-
-    @pytest.mark.asyncio
-    async def test_connect_starts_thread_and_task(self, gateway: TqGateway):
-        """测试成功启动线程和协程"""
-        with patch("threading.Thread.start") as mock_thread_start:
-            with patch("asyncio.create_task") as mock_create_task:
-                result = await gateway.connect()
-
-                assert result is True
-                mock_thread_start.assert_called_once()
-                mock_create_task.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_connect_already_running(self, gateway: TqGateway):
-        """测试重复连接处理"""
-        gateway._running = True
-        result = await gateway.connect()
-
-        assert result is True
-
-    @pytest.mark.asyncio
-    async def test_connect_failure_handling(self, gateway: TqGateway):
-        """测试连接失败处理"""
-        with patch("threading.Thread.start", side_effect=Exception("连接失败")):
-            result = await gateway.connect()
-
-            assert result is False
-            assert gateway.connected is False
-
-
-# ==================== TestTqGatewayDisconnect ====================
-
-
-class TestTqGatewayDisconnect:
-    """TqGateway 断开连接测试"""
-
-    @pytest.mark.asyncio
-    async def test_disconnect_stops_polling(self, gateway: TqGateway):
-        """测试正确停止轮询"""
-        gateway._running = True
-        gateway.connected = True
-        gateway._dispatcher_task = asyncio.create_task(asyncio.sleep(1))
-
-        result = await gateway.disconnect()
-
-        assert result is True
+    def test_init_state(self, gateway):
+        assert gateway.account_id == "DQ"
+        assert gateway.api is None
         assert gateway._running is False
         assert gateway.connected is False
 
-    @pytest.mark.asyncio
-    async def test_disconnect_cancels_dispatcher_task(self, gateway: TqGateway):
-        """测试取消事件分发协程"""
-        async def dummy_dispatcher():
-            while True:
-                await asyncio.sleep(0.1)
-
-        gateway._running = True
-        gateway._dispatcher_task = asyncio.create_task(dummy_dispatcher())
-
-        await gateway.disconnect()
-
-        assert gateway._dispatcher_task.cancelled() or gateway._dispatcher_task.done()
-
-    @pytest.mark.asyncio
-    async def test_disconnect_when_not_connected(self, gateway: TqGateway):
-        """测试未连接时断开"""
-        result = await gateway.disconnect()
-
-        assert result is True
-
-
-# ==================== TestTqGatewaySubscribe ====================
-
-
-class TestTqGatewaySubscribe:
-    """TqGateway 订阅测试"""
-
-    def test_subscribe_single_symbol(self, gateway: TqGateway):
-        """测试订阅单个合约"""
-        gateway.connected = True
-        gateway.api = MagicMock()
-
-        result = gateway.subscribe("SHFE.rb2505")
-
-        assert result is True
+    def test_hist_subs_loaded_from_config(self, gateway):
         assert "SHFE.rb2505" in gateway.hist_subs
 
-    def test_subscribe_symbol_list(self, gateway: TqGateway):
-        """测试订阅合约列表"""
-        gateway.connected = True
-        gateway.api = MagicMock()
-
-        result = gateway.subscribe(["SHFE.rb2505", "SHFE.ru2505"])
-
-        assert result is True
-        assert "SHFE.rb2505" in gateway.hist_subs
-        assert "SHFE.ru2505" in gateway.hist_subs
-
-    def test_subscribe_duplicate_handling(self, gateway: TqGateway):
-        """测试重复订阅处理"""
-        gateway.connected = True
-        gateway.hist_subs = ["SHFE.rb2505"]
-        gateway.api = MagicMock()
-
-        result = gateway.subscribe("SHFE.rb2505")
-
-        # 应该允许重复添加到历史列表
-        assert result is True
-
-
-# ==================== TestTqGatewaySendOrder ====================
-
-
-class TestTqGatewaySendOrder:
-    """TqGateway 下单测试"""
-
-    def test_send_order_market_price_uses_counter_price_buy(self, gateway: TqGateway):
-        """测试市价单买入使用对手价"""
-        gateway.connected = True
-        gateway._upper_symbols = {"RB2505": "SHFE.rb2505"}
-        gateway._quotes = {
-            "SHFE.rb2505": MagicMock(
-                ask_price1=3501.0,
-                bid_price1=3499.0,
-                instrument_id="SHFE.rb2505",
-            )
-        }
-        gateway.api = MagicMock()
-        # 模拟 insert_order 返回对象，既有 get() 方法又有 status 属性
-        class MockOrder:
-            def __init__(self):
-                self.status = "ALIVE"
-                self.instrument_id = "rb2505"
-                self.exchange_id = "SHFE"
-                self._data = {
-                    "order_id": "test_order_id",
-                    "status": "ALIVE",
-                }
-
-            def get(self, key, default=None):
-                return self._data.get(key, default)
-
-        gateway.api.insert_order.return_value = MockOrder()
-
-        req = OrderRequest(
-            symbol="RB2505",
-            direction=Direction.BUY,
-            offset=Offset.OPEN,
-            volume=5,
-            price=None,  # 市价单
-        )
-
-        gateway.send_order(req)
-
-        # 验证使用了卖一价
-        call_args = gateway.api.insert_order.call_args
-        assert call_args[1]["limit_price"] == 3501.0
-
-    def test_send_order_market_price_uses_counter_price_sell(self, gateway: TqGateway):
-        """测试市价单卖出使用对手价"""
-        gateway.connected = True
-        gateway._upper_symbols = {"RB2505": "SHFE.rb2505"}
-        gateway._quotes = {
-            "SHFE.rb2505": MagicMock(
-                ask_price1=3501.0,
-                bid_price1=3499.0,
-                instrument_id="SHFE.rb2505",
-            )
-        }
-        gateway.api = MagicMock()
-        class MockOrder:
-            def __init__(self):
-                self.status = "ALIVE"
-                self.instrument_id = "rb2505"
-                self.exchange_id = "SHFE"
-                self._data = {
-                    "order_id": "test_order_id",
-                    "status": "ALIVE",
-                }
-
-            def get(self, key, default=None):
-                return self._data.get(key, default)
-
-        gateway.api.insert_order.return_value = MockOrder()
-
-        req = OrderRequest(
-            symbol="RB2505",
-            direction=Direction.SELL,
-            offset=Offset.OPEN,
-            volume=5,
-            price=None,  # 市价单
-        )
 
-        gateway.send_order(req)
+@pytest.mark.unit
+class TestSubscribe:
+    """订阅记账（未连接）"""
 
-        # 验证使用了买一价
-        call_args = gateway.api.insert_order.call_args
-        assert call_args[1]["limit_price"] == 3499.0
+    def test_subscribe_not_connected_recorded(self, gateway):
+        assert gateway.subscribe(["SHFE.hc2505"]) is True
+        assert "SHFE.hc2505" in gateway.hist_subs
 
-    def test_send_order_limit_price(self, gateway: TqGateway):
-        """测试限价单使用指定价格"""
-        gateway.connected = True
-        gateway._upper_symbols = {"RB2505": "SHFE.rb2505"}
-        gateway._quotes = {
-            "SHFE.rb2505": MagicMock(
-                ask_price1=3501.0,
-                bid_price1=3499.0,
-                instrument_id="SHFE.rb2505",
-            )
-        }
-        gateway.api = MagicMock()
-        class MockOrder:
-            def __init__(self):
-                self.status = "ALIVE"
-                self.instrument_id = "rb2505"
-                self.exchange_id = "SHFE"
-                self._data = {
-                    "order_id": "test_order_id",
-                    "status": "ALIVE",
-                }
-
-            def get(self, key, default=None):
-                return self._data.get(key, default)
-
-        gateway.api.insert_order.return_value = MockOrder()
-
-        req = OrderRequest(
-            symbol="RB2505",
-            direction=Direction.BUY,
-            offset=Offset.OPEN,
-            volume=5,
-            price=3500.0,
-        )
-
-        gateway.send_order(req)
-
-        # 验证使用了指定价格
-        call_args = gateway.api.insert_order.call_args
-        assert call_args[1]["limit_price"] == 3500.0
-
-    def test_send_order_not_connected_returns_none(self, gateway: TqGateway):
-        """测试未连接时返回 None"""
-        gateway.connected = False
-
-        req = OrderRequest(
-            symbol="RB2505",
-            direction=Direction.BUY,
-            offset=Offset.OPEN,
-            volume=5,
-        )
-
-        result = gateway.send_order(req)
-
-        assert result is None
-
-
-# ==================== TestTqGatewayCancelOrder ====================
-
-
-class TestTqGatewayCancelOrder:
-    """TqGateway 撤单测试"""
-
-    def test_cancel_order_success(self, gateway: TqGateway):
-        """测试成功撤单"""
-        gateway.connected = True
-        gateway.api = MagicMock()
-
-        mock_order = MagicMock()
-        mock_order.order_id = "test_order_id"
-        gateway._orders = {"test_order_id": mock_order}
-
-        req = CancelRequest(order_id="test_order_id")
-
-        result = gateway.cancel_order(req)
-
-        assert result is True
-        gateway.api.cancel_order.assert_called_once_with(mock_order)
-
-    def test_cancel_order_not_found(self, gateway: TqGateway):
-        """测试订单不存在处理"""
-        gateway.connected = True
-        gateway.api = MagicMock()
-        gateway._orders = {}
-
-        req = CancelRequest(order_id="nonexistent_order")
-
-        result = gateway.cancel_order(req)
-
-        assert result is False
-
-
-# ==================== TestTqGatewayDataConversion ====================
-
-
-class TestTqGatewayDataConversion:
-    """TqGateway 数据转换测试"""
-
-    def test_convert_account(self, gateway: TqGateway):
-        """测试 _convert_account() 转换账户数据"""
-        mock_account = MagicMock()
-        mock_account.balance = 1000000.0
-        mock_account.available = 900000.0
-        mock_account.margin = 100000.0
-        mock_account.pre_balance = 1000000.0
-        mock_account.position_profit = 5000.0
-        mock_account.close_profit = 1000.0
-        mock_account.risk_ratio = 0.1
-
-        result = gateway._convert_account(mock_account)
-
-        assert isinstance(result, AccountData)
-        assert result.balance == 1000000.0
-        assert result.available == 900000.0
-        assert result.margin == 100000.0
-
-    def test_convert_order_alive(self, gateway: TqGateway):
-        """测试 _convert_order() 转换活动订单"""
-        # 使用真实对象而不是 MagicMock
-        class MockOrder:
-            def __init__(self):
-                self._data = {
-                    "order_id": "test_order",
-                    "instrument_id": "rb2505",
-                    "exchange_id": "SHFE",
-                    "direction": "BUY",
-                    "offset": "OPEN",
-                    "volume_orign": 5,
-                    "volume_left": 3,
-                    "limit_price": 3500.0,
-                    "status": "ALIVE",
-                    "last_msg": "",
-                    "insert_date_time": int(datetime.now().timestamp() * 1e9),
-                }
-                # 添加直接属性访问
-                self.status = "ALIVE"
-                self.instrument_id = "rb2505"
-                self.exchange_id = "SHFE"
-
-            def get(self, key, default=None):
-                return self._data.get(key, default)
-
-        mock_order = MockOrder()
-
-        result = gateway._convert_order(mock_order)
-
-        assert isinstance(result, OrderData)
-        assert result.order_id == "test_order"
-        assert result.symbol == "rb2505"
-        assert result.direction == Direction.BUY
-        assert result.volume == 5
-        assert result.traded == 2
-
-    def test_convert_order_finished(self, gateway: TqGateway):
-        """测试 _convert_order() 转换已完成订单"""
-        class MockOrder:
-            def __init__(self):
-                self._data = {
-                    "order_id": "test_order",
-                    "instrument_id": "rb2505",
-                    "exchange_id": "SHFE",
-                    "direction": "BUY",
-                    "offset": "OPEN",
-                    "volume_orign": 5,
-                    "volume_left": 0,
-                    "limit_price": 3500.0,
-                    "status": "FINISHED",
-                    "last_msg": "全部成交",
-                    "insert_date_time": int(datetime.now().timestamp() * 1e9),
-                }
-                # 添加直接属性访问
-                self.status = "FINISHED"
-                self.instrument_id = "rb2505"
-                self.exchange_id = "SHFE"
-
-            def get(self, key, default=None):
-                return self._data.get(key, default)
-
-        mock_order = MockOrder()
-
-        result = gateway._convert_order(mock_order)
-
-        assert result.status == OrderStatus.FINISHED
-
-    def test_convert_order_rejected(self, gateway: TqGateway):
-        """测试 _convert_order() 转换被拒订单"""
-        class MockOrder:
-            def __init__(self):
-                self._data = {
-                    "order_id": "test_order",
-                    "instrument_id": "rb2505",
-                    "exchange_id": "SHFE",
-                    "direction": "BUY",
-                    "offset": "OPEN",
-                    "volume_orign": 5,
-                    "volume_left": 5,
-                    "limit_price": 3500.0,
-                    "status": "ALIVE",
-                    "last_msg": "报单被拒绝",  # 包含错误关键词"拒绝"
-                    "insert_date_time": int(datetime.now().timestamp() * 1e9),
-                }
-                # 添加直接属性访问
-                self.status = "ALIVE"
-                self.instrument_id = "rb2505"
-                self.exchange_id = "SHFE"
-
-            def get(self, key, default=None):
-                return self._data.get(key, default)
-
-        mock_order = MockOrder()
-
-        result = gateway._convert_order(mock_order)
-
-        # 由于 last_msg 包含"拒绝"，应该被识别为 REJECTED
-        assert result.status == OrderStatus.REJECTED
-
-    def test_convert_trade(self, gateway: TqGateway):
-        """测试 _convert_trade() 转换成交数据"""
-        mock_trade = MagicMock()
-        mock_trade.get = lambda k, d=None: {
-            "trade_id": "test_trade",
-            "order_id": "test_order",
-            "instrument_id": "SHFE.rb2505",
-            "exchange_id": "SHFE",
-            "direction": "BUY",
-            "offset": "OPEN",
-            "price": 3500.0,
-            "volume": 5,
-            "trade_date_time": int(datetime.now().timestamp() * 1e9),
-        }.get(k, d)
-
-        result = gateway._convert_trade(mock_trade)
-
-        assert isinstance(result, TradeData)
-        assert result.trade_id == "test_trade"
-        assert result.order_id == "test_order"
-        assert result.price == 3500.0
-        assert result.volume == 5
-
-    def test_convert_position(self, gateway: TqGateway):
-        """测试 _convert_position() 转换持仓数据"""
-        mock_position = MagicMock()
-        mock_position.instrument_id = "SHFE.rb2505"
-        mock_position.exchange_id = "SHFE"
-        mock_position.pos_long = 10
-        mock_position.pos_short = 0
-        mock_position.pos_long_his = 5
-        mock_position.pos_short_his = 0
-        mock_position.pos_long_today = 5
-        mock_position.pos_short_today = 0
-        mock_position.open_price_long = 3500.0
-        mock_position.open_price_short = 0.0
-        mock_position.float_profit_long = 500.0
-        mock_position.float_profit_short = 0.0
-        mock_position.position_profit_long = 500.0
-        mock_position.position_profit_short = 0.0
-        mock_position.margin_long = 35000.0
-        mock_position.margin_short = 0.0
-
-        result = gateway._convert_position(mock_position)
-
-        assert isinstance(result, PositionData)
-        assert result.symbol == "SHFE.rb2505"
-        assert result.pos == 10
-        assert result.pos_long == 10
-        assert result.pos_short == 0
-
-    def test_convert_tick(self, gateway: TqGateway):
-        """测试 _convert_tick() 转换行情数据"""
-        now_ts = int(datetime.now().timestamp() * 1e9)
-        mock_quote = MagicMock()
-        mock_quote.get = lambda k, d=None: {
-            "instrument_id": "SHFE.rb2505",
-            "exchange_id": "SHFE",
-            "datetime": now_ts,
-            "last_price": 3500.0,
-            "volume": 10000,
-            "turnover": 35000000,
-            "open_interest": 50000,
-            "bid_price1": 3499.0,
-            "ask_price1": 3501.0,
-            "bid_volume1": 100,
-            "ask_volume1": 100,
-            "open": 3480.0,
-            "highest": 3520.0,
-            "lowest": 3470.0,
-            "pre_open_interest": 49000,
-            "upper_limit": 3650.0,
-            "lower_limit": 3350.0,
-        }.get(k, d)
-
-        result = gateway._convert_tick(mock_quote)
-
-        assert isinstance(result, TickData)
-        assert result.symbol == "rb2505"
-        assert result.last_price == 3500.0
-
-    def test_convert_bar(self, gateway: TqGateway):
-        """测试 _convert_bar() 转换K线数据"""
-        now_ts = int(datetime.now().timestamp() * 1e9)
-        data = {
-            "datetime": now_ts,
-            "open": 3500.0,
-            "high": 3510.0,
-            "low": 3490.0,
-            "close": 3505.0,
-            "volume": 1000,
-            "turnover": 3505000,
-            "open_interest": 50000,
-        }
-
-        result = gateway._convert_bar("SHFE.rb2505", "M1", data, now_ts)
-
-        assert isinstance(result, BarData)
-        assert result.symbol == "SHFE.rb2505"
-        assert result.interval == "M1"
-        assert result.open_price == 3500.0
-        assert result.close_price == 3505.0
-
-
-# ==================== TestTqGatewayIntervalConversion ====================
-
-
-class TestTqGatewayIntervalConversion:
-    """TqGateway 时间间隔转换测试"""
-
-    def test_interval_m1_conversion(self, gateway: TqGateway):
-        """测试 M1 转换为秒数"""
-        result = gateway._interval_to_seconds("M1")
-        assert result == 60
-
-    def test_interval_m5_conversion(self, gateway: TqGateway):
-        """测试 M5 转换为秒数"""
-        result = gateway._interval_to_seconds("M5")
-        assert result == 300
-
-    def test_interval_m15_conversion(self, gateway: TqGateway):
-        """测试 M15 转换为秒数"""
-        result = gateway._interval_to_seconds("M15")
-        assert result == 900
-
-    def test_interval_h1_conversion(self, gateway: TqGateway):
-        """测试 H1 转换为秒数"""
-        result = gateway._interval_to_seconds("H1")
-        assert result == 3600
-
-    def test_interval_h4_conversion(self, gateway: TqGateway):
-        """测试 H4 转换为秒数"""
-        result = gateway._interval_to_seconds("H4")
-        assert result == 14400
-
-    def test_interval_invalid_format_raises_error(self, gateway: TqGateway):
-        """测试无效格式抛出异常"""
-        with pytest.raises(ValueError, match="暂不支持的时间间隔"):
+    def test_subscribe_bars_unknown_symbol_fails(self, gateway):
+        assert gateway.subscribe_bars("GHOST.xx", "M1") is False
+
+    def test_subscribe_bars_not_connected_records_sub(self, gateway):
+        gateway.contracts["rb2505"] = make_contract()
+        result = gateway.subscribe_bars("SHFE.rb2505", "M1")
+        assert result is False  # 未连接
+        assert ("rb2505", "M1") in gateway.kline_subs
+
+    def test_subscribe_bars_deduplicated(self, gateway):
+        gateway.contracts["rb2505"] = make_contract()
+        gateway.subscribe_bars("SHFE.rb2505", "M1")
+        gateway.subscribe_bars("SHFE.rb2505", "M1")
+        assert gateway.kline_subs.count(("rb2505", "M1")) == 1
+
+
+@pytest.mark.unit
+class TestTqThreadQueue:
+    """tq 线程指令队列"""
+
+    def test_in_tq_thread_executes_directly(self, gateway):
+        gateway._tq_thead = threading.current_thread()
+        assert gateway._submit_to_tq_thread(lambda: 42) == 42
+
+    def test_not_running_raises(self, gateway):
+        with pytest.raises(Exception, match="未连接"):
+            gateway._submit_to_tq_thread(lambda: 42)
+
+    def test_drain_cmds_sets_result(self, gateway):
+        from concurrent.futures import Future
+
+        fut: Future = Future()
+        gateway._cmd_queue.put((fut, lambda: "ok"))
+
+        gateway._drain_cmds()
+
+        assert fut.result() == "ok"
+
+    def test_drain_cmds_captures_exception(self, gateway):
+        from concurrent.futures import Future
+
+        fut: Future = Future()
+
+        def boom():
+            raise RuntimeError("boom")
+
+        gateway._cmd_queue.put((fut, boom))
+        gateway._drain_cmds()
+
+        with pytest.raises(RuntimeError, match="boom"):
+            fut.result()
+
+
+@pytest.mark.unit
+class TestIntervalConversion:
+    """周期转换"""
+
+    def test_minute(self, gateway):
+        assert gateway._interval_to_seconds("M1") == 60
+        assert gateway._interval_to_seconds("M5") == 300
+
+    def test_hour(self, gateway):
+        assert gateway._interval_to_seconds("H1") == 3600
+
+    def test_invalid(self, gateway):
+        with pytest.raises(ValueError):
             gateway._interval_to_seconds("D1")
 
-        with pytest.raises(ValueError, match="暂不支持的时间间隔"):
-            gateway._interval_to_seconds("INVALID")
 
+@pytest.mark.unit
+class TestTradingWhenDisconnected:
+    """未连接时的交易接口"""
 
-# ==================== TestTqGatewayGetTradingDay ====================
-
-
-class TestTqGatewayGetTradingDay:
-    """TqGateway 交易日获取测试"""
-
-    def test_get_trading_day_before_8pm(self, gateway: TqGateway):
-        """测试晚上8点前返回当天"""
-        with patch("src.trader.gateway.tq_gateway.datetime") as mock_datetime:
-            mock_datetime.now.return_value = datetime(2026, 1, 15, 19, 0, 0)
-
-            result = gateway.get_trading_day()
-
-            # 19点应该在当天
-            assert result is not None
-
-    def test_get_trading_day_after_8pm(self, gateway: TqGateway):
-        """测试晚上8点后返回次日"""
-        gateway.connected = True
-        gateway.api = MagicMock()
-        with patch("src.trader.gateway.tq_gateway.datetime") as mock_datetime:
-            mock_datetime.now.return_value = datetime(2026, 1, 15, 21, 0, 0)
-
-            import pandas as pd
-            mock_calendar = pd.DataFrame({
-                "date": ["2026-01-15", "2026-01-16"],
-                "trading": [True, True],
-            })
-            gateway.api.get_trading_calendar.return_value = mock_calendar
-
-            result = gateway.get_trading_day()
-
-            # 21点应该在次日
-            assert result is not None
-
-
-# ==================== TestTqGatewayGetContracts ====================
-
-
-class TestTqGatewayGetContracts:
-    """TqGateway 合约查询测试"""
-
-    def test_get_contracts_returns_cached(self, gateway: TqGateway):
-        """测试返回缓存的合约"""
-        from qtrader.models.object import ContractData
-        mock_contract = ContractData(
+    def test_send_order_raises(self, gateway):
+        req = OrderRequest(
             symbol="rb2505",
-            exchange="SHFE",
-            name="螺纹钢2505",
+            direction="BUY",
+            offset="OPEN",
+            volume=1,
+            price=3500.0,
         )
-        gateway.contracts = {"rb2505": mock_contract}
-        gateway.connected = True  # 需要连接状态
-        gateway.api = MagicMock()  # 需要API实例
+        with pytest.raises(Exception):
+            gateway.send_order(req)
 
-        result = gateway.get_contracts()
+    def test_cancel_order_fails(self, gateway):
+        req = CancelRequest(order_id="order_001")
+        assert gateway.cancel_order(req) is False
 
-        assert "rb2505" in result
-        assert result["rb2505"] == mock_contract
-
-    def test_get_contracts_not_connected_returns_empty(self, gateway: TqGateway):
-        """测试未连接时返回空"""
-        gateway.connected = False
-
-        result = gateway.get_contracts()
-
-        assert result == {}
+    def test_get_kline_none(self, gateway):
+        assert gateway.get_kline("rb2505", "M1") is None
 
 
-# ==================== TestTqGatewayParseExchange ====================
+@pytest.mark.unit
+class TestConvertAccount:
+    """账户转换"""
+
+    def test_convert_account(self, gateway):
+        account = TqEntity(
+            balance=100000.0,
+            available=90000.0,
+            margin=8000.0,
+            static_balance=99000.0,
+            position_profit=500.0,
+            close_profit=200.0,
+            risk_ratio=0.08,
+        )
+        data = gateway._convert_account(account)
+
+        assert isinstance(data, AccountData)
+        assert data.account_id == "DQ"
+        assert data.balance == 100000.0
+        assert data.hold_profit == 500.0
+        assert data.pre_balance == 99000.0
+
+    def test_get_account_fallback(self, gateway):
+        data = gateway.get_account()
+        assert data.account_id == "DQ"
+        assert data.balance == 0
 
 
-class TestTqGatewayParseExchange:
-    """TqGateway 交易所解析测试"""
+@pytest.mark.unit
+class TestConvertPosition:
+    """持仓转换"""
 
-    def test_parse_exchange_shfe(self, gateway: TqGateway):
-        """测试解析 SHFE"""
-        result = gateway._parse_exchange("SHFE")
-        assert result == Exchange.SHFE
+    def test_convert_position(self, gateway):
+        gateway.contracts["rb2505"] = make_contract()
+        pos = TqEntity(
+            instrument_id="rb2505",
+            exchange_id="SHFE",
+            pos_long_his=1,
+            pos_long_today=2,
+            pos_short_his=0,
+            pos_short_today=0,
+            position_price_long=3500.0,
+            position_price_short=float("nan"),
+            position_profit_long=100.0,
+            position_profit_short=float("nan"),
+            margin_long=7000.0,
+            margin_short=float("nan"),
+        )
 
-    def test_parse_exchange_dce(self, gateway: TqGateway):
-        """测试解析 DCE"""
-        result = gateway._parse_exchange("DCE")
-        assert result == Exchange.DCE
+        data = gateway._convert_position(pos)
 
-    def test_parse_exchange_czce(self, gateway: TqGateway):
-        """测试解析 CZCE"""
-        result = gateway._parse_exchange("CZCE")
-        assert result == Exchange.CZCE
+        assert data.symbol == "rb2505"
+        assert data.exchange == Exchange.SHFE
+        assert data.pos_long_yd == 1
+        assert data.pos_long_td == 2
+        assert data.pos_long == 3
+        assert data.multiple == 10
+        # NaN 为真值，`or 0` 不会归零，原样保留
+        assert math.isnan(data.hold_price_short)
 
-    def test_parse_exchange_cffex(self, gateway: TqGateway):
-        """测试解析 CFFEX"""
-        result = gateway._parse_exchange("CFFEX")
-        assert result == Exchange.CFFEX
+    def test_get_positions_filters_long_symbols(self, gateway):
+        gateway.contracts["rb2505"] = make_contract()
+        valid = TqEntity(
+            instrument_id="rb2505",
+            exchange_id="SHFE",
+            pos_long_his=0,
+            pos_long_today=1,
+            pos_short_his=0,
+            pos_short_today=0,
+            position_price_long=3500.0,
+            position_price_short=0,
+            position_profit_long=0,
+            position_profit_short=0,
+            margin_long=0,
+            margin_short=0,
+        )
+        invalid = TqEntity(
+            instrument_id="TOO_LONG_SYMBOL",
+            exchange_id="SHFE",
+            pos_long_his=0,
+            pos_long_today=1,
+            pos_short_his=0,
+            pos_short_today=0,
+            position_price_long=3500.0,
+            position_price_short=0,
+            position_profit_long=0,
+            position_profit_short=0,
+            margin_long=0,
+            margin_short=0,
+        )
+        gateway._positions = {"rb2505": valid, "TOO_LONG_SYMBOL": invalid}
 
-    def test_parse_exchange_ine(self, gateway: TqGateway):
-        """测试解析 INE"""
-        result = gateway._parse_exchange("INE")
-        assert result == Exchange.INE
-
-    def test_parse_exchange_gfex(self, gateway: TqGateway):
-        """测试解析 GFEX"""
-        result = gateway._parse_exchange("GFEX")
-        assert result == Exchange.GFEX
-
-    def test_parse_exchange_unknown(self, gateway: TqGateway):
-        """测试解析未知交易所"""
-        result = gateway._parse_exchange("UNKNOWN")
-        assert result == Exchange.NONE
-
-
-# ==================== TestTqGatewayFormatSymbol ====================
-
-
-class TestTqGatewayFormatSymbol:
-    """TqGateway 合约代码格式化测试"""
-
-    def test_format_symbol_empty(self, gateway: TqGateway):
-        """测试空字符串"""
-        result = gateway._format_symbol("")
-        assert result is None
-
-    def test_format_symbol_in_upper_symbols(self, gateway: TqGateway):
-        """测试在映射中找到"""
-        gateway._upper_symbols = {"RB2505": "SHFE.rb2505"}
-
-        result = gateway._format_symbol("RB2505")
-
-        assert result == "SHFE.rb2505"
-
-    def test_format_symbol_not_found(self, gateway: TqGateway):
-        """测试未找到映射"""
-        gateway._upper_symbols = {}
-
-        result = gateway._format_symbol("UNKNOWN")
-
-        assert result is None
-
-
-# ==================== TestTqGatewayMapEventType ====================
+        positions = gateway.get_positions()
+        assert set(positions.keys()) == {"rb2505"}
 
 
-class TestTqGatewayMapEventType:
-    """TqGateway 事件类型映射测试"""
+@pytest.mark.unit
+class TestConvertOrder:
+    """订单转换与状态映射"""
 
-    def test_map_tick_event(self, gateway: TqGateway):
-        """测试映射 tick 事件"""
-        from qtrader.utils.async_event_engine import EventTypes
+    def test_alive_maps_pending(self, gateway):
+        data = gateway._convert_order(make_order(status="ALIVE", last_msg=""))
+        assert data.status == OrderStatus.PENDING
 
-        result = gateway._map_event_type("tick")
+    def test_filled_maps_finished(self, gateway):
+        data = gateway._convert_order(make_order(status="FINISHED", last_msg="全部成交"))
+        assert data.status == OrderStatus.FINISHED
 
-        assert result == EventTypes.TICK_UPDATE
+    def test_cancelled_maps_finished(self, gateway):
+        data = gateway._convert_order(make_order(status="FINISHED", last_msg="已撤单"))
+        assert data.status == OrderStatus.FINISHED
 
-    def test_map_bar_event(self, gateway: TqGateway):
-        """测试映射 bar 事件"""
-        from qtrader.utils.async_event_engine import EventTypes
+    def test_rejected_maps_rejected(self, gateway):
+        data = gateway._convert_order(make_order(status="FINISHED", last_msg="资金不足"))
+        assert data.status == OrderStatus.REJECTED
 
-        result = gateway._map_event_type("bar")
+    def test_cancel_with_reject_word_maps_finished(self, gateway):
+        data = gateway._convert_order(make_order(status="FINISHED", last_msg="撤单：场次不足"))
+        assert data.status == OrderStatus.FINISHED
 
-        assert result == EventTypes.KLINE_UPDATE
+    def test_order_fields(self, gateway):
+        data = gateway._convert_order(make_order())
 
-    def test_map_order_event(self, gateway: TqGateway):
-        """测试映射 order 事件"""
-        from qtrader.utils.async_event_engine import EventTypes
+        assert data.order_id == "order_001"
+        assert data.symbol == "SHFE.rb2505"
+        assert data.volume == 5
+        assert data.traded == 3
+        assert data.traded_price == 3500.5
+        assert data.gateway_order_id == "EX001"
+        assert data.insert_time is not None
 
-        result = gateway._map_event_type("order")
 
-        assert result == EventTypes.ORDER_UPDATE
+@pytest.mark.unit
+class TestConvertTradeAndTick:
+    """成交与行情转换"""
 
-    def test_map_trade_event(self, gateway: TqGateway):
-        """测试映射 trade 事件"""
-        from qtrader.utils.async_event_engine import EventTypes
+    def test_convert_trade(self, gateway):
+        trade = TqEntity(
+            trade_id="trade_001",
+            order_id="order_001",
+            exchange_id="SHFE",
+            instrument_id="SHFE.rb2505",
+            direction="BUY",
+            offset="OPEN",
+            price=3500.0,
+            volume=2,
+            trade_date_time=1756800000000000000,
+        )
+        data = gateway._convert_trade(trade)
 
-        result = gateway._map_event_type("trade")
+        assert data.trade_id == "trade_001"
+        assert data.price == 3500.0
+        assert data.volume == 2
+        assert data.trade_time is not None
 
-        assert result == EventTypes.TRADE_UPDATE
+    def test_convert_tick(self, gateway):
+        quote = TqEntity(
+            exchange_id="SHFE",
+            instrument_id="SHFE.rb2505",
+            datetime=1756800000000000000,
+            last_price=3510.0,
+            volume=1000.0,
+            turnover=3500000.0,
+            open_interest=200000.0,
+            bid_price1=3509.0,
+            ask_price1=3511.0,
+            bid_volume1=10.0,
+            ask_volume1=12.0,
+            open=3500.0,
+            highest=3520.0,
+            lowest=3495.0,
+            pre_close=3501.0,
+            upper_limit=3600.0,
+            lower_limit=3400.0,
+        )
+        data = gateway._convert_tick(quote)
 
-    def test_map_position_event(self, gateway: TqGateway):
-        """测试映射 position 事件"""
-        from qtrader.utils.async_event_engine import EventTypes
+        assert data.symbol == "rb2505"
+        assert data.last_price == 3510.0
+        assert data.ask_price1 == 3511.0
 
-        result = gateway._map_event_type("position")
+    def test_convert_tick_nan_last_price(self, gateway):
+        quote = TqEntity(
+            exchange_id="SHFE",
+            instrument_id="SHFE.rb2505",
+            datetime=0,
+            last_price=float("nan"),
+        )
+        data = gateway._convert_tick(quote)
+        assert math.isnan(data.last_price)  # 保留 NaN，由上游过滤
 
-        assert result == EventTypes.POSITION_UPDATE
+    def test_convert_bar(self, gateway):
+        data = gateway._convert_bar(
+            "rb2505",
+            "M1",
+            {
+                "datetime": 1756800000000000000,
+                "open": 3500.0,
+                "high": 3510.0,
+                "low": 3490.0,
+                "close": 3505.0,
+                "volume": 100.0,
+            },
+            1756800060000000000,
+        )
+        assert data.symbol == "rb2505"
+        assert data.interval == "M1"
+        assert data.close_price == 3505.0
 
-    def test_map_account_event(self, gateway: TqGateway):
-        """测试映射 account 事件"""
-        from qtrader.utils.async_event_engine import EventTypes
 
-        result = gateway._map_event_type("account")
+@pytest.mark.unit
+class TestCollectAndPush:
+    """数据变化收集与推送"""
 
-        assert result == EventTypes.ACCOUNT_UPDATE
+    def test_pending_order_change_pushed(self, gateway):
+        gateway.api = MagicMock()
+        gateway.api.is_changing.return_value = False
 
-    def test_map_unknown_event(self, gateway: TqGateway):
-        """测试映射未知事件"""
-        result = gateway._map_event_type("unknown")
+        order = make_order(status="ALIVE")
+        gateway._pending_orders["order_001"] = order
 
-        assert result is None
+        # 仅该订单变化时推送
+        gateway.api.is_changing.side_effect = lambda obj, *a: obj is order
+
+        gateway._collect_and_push_updates()
+
+        event_type, payload = gateway._event_engine.put.call_args[0]
+        assert event_type == EventTypes.ORDER_UPDATE
+        assert payload.order_id == "order_001"
+
+    def test_finished_order_removed_from_pending(self, gateway):
+        gateway.api = MagicMock()
+        gateway.api.is_changing.return_value = False
+        order = make_order(status="FINISHED", last_msg="全部成交")
+        gateway._pending_orders["order_001"] = order
+        gateway.api.is_changing.side_effect = lambda obj, *a: obj is order
+
+        gateway._collect_and_push_updates()
+
+        assert "order_001" not in gateway._pending_orders
+
+    def test_quote_change_pushes_tick(self, gateway):
+        gateway.api = MagicMock()
+        gateway.api.is_changing.return_value = False
+        quote = TqEntity(exchange_id="SHFE", instrument_id="SHFE.rb2505", last_price=3510.0)
+        gateway._quotes["rb2505"] = quote
+        gateway.api.is_changing.side_effect = lambda obj, *a: obj is quote
+
+        gateway._collect_and_push_updates()
+
+        event_type, payload = gateway._event_engine.put.call_args[0]
+        assert event_type == EventTypes.TICK_UPDATE
+        assert payload.symbol == "rb2505"
+
+    def test_trade_change_pushes_trade_with_order_price(self, gateway):
+        gateway.api = MagicMock()
+        gateway.api.is_changing.return_value = False
+        trade = TqEntity(
+            trade_id="t1",
+            order_id="order_001",
+            exchange_id="SHFE",
+            instrument_id="SHFE.rb2505",
+            direction="BUY",
+            offset="OPEN",
+            price=3500.0,
+            volume=1,
+        )
+        gateway._trades["t1"] = trade
+        pending = make_order()
+        gateway._pending_orders["order_001"] = pending
+
+        gateway.api.is_changing.side_effect = lambda obj, *a: obj is trade or obj is gateway._trades
+
+        gateway._collect_and_push_updates()
+
+        event_type, payload = gateway._event_engine.put.call_args[0]
+        assert event_type == EventTypes.TRADE_UPDATE
+        assert payload.order_price == 3500.0
+
+    def test_position_change_pushes_with_source(self, gateway):
+        gateway.api = MagicMock()
+        gateway.api.is_changing.return_value = False
+        gateway.contracts["rb2505"] = make_contract()
+        pos = TqEntity(
+            instrument_id="rb2505",
+            exchange_id="SHFE",
+            pos_long_his=0,
+            pos_long_today=1,
+            pos_short_his=0,
+            pos_short_today=0,
+            position_price_long=3500.0,
+            position_price_short=0,
+            position_profit_long=0,
+            position_profit_short=0,
+            margin_long=0,
+            margin_short=0,
+        )
+        gateway._positions["rb2505"] = pos
+        gateway.api.is_changing.side_effect = (
+            lambda obj, *a: obj is pos or obj is gateway._positions
+        )
+
+        gateway._collect_and_push_updates()
+
+        event_type, payload = gateway._event_engine.put.call_args[0]
+        assert event_type == EventTypes.POSITION_UPDATE
+        assert payload["_source"] == "trade"
+
+    def test_no_api_noop(self, gateway):
+        gateway.api = None
+        gateway._collect_and_push_updates()  # 不应抛错
+        gateway._event_engine.put.assert_not_called()
+
+
+@pytest.mark.unit
+class TestPushAndQuery:
+    """推送与查询接口"""
+
+    def test_push_ready(self, gateway):
+        gateway._push_ready()
+        gateway._event_engine.put.assert_called_once_with(EventTypes.ACCOUNT_READY, None)
+
+    def test_push_account(self, gateway):
+        account = AccountData(account_id="DQ", balance=1.0)
+        gateway._push_account(account)
+        gateway._event_engine.put.assert_called_once_with(EventTypes.ACCOUNT_UPDATE, account)
+
+    def test_parse_exchange(self, gateway):
+        assert gateway._parse_exchange("SHFE") == Exchange.SHFE
+        assert gateway._parse_exchange("DCE") == Exchange.DCE
+        assert gateway._parse_exchange("XXXX") == Exchange.NONE
+
+    def test_get_orders(self, gateway):
+        gateway._orders["order_001"] = make_order()
+        orders = gateway.get_orders()
+        assert "order_001" in orders
+        assert orders["order_001"].order_id == "order_001"
+
+    def test_get_trades(self, gateway):
+        gateway._trades["t1"] = TqEntity(
+            trade_id="t1",
+            order_id="o1",
+            exchange_id="SHFE",
+            instrument_id="SHFE.rb2505",
+            direction="BUY",
+            offset="OPEN",
+            price=1.0,
+            volume=1,
+        )
+        trades = gateway.get_trades()
+        assert "t1" in trades
+
+    def test_get_quotes_skips_empty_instrument(self, gateway):
+        gateway._quotes["rb2505"] = TqEntity(
+            exchange_id="SHFE", instrument_id="SHFE.rb2505", last_price=1.0
+        )
+        gateway._quotes["bad"] = TqEntity(exchange_id="", instrument_id="")
+        quotes = gateway.get_quotes()
+        assert set(quotes.keys()) == {"rb2505"}
+
+    def test_get_contracts(self, gateway):
+        gateway.contracts["rb2505"] = make_contract()
+        assert "rb2505" in gateway.get_contracts()

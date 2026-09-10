@@ -216,7 +216,12 @@ async def connect_system(
     if not trader:
         return error_response(code=404, message=f"账户 [{account_id}] 不存在")
 
-    success = await trader.connect()
+    try:
+        success = await trader.connect()
+    except Exception as e:
+        # 异常含 Trader 回传的真实失败原因，透传给前端
+        logger.error(f"连接失败 [{account_id}]: {e}", exc_info=True)
+        return error_response(code=500, message=f"连接失败: {str(e)}")
 
     if success:
         return success_response(data={"connected": True}, message="连接成功")
@@ -240,7 +245,11 @@ async def disconnect_system(
     if not trader:
         return error_response(code=404, message=f"账户 [{account_id}] 不存在")
 
-    await trader.disconnect()
+    try:
+        await trader.disconnect()
+    except Exception as e:
+        logger.error(f"断开连接失败 [{account_id}]: {e}", exc_info=True)
+        return error_response(code=500, message=f"断开连接失败: {str(e)}")
     return success_response(data={"connected": False}, message="已断开连接")
 
 
@@ -260,7 +269,11 @@ async def disconnect_gateway(
     if not trader:
         return error_response(code=404, message=f"账户 [{account_id}] 不存在")
 
-    await trader.disconnect()
+    try:
+        await trader.disconnect()
+    except Exception as e:
+        logger.error(f"断开网关连接失败 [{account_id}]: {e}", exc_info=True)
+        return error_response(code=500, message=f"断开网关连接失败: {str(e)}")
     return success_response(
         data={"md_connected": False, "td_connected": False}, message="已断开网关连接"
     )
@@ -562,9 +575,10 @@ async def update_manager_alert_config(
             },
         }
 
-        # 写回文件
-        with open(config_path, "w", encoding="utf-8") as f:
-            yaml.dump(config_data, f, allow_unicode=True, sort_keys=False)
+        # 写回文件（原子写 + 锁，避免并发写坏配置）
+        config_loader.atomic_write_text(
+            config_path, yaml.dump(config_data, allow_unicode=True, sort_keys=False)
+        )
 
         logger.info(
             f"Manager告警配置已更新: notification={notification.enabled}, exception={exception.enabled}"

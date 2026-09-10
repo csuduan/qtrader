@@ -24,8 +24,6 @@ class WebSocketManager {
   private reconnectTimer: any = null
 
    // 消息回调
-   private onConnectedCallbacks: Array<() => void> = []
-   private onDisconnectedCallbacks: Array<() => void> = []
    private onAccountUpdateCallbacks: Array<(data: Account) => void> = []
    private onPositionUpdateCallbacks: Array<(data: Position) => void> = []
    private onTradeUpdateCallbacks: Array<(data: Trade) => void> = []
@@ -72,7 +70,6 @@ class WebSocketManager {
       this.connected.value = true
       this.connecting.value = false
       this.reconnectAttempts = 0
-      this.onConnectedCallbacks.forEach(cb => cb())
     }
 
     this.ws.onmessage = (event) => {
@@ -88,7 +85,6 @@ class WebSocketManager {
       console.log('WebSocket 连接关闭')
       this.connected.value = false
       this.connecting.value = false
-      this.onDisconnectedCallbacks.forEach(cb => cb())
 
       // 4401: 服务端鉴权拒绝（token 无效/过期），不再自动重连
       if (event.code === 4401) {
@@ -261,32 +257,6 @@ class WebSocketManager {
          items.forEach(data => this.onTickUpdateCallbacks.forEach(cb => cb(data)))
        }
      }
-
-  /**
-   * 订阅连接成功事件
-   */
-  onConnected(callback: () => void): () => void {
-    this.onConnectedCallbacks.push(callback)
-    return () => {
-      const index = this.onConnectedCallbacks.indexOf(callback)
-      if (index > -1) {
-        this.onConnectedCallbacks.splice(index, 1)
-      }
-    }
-  }
-
-  /**
-   * 订阅断开连接事件
-   */
-  onDisconnected(callback: () => void): () => void {
-    this.onDisconnectedCallbacks.push(callback)
-    return () => {
-      const index = this.onDisconnectedCallbacks.indexOf(callback)
-      if (index > -1) {
-        this.onDisconnectedCallbacks.splice(index, 1)
-      }
-    }
-  }
 
   /**
    * 订阅账户更新事件

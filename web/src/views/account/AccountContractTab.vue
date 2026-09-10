@@ -27,7 +27,12 @@
           <template #empty>
             <el-empty description="暂无合约信息" />
           </template>
-          <el-table-column prop="symbol" label="合约代码" width="80" />
+          <el-table-column prop="symbol" label="合约代码" width="110">
+            <template #default="{ row }">
+              {{ row.symbol }}
+              <el-tag v-if="row.is_main" type="danger" size="small" effect="dark" style="margin-left: 4px">主力</el-tag>
+            </template>
+          </el-table-column>
           <el-table-column v-if="!isMobile" prop="name" label="合约名称" width="200" show-overflow-tooltip />
           <el-table-column prop="exchange_id" label="交易所" :width="isMobile ? 70 : 100">
             <template #default="{ row }">

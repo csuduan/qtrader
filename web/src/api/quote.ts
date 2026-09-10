@@ -17,19 +17,5 @@ export const quoteApi = {
    */
   subscribeSymbol: async (symbol: string, accountId?: string): Promise<{ symbol: string }> => {
     return api.post<{ symbol: string }>('/quote/subscribe', { symbol, account_id: accountId })
-  },
-
-  /**
-   * 取消订阅合约行情
-   */
-  unsubscribeSymbol: async (symbol: string, accountId?: string): Promise<{ symbol: string }> => {
-    return api.post<{ symbol: string }>('/quote/unsubscribe', { symbol, account_id: accountId })
-  },
-
-  /**
-   * 检查合约是否已订阅
-   */
-  checkSubscription: async (symbol: string, accountId?: string): Promise<{ symbol: string; subscribed: boolean }> => {
-    return api.get<{ symbol: string; subscribed: boolean }>(`/quote/check/${symbol}`, accountId ? { params: { account_id: accountId } } : undefined)
   }
 }

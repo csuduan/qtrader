@@ -250,7 +250,7 @@ def sample_config_yaml():
         "api": {
             "host": "0.0.0.0",
             "port": 8000,
-            "cors_origins": ["http://localhost:5173"],
+            "cors_origins": ["http://localhost:3000"],
         },
         "subs": {
             "subscribe_symbols": ["SHFE.rb2505"],

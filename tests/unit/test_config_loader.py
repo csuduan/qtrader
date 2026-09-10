@@ -57,7 +57,7 @@ def sample_config_yaml():
         "account_ids": ["test_account_001"],
         "accounts": [],
         "paths": {
-            "switchPos_files": "./data/orders",
+            "switch_pos": "./data/orders",
             "logs": "./data/logs",
             "database": "./data/trading.db",
             "export": "./data/export",
@@ -84,7 +84,6 @@ def sample_account_yaml():
         "account_type": "kq",
         "enabled": True,
         "auto_start": False,
-        "alert_wechat": False,
         "gateway": {
             "account_id": "test_account_001",
             "type": "TQSDK",
@@ -114,7 +113,7 @@ def sample_account_yaml():
             },
         },
         "paths": {
-            "switchPos_files": "./data/orders/test_account_001",
+            "switch_pos": "./data/orders/test_account_001",
             "logs": "./data/logs/test_account_001",
             "database": "./data/trading_test_account_001.db",
             "export": "./data/export/test_account_001",
@@ -191,16 +190,16 @@ class TestConfigLoaderModels:
     def test_paths_config_validation(self):
         """测试 PathsConfig 验证"""
         config = PathsConfig(
-            switchPos_files="./data/orders",
+            switch_pos="./data/orders",
             logs="./data/logs",
             database="./data/trading.db",
         )
-        assert config.switchPos_files == "./data/orders"
+        assert config.switch_pos == "./data/orders"
 
     def test_paths_config_default_values(self):
         """测试 PathsConfig 默认值"""
         config = PathsConfig()
-        assert config.switchPos_files == "./data/orders"
+        assert config.switch_pos == "./data/switch_pos"
         assert config.logs == "./data/logs"
 
     def test_job_config_validation(self):
@@ -334,7 +333,7 @@ class TestConfigLoaderModels:
         config = AccountConfig()
         assert config.account_type == "kq"
         assert config.enabled is True
-        assert config.alert_wechat is False
+        assert config.alert.notification.enabled is True
 
     def test_socket_config_validation(self):
         """测试 SocketConfig 验证"""
@@ -475,7 +474,7 @@ class TestConfigLoader:
         config = loader.load_config()
 
         assert isinstance(config, AppConfig)
-        assert config.paths.switchPos_files == "./data/orders"
+        assert config.paths.switch_pos == "./data/orders"
         assert config.api.port == 8000
 
     def test_load_config_caches_result(self, temp_config_dir, sample_config_yaml):
@@ -499,7 +498,11 @@ class TestConfigLoader:
         with open(config_file, "w", encoding="utf-8") as f:
             yaml.dump(sample_config_yaml, f)
 
-        # 创建多个账户配置文件
+        # 更新 account_ids 并创建对应账户配置文件（加载由 account_ids 驱动）
+        sample_config_yaml["account_ids"] = [f"test_{i:03d}" for i in range(3)]
+        with open(config_file, "w", encoding="utf-8") as f:
+            yaml.dump(sample_config_yaml, f)
+
         for i in range(3):
             account_file = temp_config_dir / f"account-test_{i:03d}.yaml"
             account_yaml = sample_account_yaml.copy()
@@ -628,40 +631,6 @@ class TestConfigLoader:
         with pytest.raises(FileNotFoundError, match="账户配置文件不存在"):
             loader._load_account_config("nonexistent")
 
-    def test_ensure_directories(self, temp_config_dir):
-        """测试 _ensure_directories() 创建目录"""
-        paths = PathsConfig(
-            switchPos_files=str(temp_config_dir / "orders"),
-            logs=str(temp_config_dir / "logs"),
-            database=str(temp_config_dir / "db" / "trading.db"),
-            params=str(temp_config_dir / "params"),
-        )
-
-        loader = ConfigLoader(config_dir=str(temp_config_dir))
-        loader._ensure_directories(paths)
-
-        # 验证目录已创建
-        assert (temp_config_dir / "orders").exists()
-        assert (temp_config_dir / "logs").exists()
-        assert (temp_config_dir / "db").exists()
-        assert (temp_config_dir / "params").exists()
-
-    def test_ensure_directories_skips_none(self, temp_config_dir):
-        """测试 _ensure_directories() 跳过 None 值"""
-        # PathsConfig 不允许 None 值，需要使用空字符串
-        paths = PathsConfig(
-            switchPos_files="",
-            logs="",
-        )
-
-        loader = ConfigLoader(config_dir=str(temp_config_dir))
-
-        # 不应该报错（空路径不会创建目录）
-        loader._ensure_directories(paths)
-
-
-# ==================== TestUpdateAccountConfigField ====================
-
 
 class TestUpdateAccountConfigField:
     """update_account_config_field 字段持久化测试"""
@@ -756,6 +725,46 @@ gateway:
         # 顶层的 enabled 被追加为 false（顶层原本没有），嵌套的保持不变
         assert "  enabled: true" in content
         assert content.rstrip().endswith("enabled: false")
+
+
+# ==================== TestAtomicWriteText ====================
+
+
+class TestAtomicWriteText:
+    """atomic_write_text 原子写测试"""
+
+    def test_writes_content_and_no_tmp_left(self, temp_config_dir):
+        """正常写入内容正确，且不残留 .tmp 文件"""
+        loader = ConfigLoader(config_dir=str(temp_config_dir))
+        target = temp_config_dir / "config.yaml"
+
+        loader.atomic_write_text(target, "account_ids: []\n")
+
+        assert target.read_text(encoding="utf-8") == "account_ids: []\n"
+        assert not list(temp_config_dir.glob("*.tmp"))
+
+    def test_concurrent_writes_serialized(self, temp_config_dir):
+        """多线程并发写同一文件时由锁串行化，最终内容完整且为某次完整写入"""
+        import threading
+
+        loader = ConfigLoader(config_dir=str(temp_config_dir))
+        target = temp_config_dir / "config.yaml"
+
+        def write(tag: str) -> None:
+            for _ in range(20):
+                loader.atomic_write_text(target, f"tag: {tag}\n")
+
+        threads = [threading.Thread(target=write, args=(f"t{i}",)) for i in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        content = target.read_text(encoding="utf-8")
+        # 最终内容必须是某一次完整写入（锁保证不撕裂）
+        assert content.startswith("tag: t")
+        assert content.count("\n") == 1
+        assert not list(temp_config_dir.glob("*.tmp"))
 
 
 # ==================== TestUpdateAccountIds ====================
@@ -872,7 +881,7 @@ class TestConfigLoaderSingleton:
         # 重置全局变量
         import qtrader.utils.config_loader
 
-        src.utils.config_loader._config_loader = None
+        qtrader.utils.config_loader._config_loader = None
 
         loader = get_config_loader()
 
@@ -881,17 +890,21 @@ class TestConfigLoaderSingleton:
 
     def test_get_config_loader_custom_dir(self, temp_config_dir):
         """测试 get_config_loader() 自定义目录"""
-        # 重置全局变量
         import qtrader.utils.config_loader
 
-        src.utils.config_loader._config_loader = None
+        # 保存现场，避免污染全局单例导致后续用例读不到真实配置
+        saved_loader = qtrader.utils.config_loader._config_loader
+        try:
+            qtrader.utils.config_loader._config_loader = None
 
-        loader = ConfigLoader(config_dir=str(temp_config_dir))
-        src.utils.config_loader._config_loader = loader
+            loader = ConfigLoader(config_dir=str(temp_config_dir))
+            qtrader.utils.config_loader._config_loader = loader
 
-        result = get_config_loader()
+            result = get_config_loader()
 
-        assert result.config_dir == temp_config_dir
+            assert result.config_dir == temp_config_dir
+        finally:
+            qtrader.utils.config_loader._config_loader = saved_loader
 
 
 # ==================== TestConfigLoaderYamlParsing ====================

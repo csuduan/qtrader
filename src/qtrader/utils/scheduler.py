@@ -23,12 +23,12 @@ logger = get_logger(__name__)
 class Job(BaseModel):
     """定时任务"""
 
-    job_id: str = None
-    job_name: str = None
-    job_group: str = None
-    job_description: str = None
-    cron_expression: str = None
-    job_method: str = None
+    job_id: str | None = None
+    job_name: str | None = None
+    job_group: str | None = None
+    job_description: str | None = None
+    cron_expression: str | None = None
+    job_method: str | None = None
     last_trigger_time: datetime | None = None
     next_trigger_time: datetime | None = None
     enabled: bool | None = None
@@ -75,6 +75,9 @@ class TaskScheduler:
                 created_at=datetime.now(),
                 updated_at=datetime.now(),
             )
+            if job.job_id is None:
+                logger.warning(f"任务配置缺少 job_id，跳过: {job.job_name}")
+                continue
             self._jobs[job.job_id] = job
             self._setup_job(job)
 
@@ -89,7 +92,7 @@ class TaskScheduler:
 
         # 获取执行函数
         job_func = self._get_job_function(job_method)
-        if not job_func:
+        if job_func is None:
             logger.error(f"任务 {job.job_name} 的执行方法 {job_method} 不存在，跳过")
             return
 
@@ -128,6 +131,9 @@ class TaskScheduler:
         wrapped_func = wrap_job_func(job_func, job)
 
         # 解析CRON表达式
+        if not job.cron_expression:
+            logger.error(f"任务 {job.job_name} 缺少CRON表达式，跳过")
+            return
         trigger = self._parse_cron_expression(job.cron_expression)
         if not trigger:
             logger.error(f"任务 {job.job_name} 的CRON表达式无效: {job.cron_expression}")
@@ -150,7 +156,7 @@ class TaskScheduler:
         except Exception as e:
             logger.error(f"添加任务 {job.job_name} 失败: {e}")
 
-    def _get_job_function(self, job_method: str) -> Callable:
+    def _get_job_function(self, job_method: str) -> Callable | None:
         """
         获取任务执行函数
 
@@ -166,8 +172,8 @@ class TaskScheduler:
 
         # 优先从 JobManager 获取
         job_func = getattr(self.job_manager, method_name, None)
-        if job_func and callable(job_func):
-            return job_func
+        if callable(job_func):
+            return job_func  # type: ignore[no-any-return]
 
         logger.warning(f"未找到任务方法: {job_method}")
         return None

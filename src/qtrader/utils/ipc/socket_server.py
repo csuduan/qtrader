@@ -228,6 +228,8 @@ class SocketServer:
         """
         手动注册消息处理器
 
+        同步 handler 会被放入线程执行（asyncio.to_thread），异步 handler 直接 await。
+
         Args:
             message_type: 消息类型 (order_req, cancel_req)
             handler: 处理函数 (data: dict) -> Any
@@ -399,7 +401,8 @@ class SocketServer:
                         if asyncio.iscoroutinefunction(handler):
                             result = await handler(request_data.get("data", {}))
                         else:
-                            result = handler(request_data.get("data", {}))
+                            # 同步 handler 放入线程执行，避免阻塞事件循环（DB/文件 IO）
+                            result = await asyncio.to_thread(handler, request_data.get("data", {}))
                         # 发送响应
                         if await conn.send_message(create_response(result, request_id)):
                             self._stats["messages_sent"] += 1
@@ -408,7 +411,11 @@ class SocketServer:
                         logger.exception(
                             f"连接[{conn_id}] 处理请求:{request_type} {request_id}时出错: {e}"
                         )
-                        if await conn.send_message(create_response(None, request_id, error=str(e))):
+                        # IPC 为 Manager↔Trader 内部信任通道，回传真实异常信息
+                        # （含异常类型），由 Manager API 层决定对前端的错误展示
+                        if await conn.send_message(
+                            create_response(None, request_id, error=f"{type(e).__name__}: {e}")
+                        ):
                             self._stats["messages_sent"] += 1
                 else:
                     logger.warning(f"连接[{conn_id}] 未找到请求处理器: {request_type} {request_id}")

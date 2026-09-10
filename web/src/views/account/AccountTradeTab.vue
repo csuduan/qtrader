@@ -22,7 +22,13 @@
       </template>
 
       <div class="table-wrapper">
-        <el-table :data="trades" stripe v-loading="loading" :size="isMobile ? 'small' : 'default'">
+        <el-table
+          :data="trades"
+          data-testid="trades-table"
+          stripe
+          v-loading="loading"
+          :size="isMobile ? 'small' : 'default'"
+        >
           <template #empty>
             <el-empty description="暂无成交记录" />
           </template>

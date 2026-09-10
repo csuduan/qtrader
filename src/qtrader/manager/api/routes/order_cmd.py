@@ -49,6 +49,7 @@ async def get_order_cmds_status(
                     direction=cmd.get("direction"),
                     offset=cmd.get("offset"),
                     limit_price=cmd.get("limit_price"),
+                    source=cmd.get("source"),
                     started_at=cmd.get("started_at"),
                     finished_at=cmd.get("finished_at"),
                     total_orders=cmd.get("total_orders", 0),
@@ -92,9 +93,13 @@ async def send_order_cmd(
         offset = request.get("offset")
         volume = request.get("volume")
         price = request.get("price", 0)
+        source = request.get("source")
 
         if not all([symbol, direction, offset, volume is not None]):
             return error_response(message="缺少必要参数: symbol, direction, offset, volume")
+
+        if source is not None and not isinstance(source, str):
+            return error_response(message="source 必须是字符串")
 
         if direction not in ["BUY", "SELL"]:
             return error_response(message="direction 必须是 BUY 或 SELL")
@@ -123,6 +128,7 @@ async def send_order_cmd(
                     "offset": offset,
                     "volume": volume,
                     "price": price,
+                    "source": source,
                 }
             },
             timeout=10.0,

@@ -5,7 +5,6 @@
 import time
 from datetime import datetime, timedelta
 from decimal import Decimal
-from unittest.mock import MagicMock, Mock
 
 from qtrader.models.object import (
     Direction,
@@ -20,22 +19,23 @@ from qtrader.models.object import (
 )
 from qtrader.trader.order_cmd import (
     ActiveOrderInfo,
-    SimpleSplitStrategy,
     OrderCmd,
     OrderCmdStatus,
-    SplitStrategyType,
+    SimpleSplitStrategy,
     SplitOrder,
+    SplitStrategyType,
 )
 
 
 def test_simple_split_strategy():
     """测试简单拆单策略"""
-    # 创建模拟的 OrderCmd
-    cmd = Mock(spec=OrderCmd)
-    cmd.max_volume_per_order = 10
-    cmd.volume = 100
-    cmd.direction = Direction.BUY
-    cmd.offset = Offset.OPEN
+    cmd = OrderCmd(
+        symbol="SHFE.rb2505",
+        direction=Direction.BUY,
+        offset=Offset.OPEN,
+        volume=100,
+        max_volume_per_order=10,
+    )
 
     strategy = SimpleSplitStrategy(cmd)
 
@@ -54,19 +54,21 @@ def test_simple_split_strategy():
 
 def test_simple_split_strategy_close_today_yesterday():
     """测试平今平昨拆单"""
-    # 创建模拟的 OrderCmd
-    cmd = Mock(spec=OrderCmd)
-    cmd.max_volume_per_order = 10
-    cmd.volume = 80
-    cmd.direction = Direction.SELL
-    cmd.offset = Offset.CLOSE
+    cmd = OrderCmd(
+        symbol="SHFE.rb2505",
+        direction=Direction.SELL,
+        offset=Offset.CLOSE,
+        volume=80,
+        max_volume_per_order=10,
+    )
 
-    # 创建持仓数据
-    pos = Mock(spec=PositionData)
-    pos.pos_long = 100
-    pos.pos_short = 0
-    pos.pos_long_td = 50  # 今仓50
-    pos.exchange = Exchange.SHFE
+    # 创建持仓数据（今仓50 + 昨仓50，pos_long 为派生属性）
+    pos = PositionData(
+        symbol="SHFE.rb2505",
+        exchange=Exchange.SHFE,
+        pos_long_td=50,
+        pos_long_yd=50,
+    )
 
     strategy = SimpleSplitStrategy(cmd)
 
@@ -216,9 +218,248 @@ def test_order_cmd_order_update_rejected():
     assert cmd._pending_order is None
     # 指令应该完成
     assert cmd.status == OrderCmdStatus.FINISHED
-    assert "订单被拒" in cmd.finish_reason
+    assert "报单被拒" in cmd.finish_reason
 
     print("test_order_cmd_order_update_rejected passed")
+
+
+def test_order_cmd_cancel_rejected_recovers_and_retries():
+    """回归：撤单被拒（订单仍活跃）后指令不得卡死
+
+    生产事故：非交易时段撤单被交易所拒绝（如"CFFEX:当前状态禁止此项操作"），
+    订单保持 PENDING 仅 status_msg 变化；执行器已在本地挂单上标记 canceled=True，
+    导致 trig 既不撤单也不重挂，cmd_timeout 后卡死在 CANCELING。
+    对象链：事件回报是网关构造的新对象（canceled 恒为 False），canceled 标记
+    只存在于本地挂单对象（executor 撤单受理时设置），恢复必须作用于本地对象。
+    """
+    cmd = OrderCmd(
+        symbol="CFFEX.IF2509",
+        direction=Direction.BUY,
+        offset=Offset.OPEN,
+        volume=2,
+    )
+    cmd.status = OrderCmdStatus.RUNNING
+    cmd.started_at = datetime.now()
+    cmd.split(pos=None)
+
+    local = OrderData(
+        order_id="order-1",
+        symbol="CFFEX.IF2509",
+        direction=Direction.BUY,
+        offset=Offset.OPEN,
+        volume=2,
+        traded=0,
+        price=Decimal("3500"),
+        account_id="test-account",
+        status=OrderStatus.PENDING,
+        insert_time=datetime.now() - timedelta(seconds=30),
+    )
+    cmd.add_order(local)
+
+    # 执行器发出撤单并标记已撤（标记在本地挂单上）
+    local.canceled = True
+    # 交易所拒绝，订单仍活跃；网关推送的回报是新对象（canceled 为默认 False）
+    event = local.model_copy(
+        update={"canceled": False, "status_msg": "已撤单，报单被拒绝CFFEX:当前状态禁止此项操作"}
+    )
+    cmd.update("ORDER_UPDATE", event)
+
+    # 撤单未生效：本地挂单恢复可撤标志，且进入节流窗口（立即 trig 不再发撤单）
+    assert local.canceled is False
+    assert cmd.trig() is None
+
+    # 节流窗口过后可重试撤单
+    cmd._last_cancel_time = datetime.now() - timedelta(
+        seconds=cmd.CANCEL_RETRY_INTERVAL + 1
+    )
+    assert cmd.trig() is local
+
+    # 再次被拒 → 再恢复 → 最终撤单成功，指令正常推进
+    local.canceled = True
+    cmd.update("ORDER_UPDATE", local.model_copy(update={"canceled": False}))
+    cmd.update("ORDER_UPDATE", local.model_copy(update={"status": OrderStatus.FINISHED}))
+    assert cmd._pending_order is None
+
+
+def test_order_cmd_canceling_not_stuck_after_cancel_rejected():
+    """回归：CANCELING 状态下撤单被拒不得永久卡死"""
+    cmd = OrderCmd(
+        symbol="CFFEX.IF2509",
+        direction=Direction.BUY,
+        offset=Offset.OPEN,
+        volume=2,
+    )
+    cmd.status = OrderCmdStatus.RUNNING
+    cmd.started_at = datetime.now()
+    cmd.split(pos=None)
+
+    local = OrderData(
+        order_id="order-1",
+        symbol="CFFEX.IF2509",
+        direction=Direction.BUY,
+        offset=Offset.OPEN,
+        volume=2,
+        traded=0,
+        price=Decimal("3500"),
+        account_id="test-account",
+        status=OrderStatus.PENDING,
+        insert_time=datetime.now(),
+    )
+    cmd.add_order(local)
+
+    # 用户停止/超时 → CANCELING；执行器撤单受理标记 + 交易所拒绝（回报为新对象）
+    cmd.close("手动停止")
+    assert cmd.status == OrderCmdStatus.CANCELING
+    local.canceled = True
+    cmd.update("ORDER_UPDATE", local.model_copy(update={"canceled": False}))
+
+    # 节流后仍可发撤单（卡死修复前本地挂单 canceled 无人恢复，此处永远返回 None）
+    cmd._last_cancel_time = datetime.now() - timedelta(
+        seconds=cmd.CANCEL_RETRY_INTERVAL + 1
+    )
+    assert cmd.trig() is local
+
+    # 撤单最终成功 → 指令终结
+    cmd.update("ORDER_UPDATE", local.model_copy(update={"status": OrderStatus.FINISHED}))
+    cmd.trig()
+    assert cmd.status == OrderCmdStatus.FINISHED
+    assert cmd.is_finished
+
+
+def test_order_cmd_session_pause_idle_run(monkeypatch):
+    """盘中非交易时段空跑：不报单、不消耗报单次数、冻结总超时，时段恢复后继续
+
+    场景：10:15-10:30 小节休息中创建指令，应挂起而非消耗重试次数，
+    休息结束后正常报出第一单。
+    """
+    from qtrader.trader import order_cmd as order_cmd_mod
+
+    cmd = OrderCmd(
+        symbol="SHFE.rb2505",
+        direction=Direction.BUY,
+        offset=Offset.OPEN,
+        volume=10,
+    )
+    cmd.status = OrderCmdStatus.RUNNING
+    cmd.started_at = datetime.now()
+    cmd.split(pos=None)
+    retry_before = cmd._left_retry_times
+
+    # 非交易时段：空跑
+    monkeypatch.setattr(
+        order_cmd_mod, "is_symbol_trading_time", lambda symbol, now=None: False
+    )
+    assert cmd.trig() is None
+    assert cmd._left_retry_times == retry_before  # 未消耗报单次数
+
+    # 模拟小节休息已空跑 15 分钟：若无冻结，started_at 已落后超时窗口 10 分钟
+    cmd.started_at = datetime.now() - timedelta(seconds=cmd.cmd_timeout + 10 * 60)
+    cmd._session_pause_started = datetime.now() - timedelta(minutes=15)
+    assert cmd.trig() is None
+    assert cmd.status == OrderCmdStatus.RUNNING  # 超时冻结，不因休息触发 TIMEOUT
+
+    # 恢复交易时段：休息时长被剔除出计时窗口，正常报出下一单
+    monkeypatch.setattr(
+        order_cmd_mod, "is_symbol_trading_time", lambda symbol, now=None: True
+    )
+    req = cmd.trig()
+    assert isinstance(req, OrderRequest)
+    assert cmd._left_retry_times == retry_before - 1
+
+
+def test_order_cmd_canceling_finishes_offsession_when_order_gone(monkeypatch):
+    """回归：收盘后挂单被交易所撤掉时，CANCELING 指令应立即结束
+
+    空跑拦截只应阻止对外撤单/报单，不应阻止"无挂单→FINISHED"的本地状态推进，
+    否则 CFFEX 15:00 收盘后指令要挂到次日 9:30 才能结束。
+    """
+    from qtrader.trader import order_cmd as order_cmd_mod
+
+    cmd = OrderCmd(
+        symbol="CFFEX.IF2509",
+        direction=Direction.BUY,
+        offset=Offset.OPEN,
+        volume=2,
+    )
+    cmd.status = OrderCmdStatus.RUNNING
+    cmd.started_at = datetime.now()
+    cmd.split(pos=None)
+
+    order = OrderData(
+        order_id="order-1",
+        symbol="CFFEX.IF2509",
+        direction=Direction.BUY,
+        offset=Offset.OPEN,
+        volume=2,
+        traded=0,
+        price=Decimal("3500"),
+        account_id="test-account",
+        status=OrderStatus.PENDING,
+        insert_time=datetime.now(),
+    )
+    cmd.add_order(order)
+    cmd.close("手动停止")
+    assert cmd.status == OrderCmdStatus.CANCELING
+
+    # 收盘后交易所撤掉挂单（终态回报清理本地挂单）
+    order.status = OrderStatus.FINISHED
+    cmd.update("ORDER_UPDATE", order)
+    assert cmd._pending_order is None
+
+    # 非交易时段：本地推进不受空跑拦截，指令立即终结
+    monkeypatch.setattr(
+        order_cmd_mod, "is_symbol_trading_time", lambda symbol, now=None: False
+    )
+    assert cmd.trig() is None
+    assert cmd.status == OrderCmdStatus.FINISHED
+    assert cmd.is_finished
+
+
+def test_order_cmd_session_pause_cancels_throttled(monkeypatch):
+    """CANCELING 指令在非交易时段同样空跑（撤单必被拒），恢复后可撤"""
+    from qtrader.trader import order_cmd as order_cmd_mod
+
+    cmd = OrderCmd(
+        symbol="SHFE.rb2505",
+        direction=Direction.BUY,
+        offset=Offset.OPEN,
+        volume=2,
+    )
+    cmd.status = OrderCmdStatus.RUNNING
+    cmd.started_at = datetime.now()
+    cmd.split(pos=None)
+
+    order = OrderData(
+        order_id="order-1",
+        symbol="SHFE.rb2505",
+        direction=Direction.BUY,
+        offset=Offset.OPEN,
+        volume=2,
+        traded=0,
+        price=Decimal("3500"),
+        account_id="test-account",
+        status=OrderStatus.PENDING,
+        insert_time=datetime.now(),
+    )
+    cmd.add_order(order)
+    cmd.close("手动停止")
+    assert cmd.status == OrderCmdStatus.CANCELING
+
+    # 非交易时段：不撤单（空跑），即使撤单节流已过
+    monkeypatch.setattr(
+        order_cmd_mod, "is_symbol_trading_time", lambda symbol, now=None: False
+    )
+    cmd._last_cancel_time = datetime.now() - timedelta(
+        seconds=cmd.CANCEL_RETRY_INTERVAL + 1
+    )
+    assert cmd.trig() is None
+
+    # 恢复：可发撤单
+    monkeypatch.setattr(
+        order_cmd_mod, "is_symbol_trading_time", lambda symbol, now=None: True
+    )
+    assert cmd.trig() is order
+
 
 
 def test_order_cmd_trade_update():
@@ -435,7 +676,9 @@ def test_order_cmd_left_retry_times_calculation():
     # 100手 / 10手每单 = 10单
     # _left_retry_times = 2 * 10 + 1 = 21
     expected_left_retry_times = 21
-    assert cmd._left_retry_times == expected_left_retry_times, f"Expected _left_retry_times={expected_left_retry_times}, got {cmd._left_retry_times}"
+    assert (
+        cmd._left_retry_times == expected_left_retry_times
+    ), f"Expected _left_retry_times={expected_left_retry_times}, got {cmd._left_retry_times}"
 
     print("test_order_cmd_left_retry_times_calculation passed")
 
@@ -470,9 +713,12 @@ def test_order_cmd_trig_timeout_returns_order_for_cancel():
     )
     cmd._pending_order = order
 
-    result = cmd.trig()
+    # 第一次 trig 触发总超时进入 CANCELING（不返回订单）
+    assert cmd.trig() is None
+    assert cmd.status == OrderCmdStatus.CANCELING
 
-    # 应该返回订单用于撤单
+    # 第二次 trig 返回待撤订单
+    result = cmd.trig()
     assert result is not None
     assert isinstance(result, OrderData)
     assert result.order_id == "order-1"
@@ -627,7 +873,8 @@ def test_order_cmd_open_position_no_position_needed():
     cmd.split(None)
 
     assert cmd._strategy is not None
-    assert cmd._left_retry_times == 2 * 1 + 1  # 1个订单
+    # 重试次数 = max(2*拆单数+1, 5)，下限5
+    assert cmd._left_retry_times == max(2 * 1 + 1, 5)
 
     print("test_order_cmd_open_position_no_position_needed passed")
 

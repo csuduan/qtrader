@@ -34,6 +34,7 @@ class ContractInfo:
         "update_date",
         "data_source",
         "is_active",
+        "is_main",
     )
 
     def __init__(
@@ -51,6 +52,7 @@ class ContractInfo:
         update_date: str | None = None,
         data_source: str | None = None,
         is_active: bool = True,
+        is_main: bool = False,
     ):
         self.symbol = symbol
         self.exchange_id = exchange_id
@@ -65,6 +67,7 @@ class ContractInfo:
         self.update_date = update_date or datetime.now().strftime("%Y-%m-%d")
         self.data_source = data_source
         self.is_active = is_active
+        self.is_main = is_main
 
     def to_dict(self) -> dict:
         """转换为字典（用于IPC传输）"""
@@ -82,6 +85,7 @@ class ContractInfo:
             "update_date": self.update_date,
             "data_source": self.data_source,
             "is_active": self.is_active,
+            "is_main": self.is_main,
         }
 
 
@@ -161,6 +165,7 @@ class PublicDataService:
                 "update_date": update_date,
                 "data_source": data_source,
                 "is_active": contract_dict.get("is_active", True),
+                "is_main": contract_dict.get("is_main", False),
             }
             for contract_dict in unique_contracts
         ]
@@ -202,6 +207,7 @@ class PublicDataService:
                 update_date=update_date,
                 data_source=data_source,
                 is_active=contract_dict.get("is_active", True),
+                is_main=contract_dict.get("is_main", False),
             )
             self._contracts[symbol] = info
             if data_source not in self._contracts_by_source:
@@ -294,9 +300,10 @@ class PublicDataService:
                         update_date=po.update_date,  # type: ignore[arg-type]
                         data_source=po.data_source,  # type: ignore[arg-type]
                         is_active=bool(po.is_active),
+                        is_main=bool(po.is_main),
                     )
                     self._contracts[po.symbol] = info  # type: ignore[index]
-                    source = po.data_source or "unknown"
+                    source = str(po.data_source or "unknown")
                     if source not in self._contracts_by_source:
                         self._contracts_by_source[source] = {}
                     self._contracts_by_source[source][po.symbol] = info  # type: ignore[index]

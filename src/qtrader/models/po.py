@@ -4,6 +4,7 @@
 """
 
 from datetime import datetime
+from typing import cast
 
 from sqlalchemy import (
     Boolean,
@@ -110,12 +111,12 @@ class PositionPo(Base):
     @property
     def pos_long(self) -> int:
         """多头总持仓"""
-        return self.pos_long_td + self.pos_long_yd
+        return cast(int, self.pos_long_td) + cast(int, self.pos_long_yd)
 
     @property
     def pos_short(self) -> int:
         """空头总持仓"""
-        return self.pos_short_td + self.pos_short_yd
+        return cast(int, self.pos_short_td) + cast(int, self.pos_short_yd)
 
     @property
     def pos_net(self) -> int:
@@ -346,6 +347,8 @@ class ContractPo(Base):
     data_source = Column(String(20), nullable=True, index=True)
     # 是否活跃合约（当日可交易）
     is_active = Column(Boolean, nullable=False, default=True, index=True)
+    # 是否主力合约（随每日合约刷新打标）
+    is_main = Column(Boolean, nullable=False, default=False, index=True)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 

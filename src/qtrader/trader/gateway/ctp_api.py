@@ -34,11 +34,13 @@ from qtrader.utils.config_loader import TraderConfig
 from qtrader.utils.logger import get_logger
 
 ctx = get_app_context()
-config: TraderConfig = ctx.get_config()
+_config = ctx.get_config()
+assert _config is not None, "应用配置未初始化"
+config: TraderConfig = _config
 logger = get_logger(__name__)
 
 
-ctp_type = config.gateway.broker.type
+ctp_type = config.gateway.broker.type if config.gateway and config.gateway.broker else ""
 if ctp_type == "rohon":
     from ctpx.rohon import mdapi, tdapi
 elif ctp_type == "jees":
@@ -129,9 +131,6 @@ error_msg = [
     "没有",
 ]
 
-# 正常撤单类消息关键词（命中时保持状态映射，不判为拒单）
-cancel_keywords = ["撤单", "撤销", "取消"]
-
 
 def adjust_price(price: float, max_value: float = 1e308) -> float:
     """调整异常价格（CTP 无效价格转换为 0）"""
@@ -152,6 +151,7 @@ class CtpMdApi(mdapi.CThostFtdcMdSpi):
         super().__init__()
         self.gateway: "CtpGateway" = gateway
         self.config = gateway.config
+        assert self.config is not None, "CTP 网关配置缺失"
 
         # 连接状态
         self._running = False
@@ -227,7 +227,7 @@ class CtpMdApi(mdapi.CThostFtdcMdSpi):
 
         self.reqid += 1
         req = mdapi.CThostFtdcReqUserLoginField()
-        if self.config.broker:
+        if self.config and self.config.broker:
             req.BrokerID = self.config.broker.broker_id or ""
             req.UserID = self.config.broker.user_id or ""
             req.Password = self.config.broker.password or ""
@@ -388,6 +388,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
 
         self.gateway: "CtpGateway" = gateway
         self.config = gateway.config
+        assert self.config is not None, "CTP 网关配置缺失"
 
         # 连接状态
         self._running = False
@@ -565,7 +566,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
 
         # 创建订单数据
         order = OrderData.model_construct(
-            account_id=self.gateway.account_id,
+            account_id=self.gateway.account_id or "",
             order_id=order_ref,
             symbol=req.symbol,
             exchange=req.exchange,
@@ -859,11 +860,9 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
             logger.warning(f"CTP 找不到订单: {order_ref}")
             return
 
-        # 撤单类消息保持映射状态（Canceled→FINISHED），其余错误关键词视为拒单（子串匹配）
+        # 错误关键词视为拒单（子串匹配）；撤单被拒走 OnRspOrderAction/OnErrRtnOrderAction 专用回调，不进本回报
         status_msg = pOrder.StatusMsg or ""
-        if not any(k in status_msg for k in cancel_keywords) and any(
-            k in status_msg for k in error_msg
-        ):
+        if any(k in status_msg for k in error_msg):
             status = OrderStatus.REJECTED
 
         order.order_sys_id = pOrder.OrderSysID
@@ -884,7 +883,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
             return
 
         trade = TradeData.model_construct(
-            account_id=self.gateway.account_id,
+            account_id=self.gateway.account_id or "",
             trade_id=pTrade.TradeID,
             order_id=pTrade.OrderRef,
             symbol=pTrade.InstrumentID,
@@ -928,7 +927,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
 
         if pTradingAccount:
             account = AccountData(
-                account_id=self.gateway.account_id,
+                account_id=self.gateway.account_id or "",
                 balance=round(pTradingAccount.Balance, 2),
                 available=round(pTradingAccount.Available, 2),
                 pre_balance=round(pTradingAccount.PreBalance, 2),
@@ -1130,7 +1129,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
                 trade_time=datetime.strptime(
                     pTrade.TradeDate + " " + pTrade.TradeTime, "%Y%m%d %H:%M:%S"
                 ),
-                account_id=self.config.account_id or "",
+                account_id=(self.config.account_id or "") if self.config else "",
                 commission=0.0,
             )
             self.gateway.add_trade(trade)
@@ -1167,7 +1166,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
                 insert_time=datetime.strptime(
                     pOrder.InsertDate + " " + pOrder.InsertTime, "%Y%m%d %H:%M:%S"
                 ),
-                account_id=self.config.account_id or "",
+                account_id=(self.config.account_id or "") if self.config else "",
                 gateway_order_id=pOrder.OrderSysID,
                 update_time=datetime.now(),
             )

@@ -43,16 +43,26 @@ def _make_email_config(**overrides) -> EmailConfig:
     return EmailConfig(**defaults)
 
 
-def _run_report(job_manager: ManagerJobManager, email_config: EmailConfig, records) -> Mock:
+def _run_report(
+    job_manager: ManagerJobManager,
+    email_config: EmailConfig,
+    records,
+    account_ids: list[str] | None = None,
+) -> Mock:
     """执行周报任务并返回 send_email 的 mock"""
+    if account_ids is None:
+        account_ids = ["DQ", "GW", "TEST"]
     with (
         patch("qtrader.trader.dao.settlement_dao.SettlementDao") as mock_dao,
         patch("qtrader.utils.config_loader.get_config_loader") as mock_loader,
         patch("qtrader.utils.email_sender.send_email") as mock_send,
     ):
-        mock_loader.return_value._load_app_config.return_value = Mock(email=email_config)
+        mock_loader.return_value.load_config.return_value = Mock(
+            email=email_config, account_ids=account_ids
+        )
         mock_dao.return_value.query_settlements.return_value = records
         job_manager.send_weekly_settlement_report()
+    _run_report.last_dao_mock = mock_dao
     return mock_send
 
 
@@ -66,16 +76,14 @@ class TestWeeklySettlementReport:
     """结算权益周报任务测试"""
 
     def test_blacklist_accounts_excluded(self, job_manager):
-        """黑名单账户不出现在周报中，其余账户正常发送"""
+        """黑名单账户被排除：query_settlements 只查询非黑名单账户"""
         email_config = _make_email_config(exclude_accounts=["TEST"])
 
         mock_send = _run_report(job_manager, email_config, _make_records())
 
         mock_send.assert_called_once()
-        html_body = mock_send.call_args.kwargs["html_body"]
-        assert ">DQ<" in html_body
-        assert ">GW<" in html_body
-        assert "TEST" not in html_body
+        queried = _run_report.last_dao_mock.return_value.query_settlements.call_args[0][0]
+        assert queried == ["DQ", "GW"]
 
     def test_all_accounts_blacklisted_skips_send(self, job_manager):
         """全部账户都在黑名单时不发送邮件"""
@@ -84,6 +92,16 @@ class TestWeeklySettlementReport:
         mock_send = _run_report(job_manager, email_config, _make_records())
 
         mock_send.assert_not_called()
+
+    def test_only_configured_accounts_sent(self, job_manager):
+        """仅查询 config.yaml 中配置的账户：未配置账户（TEST）不进入查询参数"""
+        mock_send = _run_report(
+            job_manager, _make_email_config(), _make_records(), account_ids=["DQ", "GW"]
+        )
+
+        mock_send.assert_called_once()
+        queried = _run_report.last_dao_mock.return_value.query_settlements.call_args[0][0]
+        assert queried == ["DQ", "GW"]
 
     def test_no_blacklist_sends_all_accounts(self, job_manager):
         """未配置黑名单时发送全部账户"""

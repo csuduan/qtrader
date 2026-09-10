@@ -15,9 +15,7 @@ from cachetools import TTLCache
 from qtrader.app_context import get_app_context
 from qtrader.models.object import (
     BarData,
-    Direction,
     Exchange,
-    Offset,
     OrderData,
     OrderStatus,
     PositionData,
@@ -45,7 +43,8 @@ _csv_cache: TTLCache = TTLCache(maxsize=100, ttl=60)
 def load_csv_file(csv_path: str) -> dict[str, dict]:
     """加载CSV文件到缓存（使用TTLCache自动过期）"""
     if csv_path in _csv_cache:
-        return _csv_cache[csv_path]
+        cached: dict[str, dict] = _csv_cache[csv_path]
+        return cached
 
     result = {}
     try:
@@ -154,7 +153,8 @@ class StrategyManager:
         from qtrader.trader.strategy import get_strategy_class
 
         # 获取账户ID
-        account_id = ctx.get_config().account_id
+        config = ctx.get_config()
+        account_id = config.account_id if config else ""
         for name, config in self.strategies_configs.items():
             if not config.enabled:
                 logger.info(f"策略 {name} 未启用，跳过")
@@ -203,7 +203,7 @@ class StrategyManager:
             return self.trading_engine.account.account_id
         return None
 
-    def get_strategy_position(self, strategy_id: str, symbol: str):
+    def get_strategy_position(self, strategy_id: str, symbol: str) -> Optional["PositionData"]:
         """
         获取策略的持仓信息
 
@@ -233,7 +233,7 @@ class StrategyManager:
         if not strategy:
             return {}
         positions = strategy.get_all_positions()
-        return {symbol: pos.to_dict() for symbol, pos in positions.items()}
+        return {symbol: pos.model_dump() for symbol, pos in positions.items()}
 
     def _register_events(self) -> None:
         """注册策略事件到 AsyncEventEngine"""
@@ -344,51 +344,6 @@ class StrategyManager:
                     position.pos_short_td = 0
 
     # ==================== 交易接口 ====================
-    async def _insert_order(
-        self,
-        strategy_id: str,
-        symbol: str,
-        direction: Direction,
-        volume: int,
-        price: float | None,
-        offset: Offset,
-    ) -> str | None:
-        """
-        插入订单通用方法（异步版本）
-
-        Args:
-            strategy_id: 策略ID
-            symbol: 合约代码
-            direction: 方向
-            volume: 手数
-            price: 价格（None为市价）
-            offset: 开平标识
-
-        Returns:
-            委托单ID
-        """
-        if not self.trading_engine:
-            logger.warning(f"TradingEngine 未设置，无法执行下单")
-            return None
-
-        try:
-            order_id = self.trading_engine.insert_order(
-                symbol=symbol,
-                direction=direction.value,
-                offset=offset.value,
-                volume=volume,
-                price=price or 0,
-            )
-            if order_id:
-                # 记录订单与策略的映射关系
-                self.order_strategy_map[order_id] = strategy_id
-                logger.info(
-                    f"策略 [{strategy_id}] {direction.value} {volume}手 @{price or '市价'} -> 订单ID: {order_id}"
-                )
-            return order_id
-        except Exception as e:
-            logger.error(f"策略 [{strategy_id}] 下单失败: {e}")
-            return None
 
     async def send_order_cmd(self, strategy_id: str, order_cmd: OrderCmd) -> None:
         """
@@ -461,70 +416,6 @@ class StrategyManager:
         except Exception as e:
             logger.error(f"保存策略持仓失败: {e}")
             return False
-
-    def get_strategy_position(self, strategy_id: str, symbol: str) -> Optional["PositionData"]:
-        """
-        获取策略指定合约的持仓
-
-        Args:
-            strategy_id: 策略ID
-            symbol: 合约代码
-
-        Returns:
-            PositionData: 持仓对象，如果不存在则返回None
-        """
-        strategy = self.strategies.get(strategy_id)
-        if strategy:
-            return strategy.get_position(symbol)
-        return None
-
-    def open(
-        self,
-        strategy_id: str,
-        symbol: str,
-        direction: str,
-        volume: int,
-        price: float | None = None,
-    ) -> str | None:
-        """
-        开仓 - 通过 TradingEngine
-
-        Args:
-            strategy_id: 策略ID
-            symbol: 合约代码
-            direction: 方向 ("BUY" 多开 / "SELL" 空开)
-            volume: 手数
-            price: 价格（None为市价）
-
-        Returns:
-            委托单ID
-        """
-        dir_enum = Direction.BUY if direction.upper() == "BUY" else Direction.SELL
-        return self._insert_order(strategy_id, symbol, dir_enum, volume, price, Offset.OPEN)
-
-    def close(
-        self,
-        strategy_id: str,
-        symbol: str,
-        direction: str,
-        volume: int,
-        price: float | None = None,
-    ) -> str | None:
-        """
-        平仓 - 通过 TradingEngine
-
-        Args:
-            strategy_id: 策略ID
-            symbol: 合约代码
-            direction: 方向 ("BUY" 多平 / "SELL" 空平)
-            volume: 手数
-            price: 价格（None为市价）
-
-        Returns:
-            委托单ID
-        """
-        dir_enum = Direction.BUY if direction.upper() == "BUY" else Direction.SELL
-        return self._insert_order(strategy_id, symbol, dir_enum, volume, price, Offset.CLOSE)
 
     async def cancel_order(self, strategy_id: str, order_id: str) -> bool:
         """
@@ -687,7 +578,7 @@ class StrategyManager:
                 BarDao().query_history_bars, symbol, interval, start, end
             )
             for po in history_pos:
-                bars[po.bar_time] = BarData(
+                bars[po.bar_time] = BarData(  # type: ignore[index]
                     symbol=symbol,
                     interval=interval,
                     datetime=po.bar_time,
@@ -729,19 +620,19 @@ class StrategyManager:
             today_pos = await asyncio.to_thread(
                 BarDao().query_today_bars, symbol, interval, start, end
             )
-            for po in today_pos:
-                if po.bar_time not in bars:
-                    bars[po.bar_time] = BarData(
+            for today_po in today_pos:
+                if today_po.bar_time not in bars:  # type: ignore[index]
+                    bars[today_po.bar_time] = BarData(  # type: ignore[index]
                         symbol=symbol,
                         interval=interval,
-                        datetime=po.bar_time,
-                        open_price=float(po.open_price),
-                        high_price=float(po.high_price),
-                        low_price=float(po.low_price),
-                        close_price=float(po.close_price),
-                        volume=float(po.volume or 0),
+                        datetime=today_po.bar_time,
+                        open_price=float(today_po.open_price),
+                        high_price=float(today_po.high_price),
+                        low_price=float(today_po.low_price),
+                        close_price=float(today_po.close_price),
+                        volume=float(today_po.volume or 0),
                         type="history",
-                        update_time=po.bar_time + timedelta(minutes=1),
+                        update_time=today_po.bar_time + timedelta(minutes=1),
                     )
         except Exception as e:
             logger.exception(f"查询当日K线表失败: {symbol} {interval}: {e}")

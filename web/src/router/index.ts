@@ -1,5 +1,4 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
-import AccountCombined from '@/views/AccountCombined.vue'
 
 const routes: RouteRecordRaw[] = [
   {
@@ -22,7 +21,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/account',
     name: 'Account',
-    component: AccountCombined,
+    component: () => import('@/views/AccountCombined.vue'),
     meta: { title: '账户', showAccountInfo: true }
   },
   // 一级菜单：换仓

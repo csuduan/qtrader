@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { Account, Position, Trade, Order, SystemStatus, Quote } from '@/types'
-import { accountApi, positionApi, tradeApi, orderApi } from '@/api'
+import { accountApi, positionApi, tradeApi, orderApi, contractApi } from '@/api'
 import wsManager from '@/ws'
 import { getTradeNaturalTime } from '@/utils/dateTime'
 
@@ -9,6 +9,9 @@ export const useStore = defineStore('main', () => {
   // 账户信息
   const account = ref<Account | null>(null)
   const accounts = ref<Account[]>([])
+
+  // 主力合约代码（如 rb2701），用于表单占位提示；惰性加载，会话内缓存
+  const mainSymbol = ref('')
 
   // 多账号模式
   const selectedAccountId = ref<string | null>(null)
@@ -84,15 +87,10 @@ export const useStore = defineStore('main', () => {
     if (selectedAccountId.value) {
       filtered = filtered.filter(order => order.account_id === selectedAccountId.value)
     }
-    // 按报单时间倒序排列（最新的在前面）
-    // insert_date_time 可能是 number（时间戳）或 string（ISO 格式）
+    // 按报单时间倒序排列（最新的在前面），insert_date_time 为 ISO 字符串
     return [...filtered].sort((a, b) => {
-      const timeA = typeof a.insert_date_time === 'number'
-        ? a.insert_date_time
-        : new Date(a.insert_date_time).getTime()
-      const timeB = typeof b.insert_date_time === 'number'
-        ? b.insert_date_time
-        : new Date(b.insert_date_time).getTime()
+      const timeA = new Date(a.insert_date_time).getTime()
+      const timeB = new Date(b.insert_date_time).getTime()
       return timeB - timeA
     })
   })
@@ -102,7 +100,7 @@ export const useStore = defineStore('main', () => {
     const totalBalance = accounts.value.reduce((sum, acc) => sum + acc.balance, 0)
     const totalAvailable = accounts.value.reduce((sum, acc) => sum + acc.available, 0)
     const totalMargin = accounts.value.reduce((sum, acc) => sum + acc.margin, 0)
-    const totalFloatProfit = accounts.value.reduce((sum, acc) => sum + (acc.float_profit || 0), 0)
+    const totalFloatProfit = accounts.value.reduce((sum, acc) => sum + (acc.position_profit || 0), 0)
 
     return {
       totalBalance,
@@ -163,14 +161,12 @@ export const useStore = defineStore('main', () => {
         static_balance: 0,
         position_profit: 0,
         close_profit: 0,
-        float_profit: 0,
         today_profit: 0,
         risk_ratio: 0,
         updated_at: new Date().toISOString(),
         user_id: '--',
-        status: 'stopped',
-        id: 0
-      } as unknown as Account))
+        status: 'stopped'
+      } as Account))
 
       // 如果有账户但还没选中，默认选中第一个
       if (!selectedAccountId.value && accountIds.length > 0) {
@@ -281,6 +277,21 @@ export const useStore = defineStore('main', () => {
   }
 
   /**
+   * 获取主力合约代码（供合约输入框占位提示用）
+   * 首次调用拉取主力合约列表取螺纹钢主力，失败静默返回空串
+   */
+  async function loadMainSymbol(): Promise<string> {
+    if (mainSymbol.value) return mainSymbol.value
+    try {
+      const mains = await contractApi.getContracts({ symbol_keyword: 'rb', is_main: true })
+      mainSymbol.value = mains[0]?.symbol || ''
+    } catch (error) {
+      console.error('加载主力合约失败:', error)
+    }
+    return mainSymbol.value
+  }
+
+  /**
    * 更新账户信息
    */
   function updateAccount(data: Account) {
@@ -362,6 +373,7 @@ export const useStore = defineStore('main', () => {
     trades,
     orders,
     quotes,
+    mainSymbol,
 
     // 系统状态
     systemStatus,
@@ -386,6 +398,7 @@ export const useStore = defineStore('main', () => {
     loadOrders,
     loadSystemStatus,
     loadAllData,
+    loadMainSymbol,
     initWebSocket,
     updateAccount,
     updatePosition,

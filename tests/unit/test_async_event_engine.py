@@ -204,14 +204,21 @@ class TestAsyncEventEngineRegister:
 class TestAsyncEventEnginePut:
     """AsyncEventEngine 发送事件测试"""
 
-    def test_put_sends_to_queue(self, event_engine: AsyncEventEngine):
-        """测试 put() 同步发送到队列"""
+    @pytest.mark.asyncio
+    async def test_put_sends_to_queue(self, event_engine: AsyncEventEngine):
+        """测试 put() 投递事件并被分发"""
+        received = []
+        event_engine.register_general(lambda e: received.append(e))
         event_engine.start()
 
         event_engine.put("TEST_EVENT", {"data": "test"})
 
-        # 验证事件在队列中
-        assert not event_engine._queue.empty()
+        # 等待事件引擎处理（put后事件应被分发到处理器）
+        for _ in range(20):
+            await asyncio.sleep(0.01)
+            if received:
+                break
+        assert received == [{"data": "test"}]
 
     def test_put_when_not_running_drops_event(self, event_engine: AsyncEventEngine):
         """测试未运行时丢弃事件"""
@@ -227,6 +234,36 @@ class TestAsyncEventEnginePut:
 
         # 验证事件在队列中
         assert not event_engine._queue.empty()
+
+    def test_safe_put_droppable_event_evicts_oldest(self):
+        """行情类事件队列满时丢弃最旧以容纳新事件"""
+        from qtrader.utils.async_event_engine import Event, EventTypes
+
+        engine = AsyncEventEngine(queue_size=2)
+        # 手动填满队列（不启动，直接操作 _safe_put）
+        engine._queue.put_nowait(Event(EventTypes.TICK_UPDATE, {"n": 1}))
+        engine._queue.put_nowait(Event(EventTypes.TICK_UPDATE, {"n": 2}))
+
+        engine._safe_put(Event(EventTypes.TICK_UPDATE, {"n": 3}))
+
+        # 最旧的 n=1 被丢弃，队列保留 2,3
+        items = [engine._queue.get_nowait().data["n"] for _ in range(2)]
+        assert items == [2, 3]
+        assert engine._drop_count == 1
+
+    def test_safe_put_critical_event_rejected_on_full(self):
+        """关键事件（订单/成交）队列满时被拒绝，不驱逐"""
+        from qtrader.utils.async_event_engine import Event, EventTypes
+
+        engine = AsyncEventEngine(queue_size=1)
+        engine._queue.put_nowait(Event(EventTypes.ORDER_UPDATE, {"n": 1}))
+
+        engine._safe_put(Event(EventTypes.ORDER_UPDATE, {"n": 2}))
+
+        # 原事件保留，新事件被拒绝
+        assert engine._queue.get_nowait().data["n"] == 1
+        assert engine._queue.empty()
+        assert engine._drop_count == 1
 
 
 # ==================== TestAsyncEventEngineProcess ====================

@@ -21,9 +21,12 @@ def std(data):
 
 
 def ma(data, n):
-    """移动平均线"""
+    """移动平均线：窗口大于序列长度时返回全 NaN（长度 n）"""
+    data = np.asarray(data, dtype=np.float64)
+    if n > len(data):
+        return np.full(len(data), np.nan)
     mv = np.convolve(data, np.ones(n) / n, mode="valid")
-    return np.concatenate(([np.NaN for k in range(n - 1)], mv))
+    return np.concatenate(([np.nan for _ in range(n - 1)], mv))
 
 
 def ewma(data, period, row_size=None, dtype=None, order="C", out=None):
@@ -51,14 +54,14 @@ def ewma(data, period, row_size=None, dtype=None, order="C", out=None):
         a freshly-allocated array is returned.
     :return: The flattened result.
     """
-    data = np.array(data, copy=False)
+    data = np.asarray(data, dtype=np.float64)
     alpha = 1.0 - 2.0 / (1.0 + period)
 
     if dtype is None:
         if data.dtype == np.float32:
             dtype = np.float32
         else:
-            dtype = np.float
+            dtype = np.float64
     else:
         dtype = np.dtype(dtype)
 
@@ -157,7 +160,7 @@ def ewma_vectorized(data, alpha, offset=None, dtype=None, order="C", out=None):
         the same shape as the input. If not provided or `None`,
         a freshly-allocated array is returned.
     """
-    data = np.array(data, copy=False)
+    data = np.asarray(data, dtype=np.float64)
 
     if dtype is None:
         if data.dtype == np.float32:
@@ -169,7 +172,7 @@ def ewma_vectorized(data, alpha, offset=None, dtype=None, order="C", out=None):
 
     if data.ndim > 1:
         # flatten input
-        data = data.reshape(-1, order)
+        data = np.reshape(data, -1, order=order)
 
     if out is None:
         out = np.empty_like(data, dtype=dtype)
@@ -184,7 +187,7 @@ def ewma_vectorized(data, alpha, offset=None, dtype=None, order="C", out=None):
     if offset is None:
         offset = data[0]
 
-    alpha = np.array(alpha, copy=False).astype(dtype, copy=False)
+    alpha = np.asarray(alpha, dtype=dtype)
 
     # scaling_factors -> 0 as len(data) gets large
     # this leads to divide-by-zeros below
@@ -197,7 +200,7 @@ def ewma_vectorized(data, alpha, offset=None, dtype=None, order="C", out=None):
     out /= scaling_factors[-2::-1]
 
     if offset != 0:
-        offset = np.array(offset, copy=False).astype(dtype, copy=False)
+        offset = np.asarray(offset, dtype=dtype)
         # add offsets
         out += offset * scaling_factors[1:]
 
@@ -226,7 +229,7 @@ def ewma_vectorized_2d(data, alpha, axis=None, offset=None, dtype=None, order="C
         the same shape as the desired output. If not provided or `None`,
         a freshly-allocated array is returned.
     """
-    data = np.array(data, copy=False)
+    data = np.asarray(data, dtype=np.float64)
 
     assert data.ndim <= 2
 
@@ -272,7 +275,7 @@ def ewma_vectorized_2d(data, alpha, axis=None, offset=None, dtype=None, order="C
     elif np.size(offset) == 1:
         offset = np.reshape(offset, (1,))
 
-    alpha = np.array(alpha, copy=False).astype(dtype, copy=False)
+    alpha = np.asarray(alpha, dtype=dtype)
 
     # calculate the moving average
     row_size = data.shape[1]
@@ -298,10 +301,11 @@ def ewma_vectorized_2d(data, alpha, axis=None, offset=None, dtype=None, order="C
 
 
 def wma(values, window):
-    weights = np.arange(window, 0, -1.0)
+    """加权移动平均：最近数据权重最大（np.convolve 会翻转核，故权重升序）"""
+    weights = np.arange(1.0, window + 1.0)
     weights /= window * (window + 1) / 2
     weighted_moving_averages = np.empty(window - 1)
-    weighted_moving_averages[:] = np.NAN
+    weighted_moving_averages[:] = np.nan
     weighted_moving_averages = np.append(
         weighted_moving_averages, np.convolve(values, weights, "valid")
     )
@@ -332,10 +336,10 @@ def macd(data, period_me1=12, period_me2=26, period_signal=9):
 
 
 def rsi(data, period=5):
+    """相对强弱指标：上涨均值 / (上涨均值 + 下跌均值) * 100"""
     diff = np.diff(data)
-    up = np.where(diff > 0.0, 0.0)
-    diff_rev = diff * -1
-    down = np.where(diff_rev, 0.0)
+    up = np.where(diff > 0.0, diff, 0.0)
+    down = np.where(diff < 0.0, -diff, 0.0)
     ma_up = ewma(up, period=period)
     ma_down = ewma(down, period=period)
     rs = np.array(ma_up) / np.array(ma_down)
@@ -343,12 +347,13 @@ def rsi(data, period=5):
 
 
 def kd(data: np.ndarray, period: int, period_df_ast: int = 3):
-    diff = np.diff(data)
-    rolling_array = rolling(diff, period)
+    """随机指标 KD：K = 100*(当前收盘 - 窗口最低价)/(窗口最高价 - 窗口最低价)"""
+    data = np.asarray(data, dtype=np.float64)
+    rolling_array = rolling(data, period)
     lowest = np.array(list(map(np.min, rolling_array)))
     highest = np.array(list(map(np.max, rolling_array)))
-    k_num = np.array(data) - lowest
-    k_den = np.array(highest) - np.array(lowest)
+    k_num = data[period - 1 :] - lowest
+    k_den = highest - lowest
     k = 100 * (k_num / k_den)
     d = ma(k, period_df_ast)
     perc = ma(d, period_df_ast)

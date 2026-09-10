@@ -11,25 +11,23 @@ export interface ApiResponse<T = any> {
 
 /** 账户信息 */
 export interface Account {
-  id: number
   account_id: string
-  name: string | null
-  broker_type: string | null
-  broker_name: string | null
-  currency: string
+  name?: string | null
+  broker_type?: string | null
+  broker_name?: string | null
+  currency?: string
   balance: number
-  static_balance: number
+  pre_balance?: number
+  static_balance?: number
   available: number
   margin: number
-  float_profit: number
-  position_profit: number
-  close_profit: number
-  today_profit: number
-  risk_ratio: number
+  position_profit?: number
+  close_profit?: number
+  today_profit?: number
+  risk_ratio?: number
   updated_at: string
   user_id?: string | null
   status?: 'stopped' | 'connecting' | 'connected'
-  connected?: boolean
   md_connected?: boolean
   td_connected?: boolean
   trade_paused?: boolean
@@ -40,8 +38,8 @@ export interface Account {
 export interface Position {
   id: number
   account_id: string
-  exchange_id: string
-  symbol: string
+  exchange_id?: string | null
+  symbol?: string | null
   pos_long: number
   pos_short: number
   pos_long_yd?: number | null
@@ -56,11 +54,7 @@ export interface Position {
   close_profit_short?: number | null
   margin_long?: number | null
   margin_short?: number | null
-  open_price_long: number
-  open_price_short: number
-  float_profit: number
-  margin: number
-  updated_at: string
+  updated_at?: string | null
 }
 
 /** 成交记录 */
@@ -68,15 +62,14 @@ export interface Trade {
   id: number
   account_id: string
   trade_id: string
-  order_id: string | null
-  exchange_id: string
-  instrument_id: string
+  order_id?: string | null
+  symbol: string
   direction: string
   offset: string
   price: number
   volume: number
-  trade_date_time: number | string  // Unix时间戳或ISO字符串
-  order_price: number | null  // 报单价格（用于计算滑点）
+  trade_date_time: string  // ISO 字符串（后端由 datetime 转换）
+  order_price?: number | null  // 报单价格（用于计算滑点）
   created_at: string
 }
 
@@ -85,19 +78,17 @@ export interface Order {
   id: number
   account_id: string
   order_id: string
-  exchange_order_id: string | null
+  exchange_order_id?: string | null
   symbol: string
   direction: string
   offset: string
   volume_orign: number
   volume_left: number
-  limit_price: number | null
+  limit_price?: number | null
   price_type: string
   status: string
-  insert_date_time: number
-  last_msg: string | null
-  created_at: string
-  updated_at: string
+  insert_date_time: string  // ISO 字符串
+  last_msg?: string | null
 }
 
 /** 系统状态 */
@@ -283,8 +274,8 @@ export type Direction = 'BUY' | 'SELL'
 /** 开平类型 */
 export type Offset = 'OPEN' | 'CLOSE' | 'CLOSETODAY' | 'CLOSEYESTERDAY'
 
-/** 订单状态 */
-export type OrderStatus = 'SUBMITTING' | 'NOTTRADED' | 'PARTTRADED' | 'ALLTRADED' | 'CANCELLED' | 'REJECTED'
+/** 订单状态（与后端 OrderStatus 一致：PENDING 挂单中 / FINISHED 已成或已撤 / REJECTED 已拒绝；'ALIVE' 为查询过滤值） */
+export type OrderStatus = 'PENDING' | 'FINISHED' | 'REJECTED' | 'ALIVE'
 
 /** 订单类型 */
 export type OrderType = 'LIMIT' | 'MARKET' | 'FOK' | 'FAK'
@@ -519,12 +510,11 @@ export interface OrderCmd {
   limit_price?: number | null
   source?: string | null
   started_at?: string | null
+  finished_at?: string | null
+  total_orders?: number
+  finish_reason?: string | null
   created_at: string
   updated_at: string
-  filled_price?: number
-  remaining_volume?: number
-  is_active?: boolean
-  finish_reason?: string | null
 }
 
 /** 报单指令响应（用于前端显示） */
@@ -542,6 +532,7 @@ export interface ContractInfo {
   option_strike: number | null
   option_underlying: string | null
   option_type: string | null
+  is_main: boolean
   update_date: string
   updated_at: string | null
 }

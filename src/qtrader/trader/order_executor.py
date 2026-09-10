@@ -26,8 +26,7 @@ from qtrader.models.object import (
     TradeData,
 )
 from qtrader.trader.order_cmd import OrderCmd, OrderCmdStatus
-from qtrader.utils.async_event_engine import AsyncEventEngine
-from qtrader.utils.async_event_engine import EventTypes
+from qtrader.utils.async_event_engine import AsyncEventEngine, EventTypes
 from qtrader.utils.logger import get_logger
 
 if TYPE_CHECKING:
@@ -58,7 +57,9 @@ class OrderCmdExecutor:
 
         # OrderCmd 注册表
         self._pending_cmds: dict[str, "OrderCmd"] = {}
+        # 历史指令（含已完成），供 UI 查询；限制容量，只保留最近 N 条
         self._history_cmds: dict[str, "OrderCmd"] = {}
+        self._history_capacity = 1000
 
         # 控制参数
         self._running = False
@@ -100,6 +101,9 @@ class OrderCmdExecutor:
             except asyncio.CancelledError:
                 pass
 
+        # 清理 engine 侧已完成指令（进程停止/每日结算时调用 stop）
+        self._trading_engine.cleanup_finished_order_cmds()
+
         self.logger.info("执行器已停止")
 
     def register(self, cmd: "OrderCmd") -> None:
@@ -118,6 +122,7 @@ class OrderCmdExecutor:
         cmd.started_at = datetime.now()
         self._pending_cmds[cmd.cmd_id] = cmd
         self._history_cmds[cmd.cmd_id] = cmd
+        self._trim_history()
 
         self.logger.info(
             f"添加OrderCmd到执行器: {cmd.cmd_id} {cmd.symbol} {cmd.offset} {cmd.direction} {cmd.volume}手"
@@ -227,7 +232,8 @@ class OrderCmdExecutor:
                         except Exception as e:
                             self.logger.exception(f"cmd 处理失败 {cmd_id}: {e}")
 
-                # 移除已完成的指令
+                # 移除已完成的指令（保留 engine._order_cmds 引用，供 switch_mgr 等读取终态成交进度；
+                # engine 侧由 cleanup_finished_order_cmds 定期清理）
                 for cmd_id in remove_list:
                     self._pending_cmds.pop(cmd_id, None)
 
@@ -267,12 +273,32 @@ class OrderCmdExecutor:
                 cmd.close(f"报单被拒: {e}")
 
         elif isinstance(req, OrderData):
-            # 撤单（异步）
+            # 撤单（异步）；仅在请求被受理时标记已撤，未受理时保留可撤状态供状态机重试
             try:
-                self._trading_engine.cancel_order(req.order_id)
-                req.canceled = True
+                if self._trading_engine.cancel_order(req.order_id):
+                    req.canceled = True
+                else:
+                    self.logger.warning(f"撤单请求未受理: {req.order_id}")
             except Exception as e:
                 self.logger.error(f"撤单失败 {req.order_id}: {e}")
+
+    def _trim_history(self) -> None:
+        """裁剪历史指令到容量上限，优先淘汰已完成且最旧的，保留活跃指令"""
+        if len(self._history_cmds) <= self._history_capacity:
+            return
+
+        # 按启动时间升序（最旧在前），活跃指令不参与淘汰
+        finished = [
+            (cmd.started_at or datetime.min, cmd_id)
+            for cmd_id, cmd in self._history_cmds.items()
+            if cmd.is_finished and cmd_id not in self._pending_cmds
+        ]
+        finished.sort()
+        overflow = len(self._history_cmds) - self._history_capacity
+        for _, cmd_id in finished[:overflow]:
+            self._history_cmds.pop(cmd_id, None)
+        if overflow > 0:
+            self.logger.debug(f"裁剪历史指令: 淘汰 {overflow} 条，保留 {len(self._history_cmds)}")
 
     async def _maybe_log_stats(self) -> None:
         """定期输出统计信息"""

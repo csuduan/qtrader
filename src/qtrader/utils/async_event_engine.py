@@ -246,17 +246,46 @@ class AsyncEventEngine:
             # 其他线程：通过 call_soon_threadsafe 安全投递
             self._loop.call_soon_threadsafe(self._safe_put, event)
 
+    # 行情类事件：队列满时允许丢弃最旧以保新鲜；其余事件（订单/成交/账户等）不可丢
+    DROPPABLE_EVENT_TYPES = frozenset(
+        {
+            EventTypes.TICK_UPDATE,
+            EventTypes.TICK_BATCH_UPDATE,
+            EventTypes.KLINE_UPDATE,
+            EventTypes.CONTRACT_UPDATE,
+        }
+    )
+
     def _safe_put(self, event: Event) -> None:
-        """非阻塞投递事件（队列满时丢弃并计数，日志按频率采样避免刷屏）"""
+        """非阻塞投递事件
+
+        队列满时：
+        - 行情类事件丢弃队首最旧事件以容纳新事件（保新鲜）
+        - 其他事件不可丢，记录错误并计数
+        日志按频率采样避免刷屏。
+        """
         try:
             self._queue.put_nowait(event)
         except asyncio.QueueFull:
-            self._drop_count += 1
-            if self._drop_count == 1 or self._drop_count % 100 == 0:
-                logger.error(
-                    f"[{self._name}] 事件队列已满，累计丢弃 {self._drop_count} 个事件"
-                    f"（最近丢弃: {event.type}）"
-                )
+            if event.type in self.DROPPABLE_EVENT_TYPES:
+                try:
+                    self._queue.get_nowait()  # 丢弃最旧
+                    self._queue.put_nowait(event)
+                    self._drop_count += 1
+                    if self._drop_count == 1 or self._drop_count % 100 == 0:
+                        logger.warning(
+                            f"[{self._name}] 行情事件队列已满，丢弃最旧事件以保新鲜 "
+                            f"（累计 {self._drop_count} 次，最近: {event.type}）"
+                        )
+                except asyncio.QueueEmpty:
+                    pass
+            else:
+                self._drop_count += 1
+                if self._drop_count == 1 or self._drop_count % 100 == 0:
+                    logger.error(
+                        f"[{self._name}] 事件队列已满，关键事件被拒绝 "
+                        f"（累计丢弃 {self._drop_count} 个事件，最近: {event.type}）"
+                    )
 
     async def put_async(self, event_type: str, data: Any) -> None:
         """

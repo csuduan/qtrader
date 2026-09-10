@@ -73,7 +73,7 @@
                 <el-tab-pane label="废单" name="ERROR" />
               </el-tabs>
               <el-space>
-                <el-button type="primary" @click="emit('showOrder')">
+                <el-button type="primary" @click="emit('showOrder')" data-testid="new-order-btn">
                   <el-icon><Plus /></el-icon>
                   报单
                 </el-button>
@@ -88,6 +88,7 @@
           <div class="table-wrapper">
             <el-table
               :data="orders"
+              data-testid="orders-table"
               stripe
               v-loading="loading"
               table-layout="fixed"

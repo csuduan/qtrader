@@ -49,21 +49,19 @@ class TestEnums:
         assert len(Offset) == 5
     
     def test_order_status_enum(self):
-        """测试订单状态枚举"""
-        assert OrderStatus.SUBMITTING == "SUBMITTING"
-        assert OrderStatus.NOTTRADED == "NOTTRADED"
-        assert OrderStatus.PARTTRADED == "PARTTRADED"
-        assert OrderStatus.ALLTRADED == "ALLTRADED"
-        assert OrderStatus.CANCELLED == "CANCELLED"
+        """测试订单状态枚举（网关层收敛为三态：挂起/完成/被拒）"""
+        assert OrderStatus.PENDING == "PENDING"
+        assert OrderStatus.FINISHED == "FINISHED"
         assert OrderStatus.REJECTED == "REJECTED"
-        assert len(OrderStatus) == 6
+        assert len(OrderStatus) == 3
     
     def test_product_type_enum(self):
         """测试产品类型枚举"""
         assert ProductType.FUTURES == "FUTURES"
         assert ProductType.OPTION == "OPTION"
         assert ProductType.SPOT == "SPOT"
-        assert len(ProductType) == 5
+        assert ProductType.INDEX == "INDEX"
+        assert len(ProductType) == 6
     
     def test_exchange_enum(self):
         """测试交易所枚举"""
@@ -80,9 +78,10 @@ class TestEnums:
     
     def test_interval_enum(self):
         """测试K线周期枚举"""
-        assert Interval.MINUTE == "1m"
-        assert Interval.HOUR == "1h"
-        assert Interval.DAILY == "d"
+        assert Interval.MINUTE == "M1"
+        assert Interval.MINUTE_5 == "M5"
+        assert Interval.HOUR == "H1"
+        assert Interval.DAILY == "D1"
         assert len(Interval) >= 3
     
     def test_interval_custom(self):
@@ -90,8 +89,8 @@ class TestEnums:
         # Interval是一个枚举，不支持任意字符串
         # 只能使用预定义的值
         assert Interval.TICK == "tick"
-        assert Interval.MINUTE == "1m"
-        assert Interval.HOUR == "1h"
+        assert Interval.MINUTE == "M1"
+        assert Interval.HOUR == "H1"
     
     def test_order_type_enum(self):
         """测试订单类型枚举"""
@@ -200,7 +199,6 @@ class TestBarData:
         
         bar = BarData(
             symbol="rb2505",
-            exchange=Exchange.SHFE,
             datetime=datetime(2024, 1, 1, 9, 30, 0),
             interval=Interval.MINUTE,
             open_price=3500.0,
@@ -224,7 +222,6 @@ class TestBarData:
         
         bar = BarData(
             symbol="rb2505",
-            exchange=Exchange.SHFE,
             datetime=datetime(2024, 1, 1, 9, 30, 0),
             interval=Interval.MINUTE,
             open_price=3500.0,
@@ -236,8 +233,8 @@ class TestBarData:
             open_interest=0.0
         )
         
-        # BarData的std_symbol属性是 symbol.exchange
-        assert bar.std_symbol == "rb2505.SHFE"
+        # BarData无exchange字段，std_symbol返回裸合约代码
+        assert bar.std_symbol == "rb2505"
     
     def test_bar_data_without_extras(self):
         """测试Bar数据不使用额外字段"""
@@ -245,7 +242,6 @@ class TestBarData:
         
         bar = BarData(
             symbol="rb2505",
-            exchange=Exchange.SHFE,
             datetime=datetime(2024, 1, 1, 9, 30, 0),
             interval=Interval.MINUTE,
             open_price=3500.0,
@@ -316,9 +312,9 @@ class TestEnumComparison:
     
     def test_order_status_comparison(self):
         """测试订单状态枚举比较"""
-        status = OrderStatus.ALLTRADED
-        assert status == OrderStatus.ALLTRADED
-        assert status != OrderStatus.PARTTRADED
+        status = OrderStatus.FINISHED
+        assert status == OrderStatus.FINISHED
+        assert status != OrderStatus.REJECTED
     
     def test_string_to_enum_conversion(self):
         """测试字符串转枚举"""
@@ -331,7 +327,7 @@ class TestEnumComparison:
     def test_enum_value_extraction(self):
         """测试枚举值提取"""
         assert Direction.BUY.value == "BUY"
-        assert OrderStatus.CANCELLED.value == "CANCELLED"
+        assert OrderStatus.REJECTED.value == "REJECTED"
     
     def test_iteration_over_enums(self):
         """测试枚举迭代"""
@@ -343,4 +339,4 @@ class TestEnumComparison:
     def test_enum_name(self):
         """测试枚举名称"""
         assert Direction.BUY.name == "BUY"
-        assert OrderStatus.SUBMITTING.name == "SUBMITTING"
+        assert OrderStatus.PENDING.name == "PENDING"

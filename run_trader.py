@@ -2,9 +2,14 @@ import argparse
 import sys
 from pathlib import Path
 
-import urllib.request;
-#禁用代理 
-urllib.request.getproxies = lambda: {}
+# 添加项目根目录到路径
+project_root = Path(__file__).parent
+sys.path.insert(0, str(project_root))
+
+from qtrader.utils.proxy import disable_proxy
+
+# 禁用代理
+disable_proxy()
 
 # 添加项目根目录到路径
 project_root = Path(__file__).parent

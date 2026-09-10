@@ -9,6 +9,10 @@
               <el-radio-button label="active">未完成</el-radio-button>
               <el-radio-button label="finished">已完成</el-radio-button>
             </el-radio-group>
+            <el-button type="primary" data-testid="create-order-cmd-btn" @click="showCreateDialog = true">
+              <el-icon><Plus /></el-icon>
+              新增
+            </el-button>
             <el-button type="primary" @click="emit('refresh')" :loading="loading">
               <el-icon><Refresh /></el-icon>
               刷新
@@ -29,7 +33,7 @@
             </template>
           </el-table-column>
           <el-table-column prop="symbol" label="合约" width="80" />
-          <el-table-column prop="status" label="状态" :width="isMobile ? 70 : 100">
+          <el-table-column v-if="!isMobile && localStatus === 'active'" prop="status" label="状态" :width="isMobile ? 70 : 100">
             <template #default="{ row }">
               <el-tag :type="getOrderCmdStatusType(row.status)" size="small">
                 {{ row.status }}
@@ -67,7 +71,11 @@
             </template>
           </el-table-column>
           <el-table-column v-if="!isMobile" prop="total_orders" label="总报单" width="100" />
-          <el-table-column v-if="!isMobile" prop="finish_reason" label="结束原因" width="180" show-overflow-tooltip />
+          <el-table-column v-if="!isMobile" prop="finish_reason" label="结束原因" width="180" show-overflow-tooltip>
+            <template #default="{ row }">
+              <span :class="getFinishReasonClass(row.finish_reason)">{{ row.finish_reason || '-' }}</span>
+            </template>
+          </el-table-column>
           <el-table-column
             v-if="localStatus === 'active'"
             label="操作"
@@ -88,12 +96,77 @@
         </el-table>
       </div>
     </el-card>
+
+    <!-- 新增报单指令对话框 -->
+    <el-dialog
+      v-model="showCreateDialog"
+      title="新增报单指令"
+      width="90%"
+      style="max-width: 500px"
+      @open="resetCreateForm"
+    >
+      <el-form :model="createForm" label-width="100px">
+        <el-form-item label="合约代码" required>
+          <el-input
+            v-model="createForm.symbol"
+            data-testid="create-order-cmd-symbol"
+            :placeholder="symbolPlaceholder"
+          />
+        </el-form-item>
+        <el-form-item label="买卖方向" required>
+          <el-select v-model="createForm.direction" data-testid="create-order-cmd-direction">
+            <el-option label="买入" value="BUY" />
+            <el-option label="卖出" value="SELL" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="开平标志" required>
+          <el-select v-model="createForm.offset" data-testid="create-order-cmd-offset">
+            <el-option label="开仓" value="OPEN" />
+            <el-option label="平仓" value="CLOSE" />
+            <el-option label="平今" value="CLOSETODAY" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="手数" required>
+          <el-input-number
+            v-model="createForm.volume"
+            :min="1"
+            :max="1000"
+            data-testid="create-order-cmd-volume"
+          />
+        </el-form-item>
+        <el-form-item label="价格">
+          <el-input-number
+            v-model="createForm.price"
+            :min="0"
+            :step="0.01"
+            :precision="2"
+            data-testid="create-order-cmd-price"
+            placeholder="0表示市价"
+          />
+          <span class="price-hint">0 表示市价（对手价追价报单）</span>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button data-testid="create-order-cmd-cancel" @click="showCreateDialog = false">取消</el-button>
+        <el-button
+          type="primary"
+          data-testid="create-order-cmd-submit"
+          :loading="creating"
+          @click="handleCreate"
+        >
+          发送指令
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { computed, reactive, ref, onMounted, onUnmounted } from 'vue'
+import { ElMessage } from 'element-plus'
+import { Plus, Refresh } from '@element-plus/icons-vue'
 import type { OrderCmd } from '@/types'
+import { useStore } from '@/stores'
 
 const props = defineProps<{
   loading: boolean
@@ -105,6 +178,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   refresh: []
   cancelOrderCmd: [cmdId: string]
+  createOrderCmd: [form: { symbol: string; direction: 'BUY' | 'SELL'; offset: string; volume: number; price: number }]
   'update:status': [status: 'active' | 'finished']
 }>()
 
@@ -115,13 +189,63 @@ const localStatus = computed({
 
 const isMobile = ref(false)
 
+// ==================== 新增报单指令 ====================
+const showCreateDialog = ref(false)
+const creating = ref(false)
+const createForm = reactive({
+  symbol: '',
+  direction: 'BUY' as 'BUY' | 'SELL',
+  offset: 'OPEN',
+  volume: 1,
+  price: 0
+})
+
+function resetCreateForm() {
+  createForm.symbol = ''
+  createForm.direction = 'BUY'
+  createForm.offset = 'OPEN'
+  createForm.volume = 1
+  createForm.price = 0
+}
+
+async function handleCreate() {
+  if (!createForm.symbol.trim()) {
+    ElMessage.warning('请填写合约代码')
+    return
+  }
+  if (!createForm.volume || createForm.volume <= 0) {
+    ElMessage.warning('手数必须大于0')
+    return
+  }
+  creating.value = true
+  try {
+    emit('createOrderCmd', {
+      symbol: createForm.symbol.trim(),
+      direction: createForm.direction,
+      offset: createForm.offset,
+      volume: createForm.volume,
+      price: createForm.price || 0
+    })
+    showCreateDialog.value = false
+  } finally {
+    creating.value = false
+  }
+}
+
 const updateIsMobile = () => {
   isMobile.value = window.innerWidth <= 768
 }
 
+// 合约输入框占位提示：后端最新螺纹钢主力（如 SHFE.rb2701）
+const store = useStore()
+const symbolPlaceholder = ref('如: SHFE.rb2505')
+
 onMounted(() => {
   updateIsMobile()
   window.addEventListener('resize', updateIsMobile)
+  store.loadMainSymbol().then((s) => {
+    if (s) symbolPlaceholder.value = `如: SHFE.${s}`
+  })
 })
 
 onUnmounted(() => {
@@ -157,11 +281,19 @@ function getOrderCmdStatusType(status: string): string {
       return 'success'
     case 'FINISHED':
       return 'info'
-    case 'CANCELED':
+    case 'CANCELING':
       return 'warning'
     default:
       return 'info'
   }
+}
+
+// 结束原因着色：全部完成绿色，取消/超时黄色，其他（报单被拒/拆单失败等异常）红色
+function getFinishReasonClass(reason: string | null | undefined): string {
+  if (!reason) return ''
+  if (reason === 'ALL_COMPLETED') return 'reason-success'
+  if (reason === 'CANCELLED' || reason === 'TIMEOUT' || reason.includes('取消')) return 'reason-warning'
+  return 'reason-danger'
 }
 </script>
 
@@ -181,5 +313,26 @@ function getOrderCmdStatusType(status: string): string {
 
 .table-wrapper .el-table {
   min-width: 600px;
+}
+
+.price-hint {
+  margin-left: 8px;
+  font-size: 12px;
+  color: #909399;
+}
+
+.reason-success {
+  color: #67c23a;
+  font-weight: 600;
+}
+
+.reason-warning {
+  color: #e6a23c;
+  font-weight: 600;
+}
+
+.reason-danger {
+  color: #f56c6c;
+  font-weight: 600;
 }
 </style>

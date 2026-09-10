@@ -166,13 +166,15 @@ class CtpGateway(BaseGateway):
             tick = self._quotes.get(req.symbol)
             if tick and tick.last_price is not None and tick.last_price > 0:
                 req.price = (
-                    tick.bid_price1 + tick_price
+                    (tick.bid_price1 or 0) + tick_price
                     if req.direction == Direction.BUY
-                    else tick.ask_price1 - tick_price
+                    else (tick.ask_price1 or 0) - tick_price
                 )
             else:
                 logger.warning(f"CTP 下单失败，未获取到有效价格，合约: {req.symbol}")
                 raise ValueError(f"未获取到有效价格，合约: {req.symbol}")
+        if self.td_api is None:
+            raise ValueError("CTP 交易接口未初始化")
         return self.td_api.insert_order(req)
 
     def cancel_order(self, req: CancelRequest) -> bool:
@@ -196,7 +198,7 @@ class CtpGateway(BaseGateway):
                 position.close_profit for position in self._positions.values()
             )
             self._account.balance = (
-                self._account.static_balance
+                (self._account.static_balance or 0)
                 + self._account.hold_profit
                 + self._account.close_profit
             )
@@ -204,6 +206,7 @@ class CtpGateway(BaseGateway):
             self._account.md_connected = self.md_connected
             return self._account
 
+        broker = self.config.broker if self.config else None
         default_account = AccountData(
             account_id=self.account_id,
             currency="CNY",
@@ -212,9 +215,9 @@ class CtpGateway(BaseGateway):
             available=0.0,
             md_connected=self.md_connected,
             td_connected=self.td_connected,
-            user_id=self.config.broker.user_id or "--",
-            broker_name=self.config.broker.broker_name or "--",
-            broker_type=self.config.broker.type or "--",
+            user_id=(broker.user_id if broker else None) or "--",
+            broker_name=(broker.broker_name if broker else None) or "--",
+            broker_type=(broker.type if broker else None) or "--",
         )
         return default_account
 
@@ -434,11 +437,11 @@ class CtpGateway(BaseGateway):
         # 缓存账户数据
         self._account = account
         self._account.hold_profit = sum(
-            position.hold_profit_long + position.hold_profit_short
+            (position.hold_profit_long or 0) + (position.hold_profit_short or 0)
             for position in self._positions.values()
         )
         self._account.close_profit = sum(
-            position.close_profit_long + position.close_profit_short
+            (position.close_profit_long or 0) + (position.close_profit_short or 0)
             for position in self._positions.values()
         )
         self.emit_event(EventTypes.ACCOUNT_UPDATE, self._account)
@@ -462,7 +465,7 @@ class CtpGateway(BaseGateway):
 
         if self.connected:
             # 订阅行情
-            self.md_api.subscribe(self._sub_symbols)
+            self.md_api.subscribe(sorted(self._sub_symbols))
             self.md_api.subscribe(self.subs_config.subscribe_symbols)
 
             # 订阅持仓
@@ -472,40 +475,6 @@ class CtpGateway(BaseGateway):
             for sub_bar in self.subs_config.subscribe_bars:
                 symbol, interval = sub_bar.split("-")
                 self.subscribe_bars(symbol, interval)
-
-    def _update_close_profit(self, trade: TradeData, position: PositionData, volume: int) -> None:
-        """
-        更新账户当日平仓盈亏
-
-        Args:
-            trade: 成交数据
-            position: 持仓数据
-            volume: 平仓手数
-        """
-        if not self._account:
-            return
-
-        multiple = position.multiple
-        trade_price = trade.price
-        close_profit_long = position.close_profit_long or 0.0
-        close_profit_short = position.close_profit_short or 0.0
-
-        # 计算平仓盈亏
-        if trade.direction == Direction.SELL:
-            # 平多：(平仓价 - 持仓价) × 手数 × 乘数
-            hold_price = position.hold_price_long or trade_price
-            profit = (trade_price - hold_price) * volume * multiple
-            position.close_profit_long = close_profit_long + profit
-        else:
-            # 平空：(持仓价 - 平仓价) × 手数 × 乘数
-            hold_price = position.hold_price_short or trade_price
-            profit = (hold_price - trade_price) * volume * multiple
-            position.close_profit_short = close_profit_short + profit
-
-        # 累加当日平仓盈亏
-        if self._account.close_profit is None:
-            self._account.close_profit = 0.0
-        self._account.close_profit += profit
 
     def _push_bar(self, bar_data: BarData) -> None:
         """

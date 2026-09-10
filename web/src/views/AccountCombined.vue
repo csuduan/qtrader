@@ -46,6 +46,7 @@
           :cancelling-cmd-id="cancellingCmdId"
           @refresh="loadOrderCmdData"
           @cancel-order-cmd="handleCancelOrderCmd"
+          @create-order-cmd="handleCreateOrderCmd"
         />
       </el-tab-pane>
 
@@ -135,7 +136,7 @@
     <el-dialog v-model="showOrderInputDialog" title="报单" width="90%" style="max-width: 500px">
       <el-form :model="orderForm" label-width="100px">
         <el-form-item label="合约代码">
-          <el-input v-model="orderForm.symbol" placeholder="如: rb2605" />
+          <el-input v-model="orderForm.symbol" :placeholder="symbolPlaceholder" />
         </el-form-item>
         <el-form-item label="买卖方向">
           <el-radio-group v-model="orderForm.direction">
@@ -218,7 +219,7 @@
     <el-dialog v-model="showSubscribeDialog" title="订阅行情" width="90%" style="max-width: 400px">
       <el-form :model="subscribeForm" label-width="100px">
         <el-form-item label="合约代码">
-          <el-input v-model="subscribeForm.symbol" placeholder="如: rb2505" />
+          <el-input v-model="subscribeForm.symbol" :placeholder="symbolPlaceholder" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -250,6 +251,14 @@ const loading = ref(false)
 const creating = ref(false)
 const subscribing = ref(false)
 const cancelling = ref(false)
+
+// 合约输入框占位提示：后端最新螺纹钢主力（如 rb2701）
+const symbolPlaceholder = ref('如: rb2605')
+onMounted(() => {
+  store.loadMainSymbol().then((s) => {
+    if (s) symbolPlaceholder.value = `如: ${s}`
+  })
+})
 
 // Tab 相关
 const activeTab = ref('detail')
@@ -359,7 +368,7 @@ function handleClosePositions(positions: Position[]) {
   if (positions.length === 0) return
 
   closeRows.value = positions.map(p => ({
-    symbol: p.symbol,
+    symbol: p.symbol ?? '',
     pos_long: p.pos_long,
     pos_short: p.pos_short,
     pos_long_td: p.pos_long_td || 0,
@@ -401,7 +410,8 @@ async function handleClosePositionConfirm(direction: 'BUY' | 'SELL') {
             direction,
             offset: 'CLOSE',
             volume: row.volume,
-            price: row.price || 0
+            price: row.price || 0,
+            source: '手动平仓'
           },
           store.selectedAccountId
         )
@@ -561,6 +571,34 @@ async function loadOrderCmdData() {
     ElMessage.error(`加载报单指令失败: ${error.message}`)
   } finally {
     loading.value = false
+  }
+}
+
+/** 新增报单指令（账户级 OrderCmd，自动拆单/追价） */
+async function handleCreateOrderCmd(form: {
+  symbol: string
+  direction: 'BUY' | 'SELL'
+  offset: string
+  volume: number
+  price: number
+}) {
+  if (!store.selectedAccountId) {
+    ElMessage.error('请先选择账户')
+    return
+  }
+  try {
+    const result = await orderCmdApi.sendOrderCmd(
+      { ...form, source: '手动报单' },
+      store.selectedAccountId
+    )
+    ElMessage.success(`报单指令已发送: ${form.symbol} ${form.volume}手（指令ID: ${result.cmd_id.slice(0, 8)}...）`)
+    // 新指令为进行中，切回未完成页签并刷新
+    if (orderCmdStatus.value !== 'active') {
+      orderCmdStatus.value = 'active'
+    }
+    await loadOrderCmdData()
+  } catch (error: any) {
+    ElMessage.error(`发送报单指令失败: ${error.message}`)
   }
 }
 

@@ -6,6 +6,7 @@ export const contractApi = {
     exchange_id?: string
     product_type?: string
     symbol_keyword?: string
+    is_main?: boolean
   }): Promise<ContractInfo[]> {
     return request.get('/contract/list', { params })
   },

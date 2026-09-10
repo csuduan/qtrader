@@ -186,10 +186,10 @@ class TestTaskSchedulerGetJobFunction:
         assert func == mock_job_manager.sample_method
 
     def test_get_job_function_with_underscore_prefix(self, scheduler: TaskScheduler, mock_job_manager):
-        """测试带下划线前缀的方法名"""
+        """测试带下划线前缀的方法名（按原名查找，不再去除前缀）"""
         func = scheduler._get_job_function("_sample_method")
 
-        assert func == mock_job_manager.sample_method
+        assert func == mock_job_manager._sample_method
 
     def test_get_job_function_not_found(self, scheduler: TaskScheduler):
         """测试找不到方法时返回 None"""

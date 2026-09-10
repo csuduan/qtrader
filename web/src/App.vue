@@ -43,18 +43,16 @@
           <span>行情</span>
         </el-menu-item>
 
-        <!-- 一级菜单：监控 -->
-        <el-menu-item index="/alarms">
-          <el-icon><Odometer /></el-icon>
-          <span>监控</span>
-        </el-menu-item>
-
         <!-- 管理子菜单（仅admin可见）-->
         <el-sub-menu v-if="isAdmin" index="/admin">
           <template #title>
             <el-icon><Tools /></el-icon>
             <span>管理</span>
           </template>
+          <el-menu-item index="/alarms">
+            <el-icon><Odometer /></el-icon>
+            <span>监控</span>
+          </el-menu-item>
           <el-menu-item index="/admin/log">
             <el-icon><DocumentCopy /></el-icon>
             <span>日志</span>
@@ -135,16 +133,15 @@
           <span>行情</span>
         </el-menu-item>
 
-        <el-menu-item index="/alarms">
-          <el-icon><Odometer /></el-icon>
-          <span>监控</span>
-        </el-menu-item>
-
         <el-sub-menu v-if="isAdmin" index="/admin">
           <template #title>
             <el-icon><Tools /></el-icon>
             <span>管理</span>
           </template>
+          <el-menu-item index="/alarms">
+            <el-icon><Odometer /></el-icon>
+            <span>监控</span>
+          </el-menu-item>
           <el-menu-item index="/admin/log">
             <el-icon><DocumentCopy /></el-icon>
             <span>日志</span>

@@ -73,6 +73,7 @@ class TqContractFetcher:
                 )
 
             logger.info(f"TqSdk 合约解析完成，共 {len(contracts)} 个")
+            self._mark_dominant_contracts(api, contracts)
             return contracts
         except TqTimeoutError as e:
             logger.error(f"TqSdk 连接超时: {e}")
@@ -87,3 +88,47 @@ class TqContractFetcher:
                     logger.info("TqSdk API 已关闭")
                 except Exception as e:
                     logger.warning(f"关闭 TqSdk API 失败: {e}")
+
+    @staticmethod
+    def _mark_dominant_contracts(api: TqApi, contracts: list[dict]) -> None:
+        """
+        标记主力合约（打标失败不阻塞主流程，仅全部置 False）
+
+        通过 KQ.m@EXCH.product 主连合约的 underlying_symbol 判定当前主力，
+        如 KQ.m@SHFE.rb → SHFE.rb2701。用 get_quote_list 批量订阅一次就绪。
+        """
+        try:
+            # 提取品种集合 (exchange, product前缀)，同品种共用一次主连查询。
+            # 仅境内期货交易所支持 KQ.m 主连（KQD 外盘等无主连，跳过）；
+            # 剔除 DCE 月均/组合合约的尾部 F 后缀（如 l2703F → l）
+            _kq_exchanges = {"CFFEX", "SHFE", "DCE", "CZCE", "INE", "GFEX"}
+            products: set[tuple[str, str]] = set()
+            for c in contracts:
+                if c["exchange_id"] not in _kq_exchanges:
+                    continue
+                code = str(c["symbol"]).rstrip("F")
+                product = "".join(ch for ch in code if not ch.isdigit())
+                if product:
+                    products.add((c["exchange_id"], product))
+
+            # 批量订阅全部主连，等待数据就绪后统一读取
+            kq_symbols = [f"KQ.m@{exch}.{product}" for exch, product in sorted(products)]
+            dominant: set[str] = set()
+            if kq_symbols:
+                quote_list = api.get_quote_list(kq_symbols)
+                for kq_symbol, quote in zip(kq_symbols, quote_list):
+                    underlying = quote.underlying_symbol
+                    if underlying:
+                        dominant.add(underlying.split(".")[-1])
+                    else:
+                        logger.debug(f"主连无 underlying_symbol: {kq_symbol}")
+
+            marked = 0
+            for c in contracts:
+                c["is_main"] = c["symbol"] in dominant
+                marked += 1 if c["is_main"] else 0
+            logger.info(f"主力合约打标完成: {marked}/{len(contracts)}")
+        except Exception as e:
+            logger.warning(f"主力合约打标失败（不影响主流程）: {e}")
+            for c in contracts:
+                c["is_main"] = False

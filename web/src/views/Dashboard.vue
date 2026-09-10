@@ -1,7 +1,7 @@
 <template>
   <div class="dashboard">
     <!-- 账户卡片列表 -->
-    <div class="account-cards">
+    <div class="account-cards" data-testid="account-cards">
       <el-row :gutter="20">
         <el-col :xs="12" :sm="12" :lg="6" v-for="acc in sortedAccounts" :key="acc.account_id">
           <el-card

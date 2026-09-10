@@ -8,7 +8,6 @@ from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field
-from sqlalchemy.util import b
 
 # ==================== 枚举定义 ====================
 
@@ -348,12 +347,12 @@ class PositionData(BaseModel):
     @property
     def pos_long(self) -> int:
         """多头总持仓"""
-        return self.pos_long_td + self.pos_long_yd
+        return (self.pos_long_td or 0) + (self.pos_long_yd or 0)
 
     @property
     def pos_short(self) -> int:
         """空头总持仓"""
-        return self.pos_short_td + self.pos_short_yd
+        return (self.pos_short_td or 0) + (self.pos_short_yd or 0)
 
     @property
     def pos(self) -> int:
@@ -368,12 +367,12 @@ class PositionData(BaseModel):
     @property
     def close_profit(self) -> float:
         """平仓盈亏"""
-        return self.close_profit_long + self.close_profit_short
+        return (self.close_profit_long or 0) + (self.close_profit_short or 0)
 
     @property
     def hold_profit(self) -> float:
         """持仓盈亏"""
-        return self.hold_profit_long + self.hold_profit_short
+        return (self.hold_profit_long or 0) + (self.hold_profit_short or 0)
 
     @classmethod
     def default(cls, symbol: str = "", exchange: Exchange = Exchange.NONE, multiple: int = 0):
@@ -401,10 +400,10 @@ class PositionData(BaseModel):
                 return
             self.last_price = data.last_price
             self.hold_profit_long = (
-                (self.last_price - self.hold_price_long) * self.pos_long * self.multiple
+                (self.last_price - (self.hold_price_long or 0)) * self.pos_long * self.multiple
             )
             self.hold_profit_short = (
-                (self.hold_price_short - self.last_price) * self.pos_short * self.multiple
+                ((self.hold_price_short or 0) - self.last_price) * self.pos_short * self.multiple
             )
             self.updated_at = data.datetime
 
@@ -419,15 +418,15 @@ class PositionData(BaseModel):
                 # 开仓：增加持仓
                 if trade.direction == Direction.BUY:
                     # 开多
-                    cost = self.hold_price_long * self.pos_long + price * volume
-                    self.pos_long_td += volume
+                    cost = (self.hold_price_long or 0) * self.pos_long + price * volume
+                    self.pos_long_td = (self.pos_long_td or 0) + volume
                     self.hold_price_long = (
                         round(cost / self.pos_long, 2) if self.pos_long > 0 else 0.0
                     )
                 else:
                     # 开空
-                    cost = self.hold_price_short * self.pos_short + price * volume
-                    self.pos_short_td += volume
+                    cost = (self.hold_price_short or 0) * self.pos_short + price * volume
+                    self.pos_short_td = (self.pos_short_td or 0) + volume
                     self.hold_price_short = (
                         round(cost / self.pos_short, 2) if self.pos_short > 0 else 0.0
                     )
@@ -452,8 +451,8 @@ class PositionData(BaseModel):
                                 self.pos_short_td = max(0, pos_short_td - remaining)
 
                         # 更新平仓盈亏
-                        self.close_profit_short += (
-                            (self.hold_price_short - price) * volume * self.multiple
+                        self.close_profit_short = (self.close_profit_short or 0) + (
+                            ((self.hold_price_short or 0) - price) * volume * self.multiple
                         )
                 else:
                     # 平多（卖出平多）
@@ -473,8 +472,8 @@ class PositionData(BaseModel):
                                 self.pos_long_td = max(0, pos_long_td - remaining)
 
                         # 更新平仓盈亏
-                        self.close_profit_long += (
-                            (price - self.hold_price_long) * volume * self.multiple
+                        self.close_profit_long = (self.close_profit_long or 0) + (
+                            (price - (self.hold_price_long or 0)) * volume * self.multiple
                         )
 
 

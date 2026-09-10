@@ -101,7 +101,7 @@ class SwitchPosManager:
         today = datetime.now().strftime("%Y%m%d")
         return [x for x in self.all_instructions if x.trading_date == today]
 
-    def update_instruction(self, data: dict):
+    def update_instruction(self, data: dict) -> "RotationInstructionPo":
         """更新换仓指令"""
         instruction_id = data.get("instruction_id")
         if not instruction_id:
@@ -167,7 +167,7 @@ class SwitchPosManager:
             logger.error(f"获取所有指令列表时出错: {e}")
         logger.info(f"加载换仓指令完成，共 {len(self.all_instructions)} 条")
 
-    def import_csv(self, csv_text: str, filename: str, mode: str = "replace"):
+    def import_csv(self, csv_text: str, filename: str, mode: str = "replace") -> dict:
         """
         导入换仓指令文件
 
@@ -203,7 +203,7 @@ class SwitchPosManager:
                 if len(values) < 6:
                     logger.warning(f"第{line_num}行数据不完整，跳过: {line}")
                     failed_count += 1
-                    continue
+                    continue 
 
                 account_id = values[0].strip()
                 strategy_id = values[1].strip()

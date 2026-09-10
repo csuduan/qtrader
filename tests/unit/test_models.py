@@ -83,17 +83,16 @@ class TestPositionModel:
         assert position.pos_long == 10
 
     def test_position_net_position(self):
-        """测试持仓净头寸（pos 需要显式提供）"""
+        """测试持仓净头寸（pos 为派生属性：多头 - 空头）"""
         position = PositionData(
             symbol="SHFE.rb2505",
             exchange=Exchange.SHFE,
-            pos=7,  # net position
-            pos_long=10,
-            pos_short=3,
+            pos_long_td=10,
+            pos_short_td=3,
         )
-        assert position.pos == 7
         assert position.pos_long == 10
         assert position.pos_short == 3
+        assert position.pos == 7
 
 
 class TestOrderModel:
@@ -113,7 +112,7 @@ class TestOrderModel:
         )
         assert order.order_id == "order_001"
         assert order.volume == 5
-        assert order.status == OrderStatus.SUBMITTING
+        assert order.status == OrderStatus.PENDING
 
     def test_order_volume_left(self):
         """测试订单剩余数量计算"""
@@ -142,10 +141,10 @@ class TestOrderModel:
             traded=10,
             price=Decimal("3500.0"),
             account_id="test_account",
-            status=OrderStatus.ALLTRADED,
+            status=OrderStatus.FINISHED,
         )
         assert order.volume_left == 0
-        assert order.status == OrderStatus.ALLTRADED
+        assert order.status == OrderStatus.FINISHED
 
     def test_order_status_transitions(self):
         """测试订单状态流转"""
@@ -159,12 +158,12 @@ class TestOrderModel:
             price=Decimal("3500.0"),
             account_id="test_account",
         )
-        assert order.status == OrderStatus.SUBMITTING
+        assert order.status == OrderStatus.PENDING
         # 状态可以更新
-        order.status = OrderStatus.NOTTRADED
-        assert order.status == OrderStatus.NOTTRADED
-        order.status = OrderStatus.PARTTRADED
-        assert order.status == OrderStatus.PARTTRADED
+        order.status = OrderStatus.FINISHED
+        assert order.status == OrderStatus.FINISHED
+        order.status = OrderStatus.REJECTED
+        assert order.status == OrderStatus.REJECTED
 
 
 class TestTradeModel:
@@ -345,11 +344,8 @@ class TestEnums:
 
     def test_order_status_values(self):
         """测试订单状态枚举值"""
-        assert OrderStatus.SUBMITTING.value == "SUBMITTING"
-        assert OrderStatus.NOTTRADED.value == "NOTTRADED"
-        assert OrderStatus.PARTTRADED.value == "PARTTRADED"
-        assert OrderStatus.ALLTRADED.value == "ALLTRADED"
-        assert OrderStatus.CANCELLED.value == "CANCELLED"
+        assert OrderStatus.PENDING.value == "PENDING"
+        assert OrderStatus.FINISHED.value == "FINISHED"
         assert OrderStatus.REJECTED.value == "REJECTED"
 
     def test_enum_from_string(self):
@@ -357,7 +353,7 @@ class TestEnums:
         assert Exchange("SHFE") == Exchange.SHFE
         assert Direction("BUY") == Direction.BUY
         assert Offset("OPEN") == Offset.OPEN
-        assert OrderStatus("ALLTRADED") == OrderStatus.ALLTRADED
+        assert OrderStatus("FINISHED") == OrderStatus.FINISHED
 
     def test_enum_invalid_value(self):
         """测试无效枚举值"""

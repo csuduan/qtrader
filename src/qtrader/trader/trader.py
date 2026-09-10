@@ -12,10 +12,14 @@ from typing import Any, Callable
 from qtrader.app_context import AppContext, get_app_context
 from qtrader.models.object import OrderData, TradeData
 from qtrader.trader.alarm_handler import TraderAlarmHandler
+from qtrader.trader.dao.account_dao import AccountDao
+from qtrader.trader.dao.order_dao import OrderDao
+from qtrader.trader.dao.position_dao import PositionDao
+from qtrader.trader.dao.trade_dao import TradeDao
 from qtrader.trader.job_mgr import JobManager
+from qtrader.trader.req import TraderReqHandler
 from qtrader.trader.strategy_manager import StrategyManager
 from qtrader.trader.switch_mgr import SwitchPosManager
-from qtrader.trader.trader_req import TraderReqHandler
 from qtrader.trader.trading_engine import TradingEngine
 from qtrader.utils.async_event_engine import AsyncEventEngine, EventTypes
 from qtrader.utils.config_loader import TraderConfig
@@ -94,6 +98,12 @@ class Trader:
         self._tick_push_interval: float = 1.0  # 每秒批量推送一次
         self._tick_push_task: asyncio.Task | None = None
 
+        # 数据访问对象
+        self._account_dao = AccountDao()
+        self._order_dao = OrderDao()
+        self._trade_dao = TradeDao()
+        self._position_dao = PositionDao()
+
     async def start(
         self,
         socket_path: str | None = None,
@@ -119,7 +129,7 @@ class Trader:
         # 启动Socket服务器
         self.socket_server = SocketServer(self._socket_path, self.account_id)
         req_handler = TraderReqHandler(self)
-        self.socket_server.register_handlers_from_instance(req_handler)
+        req_handler.register_to(self.socket_server)
         self._server_task = asyncio.create_task(self.socket_server.start())
         await asyncio.sleep(0.2)
         logger.info(f"Trader [{self.account_id}] SocketServer已启动，继续初始化...")
@@ -351,7 +361,7 @@ class Trader:
         # 启动socket，通过 TraderReqHandler 注册请求处理器
         self.socket_server = SocketServer(self._socket_path, self.account_id)
         req_handler = TraderReqHandler(self)
-        self.socket_server.register_handlers_from_instance(req_handler)
+        req_handler.register_to(self.socket_server)
 
         # 将服务器作为后台任务启动（方案1：后台任务）
         self._server_task = asyncio.create_task(self.socket_server.start())
@@ -401,7 +411,7 @@ class Trader:
         """订单更新事件处理器 - 写入PG后直接广播完整数据"""
         try:
             # 1. 先写入PG（放到线程执行，避免阻塞事件循环）
-            await asyncio.to_thread(self._persist_order, data)
+            await asyncio.to_thread(self._order_dao.save, self.account_id, data)
 
             # 2. 广播完整订单数据给Manager
             if self.socket_server:
@@ -415,7 +425,7 @@ class Trader:
         """成交更新事件处理器 - 写入PG后直接广播完整数据"""
         try:
             # 1. 先写入PG（放到线程执行，避免阻塞事件循环）
-            await asyncio.to_thread(self._persist_trade, data)
+            await asyncio.to_thread(self._trade_dao.save, self.account_id, data)
 
             # 2. 广播完整成交数据给Manager
             if self.socket_server:
@@ -530,214 +540,6 @@ class Trader:
         except Exception as e:
             logger.exception(f"发送就绪通知失败: {e}")
 
-    def _persist_account(self, data) -> None:
-        """持久化账户数据到PG"""
-        try:
-            from decimal import Decimal
-
-            from qtrader.models.po import AccountPo
-            from qtrader.utils.database import get_database
-
-            db = get_database()
-            if not db:
-                return
-
-            with db.get_session() as session:
-                account_po = session.query(AccountPo).filter_by(account_id=self.account_id).first()
-                if not account_po:
-                    account_po = AccountPo(account_id=self.account_id)
-
-                account_po.balance = (
-                    Decimal(str(data.balance)) if hasattr(data, "balance") else Decimal("0")
-                )
-                account_po.available = (
-                    Decimal(str(data.available)) if hasattr(data, "available") else Decimal("0")
-                )
-                account_po.margin = (
-                    Decimal(str(data.margin)) if hasattr(data, "margin") else Decimal("0")
-                )
-                account_po.position_profit = (
-                    Decimal(str(data.hold_profit)) if hasattr(data, "hold_profit") else Decimal("0")
-                )
-                account_po.close_profit = (
-                    Decimal(str(data.close_profit))
-                    if hasattr(data, "close_profit")
-                    else Decimal("0")
-                )
-                account_po.risk_ratio = (
-                    Decimal(str(data.risk_ratio)) if hasattr(data, "risk_ratio") else Decimal("0")
-                )
-                account_po.updated_at = datetime.now()
-
-                session.add(account_po)
-                logger.debug(f"账户数据已持久化: {self.account_id}")
-        except Exception as e:
-            logger.exception(f"持久化账户数据失败: {e}")
-
-    def _persist_order(self, data: OrderData) -> None:
-        """持久化订单数据到PG"""
-        try:
-            from decimal import Decimal
-
-            from qtrader.models.po import OrderPo
-            from qtrader.utils.database import get_database
-
-            db = get_database()
-            if not db:
-                return
-
-            with db.get_session() as session:
-                order_id = data.order_id if hasattr(data, "order_id") else None
-                if not order_id:
-                    return
-
-                order_po = (
-                    session.query(OrderPo)
-                    .filter_by(account_id=self.account_id, order_id=order_id)
-                    .first()
-                )
-                if not order_po:
-                    order_po = OrderPo(account_id=self.account_id, order_id=order_id)
-
-                order_po.symbol = data.symbol if hasattr(data, "symbol") else ""
-                order_po.direction = data.direction.value if hasattr(data, "direction") else ""
-                order_po.offset = data.offset.value if hasattr(data, "offset") else ""
-                order_po.limit_price = Decimal(str(data.price)) if hasattr(data, "price") else None
-                order_po.volume_orign = data.volume if hasattr(data, "volume") else 0
-                order_po.volume_left = (
-                    data.volume_left
-                    if hasattr(data, "volume_left")
-                    else data.volume if hasattr(data, "volume") else 0
-                )
-                order_po.status = data.status if hasattr(data, "status") else ""
-                order_po.price_type = data.price_type if hasattr(data, "price_type") else "LIMIT"
-                order_po.exchange_order_id = data.order_sys_id if data.order_sys_id else None
-                order_po.status_msg = data.status_msg if hasattr(data, "status_msg") else None
-                order_po.update_date_time = (
-                    data.update_time if hasattr(data, "update_time") else None
-                )
-                insert_time = data.insert_time if hasattr(data, "insert_time") else None
-                order_po.insert_date_time = (
-                    insert_time or order_po.update_date_time or datetime.now()
-                )
-
-                session.add(order_po)
-                logger.debug(f"订单数据已持久化: {order_id}")
-        except Exception as e:
-            logger.exception(f"持久化订单数据失败: {e}")
-
-    def _persist_trade(self, data: TradeData) -> None:
-        """持久化成交数据到PG"""
-        try:
-            from decimal import Decimal
-
-            from qtrader.models.po import TradePo
-            from qtrader.utils.database import get_database
-
-            db = get_database()
-            if not db:
-                return
-
-            trade_id = data.trade_id if hasattr(data, "trade_id") else None
-            if not trade_id:
-                return
-
-            with db.get_session() as session:
-                existing = session.query(TradePo).filter_by(trade_id=trade_id).first()
-                if existing:
-                    return
-
-                trade_po = TradePo(
-                    account_id=self.account_id,
-                    trade_id=trade_id,
-                    order_id=data.order_id if hasattr(data, "order_id") else "",
-                    symbol=data.symbol if hasattr(data, "symbol") else "",
-                    direction=data.direction.value if hasattr(data, "direction") else "",
-                    offset=data.offset.value if hasattr(data, "offset") else "",
-                    price=Decimal(str(data.price)) if hasattr(data, "price") else Decimal("0"),
-                    volume=data.volume if hasattr(data, "volume") else 0,
-                    trade_date_time=data.trade_time if hasattr(data, "trade_time") else 0,
-                    order_price=(
-                        Decimal(str(data.order_price))
-                        if hasattr(data, "order_price") and data.order_price is not None
-                        else None
-                    ),
-                )
-                session.add(trade_po)
-                logger.debug(f"成交数据已持久化: {trade_id}")
-        except Exception as e:
-            logger.exception(f"持久化成交数据失败: {e}")
-
-    def _persist_position(self, data) -> None:
-        """持久化持仓数据到PG"""
-        try:
-            from decimal import Decimal
-
-            from qtrader.models.po import PositionPo
-            from qtrader.utils.database import get_database
-
-            db = get_database()
-            if not db:
-                return
-
-            symbol = data.symbol if hasattr(data, "symbol") else None
-            if not symbol:
-                return
-
-            with db.get_session() as session:
-                position_po = (
-                    session.query(PositionPo)
-                    .filter_by(account_id=self.account_id, symbol=symbol, strategy_id=None)
-                    .first()
-                )
-                if not position_po:
-                    position_po = PositionPo(
-                        account_id=self.account_id,
-                        symbol=symbol,
-                        exchange=data.exchange if hasattr(data, "exchange") else "",
-                    )
-
-                position_po.pos_long_td = data.pos_long_td if hasattr(data, "pos_long_td") else 0
-                position_po.pos_long_yd = data.pos_long_yd if hasattr(data, "pos_long_yd") else 0
-                position_po.pos_short_td = data.pos_short_td if hasattr(data, "pos_short_td") else 0
-                position_po.pos_short_yd = data.pos_short_yd if hasattr(data, "pos_short_yd") else 0
-                position_po.hold_price_long = (
-                    Decimal(str(data.hold_price_long))
-                    if hasattr(data, "hold_price_long")
-                    else Decimal("0")
-                )
-                position_po.hold_price_short = (
-                    Decimal(str(data.hold_price_short))
-                    if hasattr(data, "hold_price_short")
-                    else Decimal("0")
-                )
-                position_po.hold_profit_long = (
-                    Decimal(str(data.hold_profit_long))
-                    if hasattr(data, "hold_profit_long")
-                    else Decimal("0")
-                )
-                position_po.hold_profit_short = (
-                    Decimal(str(data.hold_profit_short))
-                    if hasattr(data, "hold_profit_short")
-                    else Decimal("0")
-                )
-                # margin字段在模型中，计算方式：多头保证金+空头保证金
-                margin_long = (
-                    Decimal(str(data.margin_long)) if hasattr(data, "margin_long") else Decimal("0")
-                )
-                margin_short = (
-                    Decimal(str(data.margin_short))
-                    if hasattr(data, "margin_short")
-                    else Decimal("0")
-                )
-                position_po.margin = margin_long + margin_short
-                position_po.updated_at = datetime.now()
-
-                session.add(position_po)
-                logger.debug(f"持仓数据已持久化: {symbol}")
-        except Exception as e:
-            logger.exception(f"持久化持仓数据失败: {e}")
-
     def _cache_account_data(self, data) -> None:
         """缓存账户数据，等待批量写入"""
         try:
@@ -801,11 +603,11 @@ class Trader:
             with db.get_session() as session:
                 # 批量写入账户
                 if account_data:
-                    self._do_persist_account(session, self.account_id, account_data)
+                    self._account_dao.save_dict(session, self.account_id, account_data)
 
                 # 批量写入持仓
                 for symbol, data in positions.items():
-                    self._do_persist_position(session, self.account_id, symbol, data)
+                    self._position_dao.save_dict(session, self.account_id, symbol, data)
 
                 session.commit()
 
@@ -814,59 +616,6 @@ class Trader:
         except Exception as e:
             logger.exception(f"批量持久化失败: {e}")
             return False
-
-    def _do_persist_account(self, session, account_id: str, data: dict) -> None:
-        """执行账户数据持久化（内部方法）"""
-        from decimal import Decimal
-
-        from qtrader.models.po import AccountPo
-
-        account_po = session.query(AccountPo).filter_by(account_id=account_id).first()
-        if not account_po:
-            account_po = AccountPo(account_id=account_id)
-
-        account_po.balance = Decimal(str(data.get("balance") or 0))
-        account_po.available = Decimal(str(data.get("available") or 0))
-        account_po.margin = Decimal(str(data.get("margin") or 0))
-        account_po.position_profit = Decimal(str(data.get("hold_profit") or 0))
-        account_po.close_profit = Decimal(str(data.get("close_profit") or 0))
-        account_po.risk_ratio = Decimal(str(data.get("risk_ratio") or 0))
-        account_po.updated_at = datetime.now()
-
-        session.add(account_po)
-
-    def _do_persist_position(self, session, account_id: str, symbol: str, data: dict) -> None:
-        """执行持仓数据持久化（内部方法）"""
-        from decimal import Decimal
-
-        from qtrader.models.po import PositionPo
-
-        position_po = (
-            session.query(PositionPo)
-            .filter_by(account_id=account_id, symbol=symbol, strategy_id=None)
-            .first()
-        )
-        if not position_po:
-            position_po = PositionPo(
-                account_id=account_id,
-                symbol=symbol,
-                exchange=data.get("exchange", ""),
-            )
-
-        position_po.pos_long_td = data.get("pos_long_td") or 0
-        position_po.pos_long_yd = data.get("pos_long_yd") or 0
-        position_po.pos_short_td = data.get("pos_short_td") or 0
-        position_po.pos_short_yd = data.get("pos_short_yd") or 0
-        position_po.hold_price_long = Decimal(str(data.get("hold_price_long") or 0))
-        position_po.hold_price_short = Decimal(str(data.get("hold_price_short") or 0))
-        position_po.hold_profit_long = Decimal(str(data.get("hold_profit_long") or 0))
-        position_po.hold_profit_short = Decimal(str(data.get("hold_profit_short") or 0))
-        margin_long = Decimal(str(data.get("margin_long") or 0))
-        margin_short = Decimal(str(data.get("margin_short") or 0))
-        position_po.margin = margin_long + margin_short
-        position_po.updated_at = datetime.now()
-
-        session.add(position_po)
 
     def _register_event_handlers(self) -> None:
         """

@@ -4,12 +4,49 @@
 使用 PositionData 和 PositionPo
 """
 
+from datetime import datetime
+from decimal import Decimal
+from typing import Any
+
 from qtrader.models.object import Exchange, PositionData
 from qtrader.models.po import PositionPo
 from qtrader.utils.database import session_scope
 from qtrader.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+class PositionDao:
+    """账户级持仓数据访问对象"""
+
+    def save_dict(self, session, account_id: str, symbol: str, data: dict[str, Any]) -> None:
+        """在指定会话中通过字典持久化账户级持仓（用于批量写入）"""
+        position_po = (
+            session.query(PositionPo)
+            .filter_by(account_id=account_id, symbol=symbol, strategy_id=None)
+            .first()
+        )
+        if not position_po:
+            position_po = PositionPo(
+                account_id=account_id,
+                symbol=symbol,
+                exchange=data.get("exchange", ""),
+            )
+
+        position_po.pos_long_td = data.get("pos_long_td") or 0
+        position_po.pos_long_yd = data.get("pos_long_yd") or 0
+        position_po.pos_short_td = data.get("pos_short_td") or 0
+        position_po.pos_short_yd = data.get("pos_short_yd") or 0
+        position_po.hold_price_long = Decimal(str(data.get("hold_price_long") or 0))
+        position_po.hold_price_short = Decimal(str(data.get("hold_price_short") or 0))
+        position_po.hold_profit_long = Decimal(str(data.get("hold_profit_long") or 0))
+        position_po.hold_profit_short = Decimal(str(data.get("hold_profit_short") or 0))
+        margin_long = Decimal(str(data.get("margin_long") or 0))
+        margin_short = Decimal(str(data.get("margin_short") or 0))
+        position_po.margin = margin_long + margin_short
+        position_po.updated_at = datetime.now()
+
+        session.add(position_po)
 
 
 class StrategyPositionService:
@@ -44,14 +81,14 @@ class StrategyPositionService:
 
                 if existing:
                     # 更新现有记录
-                    existing.pos_long_td = position.pos_long_td or 0
-                    existing.pos_long_yd = position.pos_long_yd or 0
-                    existing.pos_short_td = position.pos_short_td or 0
-                    existing.pos_short_yd = position.pos_short_yd or 0
-                    existing.hold_price_long = position.hold_price_long or 0
-                    existing.hold_price_short = position.hold_price_short or 0
-                    existing.close_profit_long = position.close_profit_long or 0
-                    existing.close_profit_short = position.close_profit_short or 0
+                    existing.pos_long_td = position.pos_long_td or 0  # type: ignore[assignment]
+                    existing.pos_long_yd = position.pos_long_yd or 0  # type: ignore[assignment]
+                    existing.pos_short_td = position.pos_short_td or 0  # type: ignore[assignment]
+                    existing.pos_short_yd = position.pos_short_yd or 0  # type: ignore[assignment]
+                    existing.hold_price_long = position.hold_price_long or 0  # type: ignore[assignment]
+                    existing.hold_price_short = position.hold_price_short or 0  # type: ignore[assignment]
+                    existing.close_profit_long = position.close_profit_long or 0  # type: ignore[assignment]
+                    existing.close_profit_short = position.close_profit_short or 0  # type: ignore[assignment]
                     logger.debug(
                         f"更新策略持仓: {position.extras.get('account_id', '')}/{position.strategy_id}/{position.symbol}"
                     )
@@ -116,7 +153,7 @@ class StrategyPositionService:
                     ) > 0:
                         position = PositionData(
                             symbol=record.symbol,
-                            exchange=Exchange.from_str(record.exchange),
+                            exchange=Exchange.from_str(record.exchange),  # type: ignore[arg-type]
                             multiple=record.multiple or 0,
                             strategy_id=record.strategy_id,
                             pos_long_td=record.pos_long_td or 0,
@@ -174,7 +211,7 @@ class StrategyPositionService:
                 ):
                     return PositionData(
                         symbol=record.symbol,
-                        exchange=Exchange.from_str(record.exchange),
+                        exchange=Exchange.from_str(record.exchange),  # type: ignore[arg-type]
                         strategy_id=record.strategy_id,
                         pos_long_td=record.pos_long_td or 0,
                         pos_long_yd=record.pos_long_yd or 0,

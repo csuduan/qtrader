@@ -22,6 +22,14 @@ logger = get_logger(__name__)
 MAX_MESSAGE_SIZE = 16 * 1024 * 1024
 
 
+class RemoteHandlerError(Exception):
+    """对端处理器执行失败的 IPC 错误响应
+
+    message 即对端回传的真实失败原因（含异常类型），由调用方决定
+    是否透传给前端；与传输失败/超时（返回 None）区分。
+    """
+
+
 class MessageType(str, Enum):
     """消息类型枚举"""
 
@@ -102,7 +110,7 @@ class MessageProtocol:
         """
         # 将消息体转换为JSON
         # json_data = self.encoder.encode(message.to_dict())
-        json_data = json.dumps(message.to_dict(), ignore_nan=True, default=str)
+        json_data: str = json.dumps(message.to_dict(), ignore_nan=True, default=str)
         message_bytes = json_data.encode("utf-8")
 
         # 4字节长度 + 报文体

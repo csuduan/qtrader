@@ -65,6 +65,8 @@ class TqGateway(BaseGateway):
         super().__init__()
         self._running = False
         self.config = acct_config.gateway
+        if self.config is None:
+            raise ValueError("TQ 网关配置缺失")
         self.account_id = self.config.account_id
         logger.info(f"TqGateway初始化, account_id: {self.account_id}, id: {id(self)}")
 
@@ -122,7 +124,7 @@ class TqGateway(BaseGateway):
 
             if self._running:
                 logger.warning("TqSdk运行中，先断开连接")
-                self.disconnect()
+                await self.disconnect()
 
             self._running = True
             # 启动tq主线程
@@ -451,9 +453,10 @@ class TqGateway(BaseGateway):
             if req.slip is not None and req.slip > 0 and contract.pricetick is not None:
                 tick_price = contract.pricetick * req.slip
 
-            return self._submit_to_tq_thread(
+            order: OrderData = self._submit_to_tq_thread(
                 lambda: self._do_insert_order(req, contract, symbol, tick_price)
             )
+            return order
         except Exception as e:
             logger.exception(f"下单失败: {e}")
             raise e

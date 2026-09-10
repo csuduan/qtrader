@@ -3,16 +3,15 @@ WebSocket管理模块
 """
 
 import asyncio
-from datetime import datetime, date
+from datetime import date, datetime
 
 import simplejson as json
 from fastapi import WebSocket
 
 from qtrader.app_context import AppContext, get_app_context
-from qtrader.utils.async_event_engine import AsyncEventEngine
-from qtrader.utils.async_event_engine import EventTypes
-from qtrader.utils.logger import get_logger
+from qtrader.utils.async_event_engine import AsyncEventEngine, EventTypes
 from qtrader.utils.json_util import datetime_handler
+from qtrader.utils.logger import get_logger
 
 logger = get_logger(__name__)
 ctx: AppContext = get_app_context()
@@ -55,14 +54,12 @@ class WebSocketManager:
             self.quote_subscriptions[websocket] = subscribed
             logger.info(f"WebSocket行情订阅状态更新: {subscribed}")
 
-    
-
     async def broadcast(self, message: dict):
         """广播消息到所有连接"""
         if not self.active_connections:
             return
         try:
-            message_str = json.dumps(message, ignore_nan=True,default=datetime_handler)
+            message_str = json.dumps(message, ignore_nan=True, default=datetime_handler)
         except Exception as e:
             logger.error(f"JSON序列化消息失败: {e} {message}")
             return
@@ -161,7 +158,6 @@ class WebSocketManager:
             },
             "quote",
         )
-
 
 
 # 创建全局实例

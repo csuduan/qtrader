@@ -322,7 +322,13 @@ async def connect_account_gateway(
     if not trader:
         return error_response(code=404, message=f"账户 [{account_id}] 不存在")
 
-    success = await trader.connect()
+    try:
+        success = await trader.connect()
+    except Exception as e:
+        # 异常含 Trader 回传的真实失败原因，透传给前端
+        logger.error(f"连接失败 [{account_id}]: {e}", exc_info=True)
+        return error_response(code=500, message=f"连接失败: {str(e)}")
+
     if success:
         return success_response(data={"connected": True}, message="连接成功")
     else:
@@ -344,7 +350,13 @@ async def disconnect_account_gateway(
     if not trader:
         return error_response(code=404, message=f"账户 [{account_id}] 不存在")
 
-    success = await trader.disconnect()
+    try:
+        success = await trader.disconnect()
+    except Exception as e:
+        # 异常含 Trader 回传的真实失败原因，透传给前端
+        logger.error(f"断开连接失败 [{account_id}]: {e}", exc_info=True)
+        return error_response(code=500, message=f"断开连接失败: {str(e)}")
+
     if success:
         return success_response(data={"connected": False}, message="已断开连接")
     else:

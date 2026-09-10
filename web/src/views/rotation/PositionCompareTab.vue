@@ -38,7 +38,12 @@
       </template>
 
       <div class="table-wrapper">
-        <el-table :data="comparisons" table-layout="fixed" :size="isMobile ? 'small' : 'default'">
+        <el-table
+          data-testid="position-compare-table"
+          :data="comparisons"
+          table-layout="fixed"
+          :size="isMobile ? 'small' : 'default'"
+        >
           <template #empty>
             <el-empty description="暂无目标仓位文件，请导入或投放目标仓位文件" />
           </template>

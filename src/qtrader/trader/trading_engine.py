@@ -24,6 +24,7 @@ from qtrader.models.object import (
     OrderRequest,
     OrderStatus,
     PositionData,
+    TickData,
     TradeData,
 )
 from qtrader.models.po import SystemParamPo
@@ -35,6 +36,7 @@ from qtrader.utils.config_loader import AccountConfig, AppConfig, RiskControlCon
 from qtrader.utils.database import get_session
 from qtrader.utils.helpers import _get_int_param
 from qtrader.utils.logger import get_logger
+from qtrader.utils.trading_session import is_symbol_trading_time
 
 logger = get_logger(__name__)
 ctx = get_app_context()
@@ -115,13 +117,13 @@ class TradingEngine:
         return self.gateway.connected
 
     @property
-    def trades(self):
+    def trades(self) -> dict[str, TradeData]:
         if self.gateway is None:
             return {}
         return self.gateway.get_trades()
 
     @property
-    def account(self):
+    def account(self) -> AccountData | None:
         if self.gateway is None:
             return None
         account = self.gateway.get_account()
@@ -135,9 +137,11 @@ class TradingEngine:
         account.user_id = user_id or "--"
         account.risk_status = self.risk_control.get_status()
         account.trade_paused = self.paused
-        account.broker_name = self.config.gateway.broker.broker_name or "--"
-        broke_type = self.config.gateway.broker.type.upper()
-        if "TQSDK" in self.config.gateway.type:
+        broker = self.config.gateway.broker if self.config.gateway else None
+        account.broker_name = (broker.broker_name if broker else None) or "--"
+        broke_type = (broker.type if broker else "").upper()
+        gateway_type = self.config.gateway.type if self.config.gateway else ""
+        if "TQSDK" in gateway_type:
             account.broker_type = f"TQ"
         else:
             account.broker_type = broke_type
@@ -146,7 +150,7 @@ class TradingEngine:
         return account
 
     @property
-    def orders(self):
+    def orders(self) -> dict[str, OrderData]:
         if self.gateway is None:
             return {}
         return self.gateway.get_orders()
@@ -161,18 +165,20 @@ class TradingEngine:
         return datetime.strptime(trading_day, "%Y%m%d")
 
     @property
-    def positions(self):
+    def positions(self) -> dict[str, PositionData]:
         if self.gateway is None:
             return {}
         return self.gateway.get_positions()
 
     @property
-    def quotes(self):
+    def quotes(self) -> dict[str, TickData]:
         if self.gateway is None:
             return {}
         return self.gateway.get_quotes()
 
     def get_contract(self, symbol: str):
+        if self.gateway is None:
+            return None
         return self.gateway.get_contracts().get(symbol, None)
 
     def reload_risk_control_config(self):
@@ -345,6 +351,12 @@ class TradingEngine:
         if self.paused:
             logger.warning("交易已暂停，无法下单")
             raise Exception("交易已暂停，无法下单")
+
+        # 盘中非交易时段（小节休息/午休/闭市）拦截直接报单；
+        # OrderCmd 由状态机在 trig 中空跑挂起，不受此拦截影响
+        if not is_symbol_trading_time(symbol):
+            logger.warning(f"盘中非交易时段，拒绝直接报单: {symbol}")
+            raise Exception(f"盘中非交易时段，禁止报单: {symbol}")
 
         # 风控检查
         if not self.risk_control.check_order(volume):

@@ -43,7 +43,7 @@ data_base:
     port: 5432
     user: "postgres"
     password: "123456"
-    db: "qtrader"
+    database: "qtrader_test"
 
 # 外部数据服务
 data_service:

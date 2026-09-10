@@ -30,6 +30,7 @@ from qtrader.models.object import (
     PositionData,
     TradeData,
 )
+from qtrader.utils.trading_session import is_symbol_trading_time
 
 
 class OrderCmdStatus(str):
@@ -229,6 +230,8 @@ class OrderCmd:
         self._active_order_info: ActiveOrderInfo | None = None
         self._pending_retry_volume: int = 0  # 待重试的手数
         self._left_retry_times = 0  # 剩余重试次数
+        self._last_cancel_time: datetime | None = None  # 上次发出撤单请求时间
+        self._session_pause_started: datetime | None = None  # 非交易时段空跑起始时刻
         # 拆单策略
         self._strategy: BaseSplitStrategy | None = None
 
@@ -270,16 +273,41 @@ class OrderCmd:
         if self.is_finished:
             return None
 
-        # 1. 取消中处理
+        # 1. 取消中处理（置于非交易时段空跑之前）：
+        # "无挂单→FINISHED"是纯本地状态推进，不受非交易时段限制
+        # （收盘后挂单被交易所撤掉时指令应立即结束，而非挂到次日开盘）；
+        # 撤单请求仍受空跑限制（非交易时段发了必被交易所拒）
         if self.status == OrderCmdStatus.CANCELING:
-            # 取消中，有挂单，且可以撤单
-            if self._pending_order and self._pending_order.can_cancel():
-                return self._pending_order
-            # 取消中，无挂单
             if not self._pending_order or not self._pending_order.is_active():
                 self.status = OrderCmdStatus.FINISHED
                 self._notify_change()
+                return None
+            if (
+                is_symbol_trading_time(self.symbol, now)
+                and self._pending_order.can_cancel()
+                and self._cancel_ready(now)
+            ):
+                return self._pending_order
             return None
+
+        # 0. 盘中非交易时段（小节休息/午休/闭市）：空跑挂起
+        # 不报单不撤单（发了必被交易所拒），不消耗报单次数；
+        # 时段恢复后把休息时长从计时窗口剔除（总超时/报单间隔/撤单节流冻结），
+        # 继续执行剩余拆单
+        if not is_symbol_trading_time(self.symbol, now):
+            if self._session_pause_started is None:
+                self._session_pause_started = now
+                logger.info(f"盘中非交易时段，指令空跑等待: {self.cmd_id} {self.symbol}")
+            return None
+        if self._session_pause_started is not None:
+            paused = now - self._session_pause_started
+            if self.started_at is not None:
+                self.started_at += paused
+            if self._last_order_time is not None:
+                self._last_order_time += paused
+            if self._last_cancel_time is not None:
+                self._last_cancel_time += paused
+            self._session_pause_started = None
 
         # 2. 运行中处理
         # 检查总超时
@@ -297,8 +325,12 @@ class OrderCmd:
             insert_time = self._pending_order.insert_time
             if insert_time is not None:
                 elapsed = now - insert_time
-                # 当前报单已超时且剩余次数>0,撤单
-                if elapsed.total_seconds() >= self.order_timeout and self._left_retry_times > 0:
+                # 当前报单已超时且剩余次数>0,撤单（节流：被拒后间隔重试）
+                if (
+                    elapsed.total_seconds() >= self.order_timeout
+                    and self._left_retry_times > 0
+                    and self._cancel_ready(now)
+                ):
                     return self._pending_order
 
         # 重试处理
@@ -371,7 +403,14 @@ class OrderCmd:
             return
 
         if order.status not in [OrderStatus.FINISHED, OrderStatus.REJECTED]:
-            # 未完结报单不处理
+            # 撤单请求被拒/未生效（如非交易时段）：订单仍为活跃挂单。
+            # canceled 标志由 executor 在撤单受理时标记在本地挂单对象上，
+            # 事件回报是网关构造的新对象（canceled 恒为 False），
+            # 必须恢复本地挂单的可撤标志，否则状态机按节流间隔重试撤单而非永久卡死
+            if self._pending_order.canceled:
+                logger.warning(f"撤单未生效，恢复重试: {order.order_id} {order.status_msg}")
+                self._pending_order.canceled = False
+                self._last_cancel_time = datetime.now()
             return
 
         # 订单完成后清理
@@ -379,7 +418,7 @@ class OrderCmd:
         traded = order.traded if order.traded is not None else 0
         if traded > 0:
             # 更新报单指令
-            traded_price = order.traded_price or order.price
+            traded_price = float(order.traded_price or order.price or 0)
             total_cost = self.filled_volume * self.filled_price + traded * traded_price
             self.filled_volume += traded
             if self.filled_volume > 0:
@@ -429,6 +468,19 @@ class OrderCmd:
         self._left_retry_times = 0
         self._notify_change()
 
+    # 撤单重试最小间隔（秒）：撤单被拒后订单仍活跃，避免每轮主循环重发撤单
+    CANCEL_RETRY_INTERVAL = 3.0
+
+    def _cancel_ready(self, now: datetime) -> bool:
+        """撤单节流判断，通过时记录本次撤单时间"""
+        if (
+            self._last_cancel_time is None
+            or (now - self._last_cancel_time).total_seconds() >= self.CANCEL_RETRY_INTERVAL
+        ):
+            self._last_cancel_time = now
+            return True
+        return False
+
     def _notify_change(self) -> None:
         """通知指令状态变更"""
         logger.info(
@@ -477,6 +529,7 @@ class OrderCmd:
                 self.offset.value if isinstance(self.offset, (Direction, Offset)) else self.offset
             ),
             "volume": self.volume,
+            "price": self.price,
             "filled_volume": self.filled_volume,
             "filled_price": round(self.filled_price, 2),
             "remaining_volume": self.remaining_volume,

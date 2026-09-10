@@ -17,6 +17,7 @@
             </el-tag>
             <el-button
               v-if="!rotationStatus.working"
+              data-testid="start-rotation-btn"
               @click="handleStartRotation"
               :loading="rotating"
               type="success"
@@ -26,6 +27,7 @@
             </el-button>
             <el-button
               v-else
+              data-testid="stop-rotation-btn"
               @click="handleStopRotation"
               :loading="stopping"
               type="danger"
@@ -45,6 +47,7 @@
               删除选中
             </el-button>
             <el-button
+              data-testid="rotation-import-btn"
               @click="showImportDialog = true"
               :disabled="rotationStatus.working"
             >
@@ -61,6 +64,7 @@
 
       <div class="table-wrapper">
         <el-table
+          data-testid="rotation-instructions-table"
           :data="instructions"
           :row-class-name="tableRowClassName"
           table-layout="fixed"
@@ -109,6 +113,7 @@
           <el-table-column label="进度" :width="isMobile ? 120 : 160">
             <template #default="{ row }">
               <el-progress
+                :data-testid="`rotation-progress-${row.id}`"
                 :percentage="getProgress(row.volume, row.remaining_volume)"
                 :format="() => `${row.filled_volume}/${row.volume}`"
               />
@@ -126,12 +131,18 @@
             :min-width="isMobile ? 80 : 120"
           >
             <template #default="{ row }">
-              <span v-if="row.status === 'COMPLETED'" style="color: #67c23a"
+              <span
+                v-if="row.status === 'COMPLETED'"
+                :data-testid="`rotation-status-${row.id}`"
+                style="color: #67c23a"
                 >已完成</span
               >
-              <span v-else style="color: #f56c6c">{{
-                row.error_message || "待执行"
-              }}</span>
+              <span
+                v-else
+                :data-testid="`rotation-status-${row.id}`"
+                style="color: #f56c6c"
+                >{{ row.error_message || "待执行" }}</span
+              >
             </template>
           </el-table-column>
           <el-table-column
@@ -165,6 +176,7 @@
               <el-button
                 type="primary"
                 :size="isMobile ? 'small' : 'small'"
+                :data-testid="`rotation-edit-btn-${row.id}`"
                 @click="openEditDialog(row)"
                 :disabled="rotationStatus.working"
               >
@@ -306,7 +318,7 @@
           />
         </el-form-item>
         <el-form-item label="合约代码">
-          <el-input v-model="form.symbol" placeholder="如: rb2505" />
+          <el-input v-model="form.symbol" :placeholder="symbolPlaceholder" />
         </el-form-item>
         <el-form-item label="交易所代码">
           <el-input v-model="form.exchange_id" placeholder="如: SHFE" />
@@ -387,7 +399,12 @@
       </el-form>
       <template #footer>
         <el-button @click="showEditDialog = false">取消</el-button>
-        <el-button type="primary" @click="handleEdit" :loading="editing">
+        <el-button
+          type="primary"
+          data-testid="rotation-edit-save-btn"
+          @click="handleEdit"
+          :loading="editing"
+        >
           保存
         </el-button>
       </template>
@@ -836,10 +853,16 @@ watch(
   },
 );
 
+// 合约输入框占位提示：后端最新螺纹钢主力（如 rb2701）
+const symbolPlaceholder = ref("如: rb2505");
+
 onMounted(() => {
   updateIsMobile();
   window.addEventListener("resize", updateIsMobile);
   loadData();
+  store.loadMainSymbol().then((s) => {
+    if (s) symbolPlaceholder.value = `如: ${s}`;
+  });
 });
 
 onUnmounted(() => {

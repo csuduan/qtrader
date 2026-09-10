@@ -31,19 +31,19 @@
         </el-descriptions-item>
 
         <el-descriptions-item label="持仓盈亏">
-          <span :class="store.currentAccount.position_profit >= 0 ? 'profit' : 'loss'">
+          <span :class="(store.currentAccount.position_profit ?? 0) >= 0 ? 'profit' : 'loss'">
             ¥{{ formatNumber(store.currentAccount.position_profit) }}
           </span>
         </el-descriptions-item>
         <el-descriptions-item label="平仓盈亏">
-          <span :class="store.currentAccount.close_profit >= 0 ? 'profit' : 'loss'">
+          <span :class="(store.currentAccount.close_profit ?? 0) >= 0 ? 'profit' : 'loss'">
             ¥{{ formatNumber(store.currentAccount.close_profit) }}
           </span>
         </el-descriptions-item>
         <el-descriptions-item label="保证金占用">
           ¥{{ formatNumber(store.currentAccount.margin) }}
-           <el-tag :type="store.currentAccount.risk_ratio > 1 ? 'danger' : 'success'">
-            {{ formatNumber(store.currentAccount.risk_ratio*100) }}%
+           <el-tag :type="(store.currentAccount.risk_ratio ?? 0) > 1 ? 'danger' : 'success'">
+            {{ formatNumber((store.currentAccount.risk_ratio ?? 0)*100) }}%
           </el-tag>
         </el-descriptions-item>
         <el-descriptions-item label="更新时间">{{ formatDateTime(store.currentAccount.updated_at) }}</el-descriptions-item>
@@ -73,6 +73,7 @@
       <div class="table-wrapper">
         <el-table
           :data="store.currentPositions"
+          data-testid="positions-table"
           stripe
           v-loading="loading"
           table-layout="fixed"

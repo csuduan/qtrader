@@ -84,15 +84,15 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         # 1. 公开接口直接放行
         if self._is_public_path(path):
-            return await call_next(request)
+            return await call_next(request)  # type: ignore[no-any-return]
 
         # 2. 只处理API请求（以/api开头的路径）
         if not path.startswith("/api"):
-            return await call_next(request)
+            return await call_next(request)  # type: ignore[no-any-return]
 
         # 3. WebSocket请求不在这里处理（由WebSocket自己处理）
         if path == "/ws":
-            return await call_next(request)
+            return await call_next(request)  # type: ignore[no-any-return]
 
         # 4. 获取并验证Token
         auth_header = request.headers.get("Authorization")
@@ -161,4 +161,5 @@ class AuthMiddleware(BaseHTTPMiddleware):
             )
 
         # 继续处理请求
-        return await call_next(request)
+        response: Response = await call_next(request)
+        return response

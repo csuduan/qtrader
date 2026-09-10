@@ -86,7 +86,7 @@ class TestSaveSettlement:
     def test_save_settlement(self, dao, sample_account):
         """测试保存结算权益快照"""
         settle_date = date(2026, 7, 24)
-        dao.save_settlement("TEST", settle_date, sample_account)
+        dao.save_settlement_snapshot("TEST", settle_date, sample_account, {})
 
         records = dao.query_settlements(None, settle_date, settle_date)
         assert len(records) == 1
@@ -101,10 +101,10 @@ class TestSaveSettlement:
     def test_save_settlement_upsert_same_day(self, dao, sample_account):
         """测试同日重复保存覆盖旧记录"""
         settle_date = date(2026, 7, 24)
-        dao.save_settlement("TEST", settle_date, sample_account)
+        dao.save_settlement_snapshot("TEST", settle_date, sample_account, {})
 
         sample_account.balance = 1010000.0
-        dao.save_settlement("TEST", settle_date, sample_account)
+        dao.save_settlement_snapshot("TEST", settle_date, sample_account, {})
 
         records = dao.query_settlements(None, settle_date, settle_date)
         assert len(records) == 1
@@ -114,7 +114,7 @@ class TestSaveSettlement:
         """测试 TQ 网关账户（无出入金字段）保存"""
         account = AccountData(account_id="TQ", balance=500000.0, available=400000.0)
         settle_date = date(2026, 7, 24)
-        dao.save_settlement("TQ", settle_date, account)
+        dao.save_settlement_snapshot("TQ", settle_date, account, {})
 
         records = dao.query_settlements(None, settle_date, settle_date)
         assert len(records) == 1
@@ -128,10 +128,9 @@ class TestSavePositions:
     def test_save_positions(self, dao, sample_positions):
         """测试保存持仓快照，空仓被过滤"""
         settle_date = date(2026, 7, 24)
-        dao.save_positions("TEST", settle_date, sample_positions)
-
-        records = dao.query_settlements(None, settle_date, settle_date)
-        assert len(records) == 0  # 持仓保存不影响权益表
+        dao.save_settlement_snapshot(
+            "TEST", settle_date, AccountData(account_id="TEST", balance=0.0), sample_positions
+        )
 
         from qtrader.models.po import PositionHistoryPo
         from qtrader.utils.database import session_scope
@@ -154,11 +153,13 @@ class TestSavePositions:
     def test_save_positions_overwrite_same_day(self, dao, sample_positions):
         """测试同日重复保存先删旧记录"""
         settle_date = date(2026, 7, 24)
-        dao.save_positions("TEST", settle_date, sample_positions)
+        dao.save_settlement_snapshot(
+            "TEST", settle_date, AccountData(account_id="TEST", balance=0.0), sample_positions
+        )
 
         # 第二次只保存一个持仓
         new_positions = {"rb2505": sample_positions["rb2505"]}
-        dao.save_positions("TEST", settle_date, new_positions)
+        dao.save_settlement_snapshot("TEST", settle_date, AccountData(account_id="TEST", balance=0.0), new_positions)
 
         from qtrader.models.po import PositionHistoryPo
         from qtrader.utils.database import session_scope
@@ -172,6 +173,19 @@ class TestSavePositions:
         assert len(positions) == 1
         assert positions[0].symbol == "rb2505"
 
+    def test_snapshot_is_atomic(self, dao, sample_account, sample_positions):
+        """权益与持仓在同一事务写入，持仓写入异常时权益也不落库"""
+        settle_date = date(2026, 7, 24)
+        bad_positions = dict(sample_positions)
+        bad_positions["bad"] = None  # 触发属性访问异常
+
+        with pytest.raises(AttributeError):
+            dao.save_settlement_snapshot("TEST", settle_date, sample_account, bad_positions)
+
+        # 权益快照也应回滚
+        records = dao.query_settlements(None, settle_date, settle_date)
+        assert records == []
+
 
 class TestQuerySettlements:
     """结算权益查询测试"""
@@ -182,8 +196,8 @@ class TestQuerySettlements:
         for i in range(5):
             day = date(2026, 7, 20 + i)
             sample_account.balance = 1000000.0 + i * 1000
-            dao.save_settlement("TEST", day, sample_account)
-            dao.save_settlement("OTHER", day, sample_account)
+            dao.save_settlement_snapshot("TEST", day, sample_account, {})
+            dao.save_settlement_snapshot("OTHER", day, sample_account, {})
 
         # 查询全部账户整周
         records = dao.query_settlements(None, monday, date(2026, 7, 24))
@@ -210,19 +224,22 @@ class TestBuildReportHtml:
 
         monday = date(2026, 7, 20)
         friday = date(2026, 7, 24)
-        dao.save_settlement("AAA", monday, sample_account)
-        dao.save_settlement("AAA", friday, sample_account)
-        dao.save_settlement("BBB", friday, sample_account)
+        dao.save_settlement_snapshot("AAA", monday, sample_account, {})
+        dao.save_settlement_snapshot("AAA", friday, sample_account, {})
+        dao.save_settlement_snapshot("BBB", friday, sample_account, {})
 
         records = dao.query_settlements(None, monday, friday)
-        html = _build_settlement_report_html(records, monday, friday)
+        html = _build_settlement_report_html(records, friday)
 
-        assert "账户：AAA" in html
-        assert "账户：BBB" in html
-        assert html.count("<table") == 2
+        # 新版语义：全部账户合并一张表，每账户取最新一日数据
+        assert ">AAA<" in html
+        assert ">BBB<" in html
+        assert html.count("<table") == 1
         assert "1,005,000.00" in html  # balance 格式化
         assert "5,000.00" in html  # deposit 格式化
         assert "结算权益" in html
+        # AAA 有两条记录（周一/周五），仅取周五一条
+        assert html.count(">AAA<") == 1
 
     def test_build_report_html_none_fields(self, dao):
         """测试无出入金的账户在 HTML 中显示为 -"""
@@ -230,10 +247,10 @@ class TestBuildReportHtml:
 
         monday = date(2026, 7, 20)
         account = AccountData(account_id="TQ", balance=500000.0, available=400000.0)
-        dao.save_settlement("TQ", monday, account)
+        dao.save_settlement_snapshot("TQ", monday, account, {})
 
         records = dao.query_settlements(None, monday, monday)
-        html = _build_settlement_report_html(records, monday, monday)
+        html = _build_settlement_report_html(records, monday)
 
-        assert "账户：TQ" in html
-        assert "<td" in html and ">-" in html  # None 字段显示为 -
+        assert ">TQ<" in html
+        assert ">-</td>" in html  # None 字段显示为 -

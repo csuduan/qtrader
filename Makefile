@@ -1,28 +1,36 @@
 # qrader Makefile
 # 常用命令快捷方式
 
-.PHONY: help test test-unit test-api test-e2e test-all test-coverage clean lint format
+.PHONY: help test test-mypy test-unit test-integration test-api test-e2e test-all test-coverage clean lint format
 
 help:  ## 显示帮助信息
 	@echo "qrader 开发命令："
 	@echo ""
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
 
-test-unit:  ## 运行单元测试
-	pytest tests/unit/ -v
+test-mypy:  ## 运行静态类型检查
+	uv run python -m mypy src/ --show-error-codes --ignore-missing-imports
 
-test-api:  ## 运行API集成测试（需先启动后端）
-	pytest tests/integration/ -v
+test-unit:  ## 运行单元测试（第1层）
+	uv run pytest tests/unit/ -v
 
-test-e2e:  ## 运行E2E测试（需先启动前后端）
-	pytest tests/e2e/ -v --headed
+test-integration:  ## 运行集成测试（第2层：模块联动，mock 交易接口；真实库用例需设置 QTRADER_TEST_DB_URL）
+	uv run pytest tests/integration/ -v
 
-test-all:  ## 运行所有测试（按顺序）
+test-api:  ## 运行API测试（第3层：真实后端，最小化 mock；需先启动 Manager + DQ Trader，设置 E2E_USERNAME/E2E_PASSWORD）
+	uv run pytest tests/api/ -v
+
+test-e2e:  ## 运行E2E测试（第4层：Playwright 前后端联调；冒烟模式需先启动前端 dev server，真实模式设置 E2E_USERNAME/E2E_PASSWORD）
+	uv run pytest tests/e2e/ -v --headed
+
+test-all:  ## 运行自动化测试全链路（mypy → unit → integration；api/e2e 依赖真实后端与前端，单独执行）
 	@echo "运行完整测试套件..."
-	python run_tests.py
+	uv run python -m mypy src/ --show-error-codes --ignore-missing-imports
+	uv run pytest tests/unit/ -v
+	uv run pytest tests/integration/ -v
 
-test-coverage:  ## 生成测试覆盖率报告
-	pytest tests/ --cov=qtrader --cov-report=html
+test-coverage:  ## 生成测试覆盖率报告（单元测试层）
+	uv run pytest tests/unit/ --cov=src/qtrader --cov-report=html
 	@echo "覆盖率报告: htmlcov/index.html"
 
 clean:  ## 清理测试生成的文件
@@ -35,14 +43,14 @@ clean:  ## 清理测试生成的文件
 	rm -rf .playwright/
 
 lint:  ## 运行代码检查
-	black src/qtrader/ --line-length 100 --target py312 --check
-	isort src/qtrader/ --profile black --check
-	mypy src/qtrader/
+	uv run black src/qtrader/ --line-length 100 --target-version py312 --check
+	uv run isort src/qtrader/ --profile black --check
+	uv run mypy src/qtrader/
 
 format:  ## 格式化代码
-	black src/qtrader/ --line-length 100 --target py312
-	isort src/qtrader/ --profile black
+	uv run black src/qtrader/ --line-length 100 --target py312
+	uv run isort src/qtrader/ --profile black
 
 
 install:  ## 安装项目
-	uv pip install -e .
+	uv sync --group dev

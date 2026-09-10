@@ -357,6 +357,26 @@ class ConfigLoader:
         """
         self.config_dir = Path(config_dir)
         self.app_config: AppConfig | None = None
+        # 配置文件写操作锁（多线程/事件循环混合环境下串行化写入）
+        self._write_lock = threading.Lock()
+
+    def atomic_write_text(self, config_path: Path, text: str) -> None:
+        """
+        原子写入配置文件：先写临时文件再 os.replace，避免写一半进程被杀导致配置损坏
+
+        所有 config 写操作必须经此方法 + self._write_lock 串行化。
+
+        Args:
+            config_path: 目标配置文件路径
+            text: 写入内容
+        """
+        with self._write_lock:
+            tmp_path = config_path.with_suffix(config_path.suffix + ".tmp")
+            try:
+                tmp_path.write_text(text, encoding="utf-8")
+                os.replace(tmp_path, config_path)
+            finally:
+                tmp_path.unlink(missing_ok=True)
 
     def load_config(self) -> AppConfig:
         """加载所有配置（包括动态扫描账户配置）"""
@@ -480,7 +500,7 @@ class ConfigLoader:
                 text += "\n"
             text += f"{new_line}\n"
 
-        config_path.write_text(text, encoding="utf-8")
+        self.atomic_write_text(config_path, text)
 
     def update_account_ids(self, account_ids: list[str]) -> None:
         """
@@ -510,7 +530,7 @@ class ConfigLoader:
                 text += "\n"
             text += block
 
-        config_path.write_text(text, encoding="utf-8")
+        self.atomic_write_text(config_path, text)
         if self.app_config is not None:
             self.app_config.account_ids = list(account_ids)
 

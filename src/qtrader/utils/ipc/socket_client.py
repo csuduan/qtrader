@@ -15,6 +15,7 @@ from typing import Any, Awaitable, Callable
 
 from qtrader.utils.ipc.protocol import (
     MessageBody,
+    RemoteHandlerError,
     MessageProtocol,
     MessageType,
     create_heartbeat,
@@ -252,6 +253,11 @@ class SocketClient:
             logger.info(f"收到响应: {request_type} {request_id}")
             return response_data
 
+        except RemoteHandlerError:
+            # 对端处理器失败：异常消息为真实失败原因，上抛给调用方
+            # （如"盘中非交易时段，禁止报单"），不再吞为 None
+            self._pending_requests.pop(request_id, None)
+            raise
         except asyncio.TimeoutError:
             logger.warning(f"请求超时: {request_type}")
             self._pending_requests.pop(request_id, None)
@@ -307,7 +313,7 @@ class SocketClient:
             future = self._pending_requests.pop(request_id, None)
             if future and not future.done():
                 if message.error:
-                    future.set_exception(Exception(message.error))
+                    future.set_exception(RemoteHandlerError(message.error))
                 else:
                     future.set_result(message.data)
             return

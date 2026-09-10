@@ -1,5 +1,5 @@
+from datetime import date, datetime
 
-from datetime import datetime, date
 
 def datetime_handler(obj):
     if isinstance(obj, datetime):

@@ -7,9 +7,13 @@ import asyncio
 from collections import deque
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from qtrader.app_context import AppContext, get_app_context
+
+if TYPE_CHECKING:
+    from qtrader.manager.data_feed import ManagerDataFeed
+
 from qtrader.manager.public_data_service import PublicDataService
 from qtrader.manager.service.alarm_service import AlarmService
 from qtrader.manager.trader_proxy import TraderProxy
@@ -83,7 +87,7 @@ class TradingManager:
         self.public_data_service: PublicDataService | None = None
 
         # 数据服务（data-only TqApi 订阅K线落库，将在 start() 中初始化）
-        self.data_feed = None
+        self.data_feed: "ManagerDataFeed | None" = None
 
         # 告警服务
         self.alarm_service: AlarmService | None = None
@@ -1039,6 +1043,9 @@ class TradingManager:
 
             # 使用 PostgreSQL 数据库
             db_config = app_config.data_base
+            if db_config is None:
+                logger.warning("数据库配置缺失，公共数据服务未初始化")
+                return
             db_url = build_db_url(db_config)
             self._shared_db = init_shared_database(
                 db_url,
@@ -1102,6 +1109,8 @@ class TradingManager:
                 contract["min_open_volume"] = min_order_map_upper.get(raw_symbol.upper(), 1)
 
             # 4. 写入共享库（批量 upsert，放线程避免阻塞事件循环）
+            if self.public_data_service is None:
+                return
             count = await asyncio.to_thread(
                 self.public_data_service.upsert_contracts, contracts, "tq"
             )
@@ -1129,7 +1138,7 @@ class TradingManager:
         data_service = getattr(app_config, "data_service", None)
         if not data_service or not isinstance(data_service, dict):
             return None
-        config = data_service.get(key)
+        config: dict | None = data_service.get(key)
         if config and config.get("username"):
             return config
         return None

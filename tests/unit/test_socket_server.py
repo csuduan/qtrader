@@ -1,733 +1,420 @@
 """
 SocketServer 单元测试
-测试 SocketServer 类的所有方法和功能
+
+覆盖当前 V2 服务器：初始化统计、处理器注册（手动与 @request 装饰器）、
+消息处理（心跳/请求/错误响应）、无客户端时的推送缓冲队列、
+连接管理，以及基于真实 Unix Socket 回环的端到端验证。
 """
 
 import asyncio
-import json
-import struct
+import tempfile
 from pathlib import Path
-from typing import Any, Dict
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
+import pytest_asyncio
 
-from qtrader.trader.socket_server import SocketServer, request
-
-
-# ==================== Fixtures ====================
-
-
-@pytest.fixture
-def socket_path(tmp_path):
-    """临时socket文件路径"""
-    return str(tmp_path / "test.sock")
-
-
-@pytest.fixture
-def account_id():
-    """测试账户ID"""
-    return "test_account_001"
+from qtrader.utils.ipc.protocol import (
+    MessageBody,
+    MessageType,
+    create_heartbeat,
+    create_request,
+)
+from qtrader.utils.ipc.socket_client import SocketClient
+from qtrader.utils.ipc.socket_server import SocketClientConnection, SocketServer, request
 
 
 @pytest.fixture
-def socket_server(socket_path, account_id):
-    """创建 SocketServer 实例"""
-    return SocketServer(socket_path, account_id)
+def server() -> SocketServer:
+    return SocketServer("/tmp/qt_test_dummy.sock", "TEST", enable_health_check=False)
 
 
-@pytest.fixture
-def mock_reader():
-    """模拟StreamReader"""
-    return MagicMock()
+def make_conn(conn_id: str = "c1") -> MagicMock:
+    """构造 mock 客户端连接"""
+    conn = MagicMock()
+    conn.conn_id = conn_id
+    conn.is_connected.return_value = True
+    conn.update_heartbeat = MagicMock()
+    conn.send_message = AsyncMock(return_value=True)
+    conn.close = AsyncMock()
+    return conn
 
 
-@pytest.fixture
-def mock_writer():
-    """模拟StreamWriter"""
-    writer = MagicMock()
-    writer.write = MagicMock()
-    writer.drain = AsyncMock()
-    writer.close = MagicMock()
-    writer.wait_closed = AsyncMock()
-    return writer
-
-
-# ==================== Test Request Decorator ====================
-
-
-class TestRequestDecorator:
-    """测试 @request 装饰器"""
-
-    def test_request_decorator_sync_function(self):
-        """测试装饰同步函数"""
-        @request("test_type")
-        def handle_test(data: dict) -> str:
-            return "test_result"
-
-        assert hasattr(handle_test, "_message_type")
-        assert handle_test._message_type == "test_type"
-        assert hasattr(handle_test, "_handler_func")
-
-    def test_request_decorator_async_function(self):
-        """测试装饰异步函数"""
-        @request("async_type")
-        async def handle_async(data: dict) -> str:
-            return "async_result"
-
-        assert hasattr(handle_async, "_message_type")
-        assert handle_async._message_type == "async_type"
-
-    @pytest.mark.asyncio
-    async def test_request_decorator_call_sync(self):
-        """测试调用同步包装函数"""
-        @request("test_type")
-        def handle_test(data: dict) -> str:
-            return "test_result"
-
-        result = await handle_test({"key": "value"})
-        assert result == "test_result"
-
-    @pytest.mark.asyncio
-    async def test_request_decorator_call_async(self):
-        """测试调用异步包装函数"""
-        @request("test_type")
-        async def handle_async(data: dict) -> str:
-            return "async_result"
-
-        result = await handle_async({"key": "value"})
-        assert result == "async_result"
-
-    @pytest.mark.asyncio
-    async def test_request_decorator_exception_handling(self):
-        """测试装饰器异常处理"""
-        @request("error_type")
-        def handle_error(data: dict) -> str:
-            raise ValueError("Test error")
-
-        with pytest.raises(ValueError, match="Test error"):
-            await handle_error({})
-
-
-# ==================== Test Initialization ====================
-
-
+@pytest.mark.unit
 class TestSocketServerInit:
-    """测试 __init__ 方法"""
+    """初始化"""
 
-    def test_init(self, socket_server, socket_path, account_id):
-        """测试初始化"""
-        assert socket_server.socket_path == socket_path
-        assert socket_server.account_id == account_id
-        assert socket_server.server is None
-        assert socket_server.client_writer is None
-        assert socket_server.client_connected is False
-        assert socket_server._req_handlers == {}
+    def test_init_state(self, server):
+        assert server.account_id == "TEST"
+        assert server._clients == {}
+        assert server._req_handlers == {}
+        assert server._running is False
+        assert server.is_connected() is False
+        assert server.get_connection_count() == 0
+
+    def test_get_stats_initial(self, server):
+        stats = server.get_stats()
+        assert stats["total_connections"] == 0
+        assert stats["messages_received"] == 0
+        assert stats["messages_sent"] == 0
+        assert stats["errors"] == 0
+        assert stats["active_connections"] == 0
+        assert stats["push_queue_size"] == 0
 
 
-# ==================== Test Handler Registration ====================
+@pytest.mark.unit
+class TestHandlerRegistration:
+    """处理器注册"""
+
+    def test_register_handler(self, server):
+        server.register_handler("order_req", lambda data: True)
+        assert "order_req" in server._req_handlers
+
+    def test_register_handlers_from_instance(self, server):
+        class Handlers:
+            @request("connect")
+            async def _req_connect(self, data):
+                return True
+
+            @request("order_req")
+            async def _req_order(self, data):
+                return "id"
+
+            async def not_a_handler(self, data):
+                return None
+
+        server.register_handlers_from_instance(Handlers())
+
+        assert set(server._req_handlers.keys()) == {"connect", "order_req"}
 
 
-class TestSocketServerHandlerRegistration:
-    """测试处理器注册"""
+@pytest.mark.unit
+class TestProcessMessage:
+    """消息处理（mock 连接）"""
 
-    def test_register_handler(self, socket_server):
-        """测试手动注册处理器"""
-        async def test_handler(data: dict) -> str:
-            return "test"
+    @pytest.mark.asyncio
+    async def test_heartbeat_updates_and_replies(self, server):
+        conn = make_conn()
+        await server._process_message(conn, create_heartbeat())
 
-        socket_server.register_handler("test_type", test_handler)
+        conn.update_heartbeat.assert_called_once()
+        conn.send_message.assert_awaited_once()
+        reply = conn.send_message.call_args[0][0]
+        assert reply.msg_type == MessageType.HEARTBEAT
 
-        assert "test_type" in socket_server._req_handlers
-        assert socket_server._req_handlers["test_type"] == test_handler
+    @pytest.mark.asyncio
+    async def test_request_sync_handler(self, server):
+        handler = MagicMock(return_value={"ok": 1})
+        server.register_handler("query", handler)
+        conn = make_conn()
 
-    def test_register_handlers_from_instance(self, socket_server):
-        """测试从实例自动注册处理器"""
-        class TestHandlers:
-            @request("req1")
-            async def _req_handler1(self, data: dict) -> str:
-                return "handler1"
+        message = create_request({"type": "query", "data": {"k": 1}}, "req_1")
+        await server._process_message(conn, message)
 
-            @request("req2")
-            async def _req_handler2(self, data: dict) -> str:
-                return "handler2"
+        handler.assert_called_once_with({"k": 1})
+        response = conn.send_message.call_args[0][0]
+        assert response.msg_type == MessageType.RESPONSE
+        assert response.request_id == "req_1"
+        assert response.data == {"ok": 1}
+        assert response.error is None
 
-            def not_a_handler(self):
-                """不是处理器"""
+    @pytest.mark.asyncio
+    async def test_request_async_handler(self, server):
+        async def async_handler(data):
+            return {"async": True}
+
+        server.register_handler("aquery", async_handler)
+        conn = make_conn()
+
+        await server._process_message(conn, create_request({"type": "aquery", "data": {}}, "r2"))
+
+        response = conn.send_message.call_args[0][0]
+        assert response.data == {"async": True}
+
+    @pytest.mark.asyncio
+    async def test_unknown_request_returns_error(self, server):
+        conn = make_conn()
+
+        await server._process_message(conn, create_request({"type": "nope", "data": {}}, "r3"))
+
+        response = conn.send_message.call_args[0][0]
+        assert response.error == "Unknown request type"
+
+    @pytest.mark.asyncio
+    async def test_handler_exception_returns_error(self, server):
+        def bad_handler(data):
+            raise RuntimeError("boom")
+
+        server.register_handler("bad", bad_handler)
+        conn = make_conn()
+
+        await server._process_message(conn, create_request({"type": "bad", "data": {}}, "r4"))
+
+        response = conn.send_message.call_args[0][0]
+        # IPC 为内部信任通道：异常类型与消息回传 Manager，前端才能看到真实失败原因
+        assert response.error == "RuntimeError: boom"
+
+    @pytest.mark.asyncio
+    async def test_sync_handler_runs_in_thread(self, server):
+        """同步 handler 应通过 to_thread 在工作线程执行，不占用事件循环线程"""
+        import threading
+
+        loop_thread = threading.get_ident()
+        seen = {}
+
+        def slow_handler(data):
+            seen["thread"] = threading.get_ident()
+            return {"ok": True}
+
+        server.register_handler("slow", slow_handler)
+        conn = make_conn()
+
+        await server._process_message(conn, create_request({"type": "slow", "data": {}}, "r5"))
+
+        response = conn.send_message.call_args[0][0]
+        assert response.data == {"ok": True}
+        assert seen["thread"] != loop_thread  # 在工作线程而非事件循环线程执行
+
+    @pytest.mark.asyncio
+    async def test_push_message_not_processed(self, server):
+        conn = make_conn()
+        message = MessageBody(
+            msg_type=MessageType.PUSH, request_id="", data={"type": "x", "data": {}}
+        )
+
+        await server._process_message(conn, message)  # 仅记录，不响应
+
+        conn.send_message.assert_not_awaited()
+
+
+@pytest.mark.unit
+class TestSendWithoutClients:
+    """无客户端时的发送与缓冲"""
+
+    @pytest.mark.asyncio
+    async def test_send_message_no_clients(self, server):
+        assert await server.send_message(create_heartbeat()) is False
+
+    @pytest.mark.asyncio
+    async def test_send_push_no_clients_buffered(self, server):
+        assert await server.send_push("account", {"balance": 1}) is False
+        assert server.get_stats()["push_queue_size"] == 1
+
+    @pytest.mark.asyncio
+    async def test_send_push_no_clients_not_buffered(self, server):
+        assert await server.send_push("tick_batch", {"ticks": []}) is False
+        assert server.get_stats()["push_queue_size"] == 0
+
+    @pytest.mark.asyncio
+    async def test_push_queue_bounded(self, server):
+        # 超过上限后旧消息被挤出，队列长度不超过上限
+        for i in range(SocketServer.PUSH_QUEUE_MAX_SIZE + 50):
+            await server.send_push("account", {"i": i})
+        assert len(server._push_queue) == SocketServer.PUSH_QUEUE_MAX_SIZE
+
+    @pytest.mark.asyncio
+    async def test_send_heartbeat_no_clients(self, server):
+        assert await server.send_heartbeat() is False
+
+
+@pytest.mark.unit
+class TestConnectionLifecycle:
+    """连接移除"""
+
+    @pytest.mark.asyncio
+    async def test_remove_client_connection(self, server):
+        conn = make_conn()
+        server._clients["c1"] = conn
+
+        await server._remove_client_connection("c1")
+
+        assert "c1" not in server._clients
+        conn.close.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_remove_unknown_connection_no_error(self, server):
+        await server._remove_client_connection("ghost")
+
+
+@pytest.mark.unit
+class TestClientConnectionUnit:
+    """SocketClientConnection 单元行为（真实连接）"""
+
+    @pytest_asyncio.fixture
+    async def conn_pair(self):
+        with tempfile.TemporaryDirectory(prefix="qt_conn_") as short_dir:
+            socket_path = str(Path(short_dir) / "c.sock")
+            server = SocketServer(socket_path, "TEST", enable_health_check=False)
+            server_task = asyncio.create_task(server.start())
+            for _ in range(100):
+                await asyncio.sleep(0.02)
+                if Path(socket_path).exists():
+                    break
+
+            client = SocketClient(socket_path, "MGR")
+            assert await client.connect(max_retries=5, retry_interval=0.05) is True
+            for _ in range(50):
+                await asyncio.sleep(0.02)
+                if server._clients:
+                    break
+
+            conn = next(iter(server._clients.values()))
+            yield server, conn, client
+
+            await client.disconnect()
+            await server.stop()
+            server_task.cancel()
+            try:
+                await server_task
+            except asyncio.CancelledError:
                 pass
 
-        instance = TestHandlers()
-        socket_server.register_handlers_from_instance(instance)
+    @pytest.mark.asyncio
+    async def test_connection_registered(self, conn_pair):
+        server, conn, client = conn_pair
+        assert isinstance(conn, SocketClientConnection)
+        assert conn.is_connected() is True
+        assert server.get_connection_count() == 1
+        assert server.is_connected() is True
 
-        assert "req1" in socket_server._req_handlers
-        assert "req2" in socket_server._req_handlers
+    @pytest.mark.asyncio
+    async def test_uptime_and_heartbeat(self, conn_pair):
+        server, conn, client = conn_pair
+        assert 0 <= conn.get_uptime() < 5
+        assert 0 <= conn.get_time_since_last_heartbeat() < 5
 
-    def test_register_handlers_skips_private_methods(self, socket_server):
-        """测试跳过非_req_开头的私有方法"""
-        class TestHandlers:
-            def _private_method(self):
+        conn._last_heartbeat_time -= 10
+        assert conn.get_time_since_last_heartbeat() >= 10
+        conn.update_heartbeat()
+        assert conn.get_time_since_last_heartbeat() < 1
+
+    @pytest.mark.asyncio
+    async def test_close_marks_disconnected(self, conn_pair):
+        server, conn, client = conn_pair
+        await conn.close()
+        assert conn.is_connected() is False
+
+    @pytest.mark.asyncio
+    async def test_stats_count_connection(self, conn_pair):
+        server, conn, client = conn_pair
+        assert server.get_stats()["total_connections"] == 1
+
+
+@pytest.mark.unit
+class TestLoopback:
+    """回环端到端（真实 Unix Socket）"""
+
+    @pytest_asyncio.fixture
+    async def pair(self):
+        with tempfile.TemporaryDirectory(prefix="qt_srv_") as short_dir:
+            socket_path = str(Path(short_dir) / "s.sock")
+            server = SocketServer(socket_path, "TEST", enable_health_check=False)
+            server.register_handler("echo", lambda data: {"echo": data})
+            server_task = asyncio.create_task(server.start())
+            for _ in range(100):
+                await asyncio.sleep(0.02)
+                if Path(socket_path).exists():
+                    break
+            server._test_task = server_task
+            yield server, socket_path
+            await server.stop()  # 先关闭客户端连接，否则 wait_closed 挂起
+            server._test_task.cancel()
+            try:
+                await server._test_task
+            except asyncio.CancelledError:
                 pass
 
-            @request("public_req")
-            async def _req_handler(self, data: dict) -> str:
-                return "handler"
-
-        instance = TestHandlers()
-        socket_server.register_handlers_from_instance(instance)
-
-        assert "public_req" in socket_server._req_handlers
-        assert "_private_method" not in socket_server._req_handlers
-
-
-# ==================== Test Start/Stop ====================
-
-
-class TestSocketServerStartStop:
-    """测试启动和停止"""
+    async def _wait_for(self, cond, attempts: int = 50, interval: float = 0.02):
+        """轮询等待条件成立"""
+        for _ in range(attempts):
+            await asyncio.sleep(interval)
+            if cond():
+                return True
+        return False
 
     @pytest.mark.asyncio
-    async def test_start_creates_socket_file(self, socket_server, tmp_path):
-        """测试启动创建socket文件"""
-        socket_path = tmp_path / "test.sock"
-        socket_server.socket_path = str(socket_path)
+    async def test_handler_exception_error_propagates_to_client(self, pair):
+        """回环验证：handler 异常的真实原因经 IPC 完整传到客户端（Manager）"""
+        server, socket_path = pair
+        server.register_handler(
+            "boom", lambda data: (_ for _ in ()).throw(RuntimeError("账户资金不足"))
+        )
+        client = SocketClient(socket_path, "MGR")
+        assert await client.connect(max_retries=5, retry_interval=0.05) is True
+        assert await self._wait_for(lambda: server.get_connection_count() == 1)
 
-        with patch("asyncio.start_unix_server") as mock_start:
-            mock_server = AsyncMock()
-            mock_server.close = MagicMock()
-            mock_start.return_value = mock_server
-
-            await socket_server.start()
-
-            assert socket_server.server == mock_server
-
-    @pytest.mark.asyncio
-    async def test_start_deletes_existing_socket(self, socket_server, tmp_path):
-        """测试启动时删除已存在的socket文件"""
-        socket_path = tmp_path / "test.sock"
-        socket_path.touch()  # 创建已存在的文件
-        socket_server.socket_path = str(socket_path)
-
-        with patch("asyncio.start_unix_server") as mock_start:
-            mock_server = AsyncMock()
-            mock_start.return_value = mock_server
-
-            await socket_server.start()
-
-            # 文件应该被删除
-            assert not socket_path.exists()
+        with pytest.raises(Exception, match="账户资金不足"):
+            await client.request("boom", {}, timeout=5.0)
+        await client.disconnect()
 
     @pytest.mark.asyncio
-    async def test_start_socket_dir_not_exists(self, socket_server, tmp_path):
-        """测试socket目录不存在时创建"""
-        socket_path = tmp_path / "subdir" / "test.sock"
-        socket_server.socket_path = str(socket_path)
+    async def test_push_with_connected_client(self, pair):
+        server, socket_path = pair
+        client = SocketClient(socket_path, "MGR")
+        received = []
+        client.on_data_callback = lambda t, d: received.append((t, d))
+        assert await client.connect(max_retries=5, retry_interval=0.05) is True
+        # 等待服务端完成连接注册，避免与 _handle_client 协程调度竞争
+        assert await self._wait_for(lambda: server.get_connection_count() == 1)
 
-        with patch("asyncio.start_unix_server") as mock_start:
-            mock_server = AsyncMock()
-            mock_start.return_value = mock_server
-
-            await socket_server.start()
-
-            # 目录应该被创建
-            assert socket_path.parent.exists()
-
-    @pytest.mark.asyncio
-    async def test_stop(self, socket_server):
-        """测试停止服务器"""
-        mock_server = MagicMock()
-        mock_server.close = MagicMock()
-        mock_server.wait_closed = AsyncMock()
-        socket_server.server = mock_server
-
-        await socket_server.stop()
-
-        mock_server.close.assert_called_once()
+        assert await server.send_push("account", {"balance": 9}) is True
+        assert await self._wait_for(lambda: bool(received))
+        assert received == [("account", {"balance": 9})]
+        await client.disconnect()
 
     @pytest.mark.asyncio
-    async def test_stop_with_client_connection(self, socket_server, mock_writer):
-        """测试停止时关闭客户端连接"""
-        mock_server = MagicMock()
-        mock_server.close = MagicMock()
-        mock_server.wait_closed = AsyncMock()
-        socket_server.server = mock_server
-        socket_server.client_writer = mock_writer
-        socket_server.client_connected = True
+    async def test_buffered_push_flushed_on_reconnect(self, pair):
+        server, socket_path = pair
 
-        await socket_server.stop()
+        # 客户端未连接：account 推送进入缓冲队列
+        await server.send_push("account", {"balance": 42})
+        assert server.get_stats()["push_queue_size"] == 1
 
-        mock_writer.close.assert_called_once()
-        assert socket_server.client_writer is None
-        assert socket_server.client_connected is False
+        client = SocketClient(socket_path, "MGR")
+        received = []
+        client.on_data_callback = lambda t, d: received.append((t, d))
+        assert await client.connect(max_retries=5, retry_interval=0.05) is True
 
-    @pytest.mark.asyncio
-    async def test_stop_deletes_socket_file(self, socket_server, tmp_path):
-        """测试停止时删除socket文件"""
-        socket_path = tmp_path / "test.sock"
-        socket_path.touch()
-        socket_server.socket_path = str(socket_path)
-
-        mock_server = MagicMock()
-        mock_server.close = MagicMock()
-        mock_server.wait_closed = AsyncMock()
-        socket_server.server = mock_server
-
-        await socket_server.stop()
-
-        assert not socket_path.exists()
-
-
-# ==================== Test Client Handling ====================
-
-
-class TestSocketServerClientHandling:
-    """测试客户端处理"""
+        # 连接建立后缓冲消息被自动下发
+        for _ in range(50):
+            await asyncio.sleep(0.02)
+            if received:
+                break
+        assert received == [("account", {"balance": 42})]
+        assert server.get_stats()["push_queue_size"] == 0
+        await client.disconnect()
 
     @pytest.mark.asyncio
-    async def test_handle_client_sends_register_message(self, socket_server, mock_writer):
-        """测试处理客户端连接时发送注册消息"""
-        mock_reader = MagicMock()
+    async def test_stats_messages_received(self, pair):
+        server, socket_path = pair
+        client = SocketClient(socket_path, "MGR")
+        assert await client.connect(max_retries=5, retry_interval=0.05) is True
 
-        # Mock _receive_message to return None and exit the loop
-        async def mock_receive(reader):
-            return None
+        await client.request("echo", {"a": 1})
+        for _ in range(20):
+            await asyncio.sleep(0.02)
+            if server.get_stats()["messages_received"] >= 1:
+                break
 
-        with patch.object(socket_server, "_receive_message", side_effect=mock_receive), \
-             patch.object(socket_server, "send_message", new=AsyncMock()) as mock_send:
-            await socket_server._handle_client(mock_reader, mock_writer)
-
-            # Should send register message
-            mock_send.assert_called_once_with("register", {"account_id": socket_server.account_id})
-
-    @pytest.mark.asyncio
-    async def test_handle_client_processes_messages(self, socket_server):
-        """测试处理客户端消息"""
-        # Create fresh mocks
-        mock_reader = MagicMock()
-        mock_writer = MagicMock()
-        mock_writer.close = MagicMock()
-        mock_writer.wait_closed = AsyncMock()
-
-        # Mock messages
-        messages = [
-            {"type": "test", "request_id": "1", "data": {}},
-            {"type": "test2", "request_id": "2", "data": {}},
-            None  # Exit the loop
-        ]
-
-        async def mock_receive(reader):
-            if messages:
-                return messages.pop(0)
-            return None
-
-        with patch.object(socket_server, "_receive_message", side_effect=mock_receive), \
-             patch.object(socket_server, "_handle_message", new=AsyncMock()), \
-             patch("asyncio.IncompleteReadError", Exception):
-            await socket_server._handle_client(mock_reader, mock_writer)
+        stats = server.get_stats()
+        assert stats["messages_received"] >= 1
+        assert stats["messages_sent"] >= 1
+        await client.disconnect()
 
     @pytest.mark.asyncio
-    async def test_handle_client_incomplete_read_error(self, socket_server):
-        """测试处理IncompleteReadError"""
-        mock_reader = MagicMock()
-        mock_writer = MagicMock()
-        mock_writer.close = MagicMock()
-        mock_writer.wait_closed = AsyncMock()
-
-        async def mock_receive(reader):
-            raise asyncio.IncompleteReadError(partial=b"", expected=4)
-
-        with patch.object(socket_server, "_receive_message", side_effect=mock_receive):
-            await socket_server._handle_client(mock_reader, mock_writer)
-
-        # Should exit without exception
-        assert True
-
-    @pytest.mark.asyncio
-    async def test_handle_client_exception(self, socket_server):
-        """测试处理异常"""
-        mock_reader = MagicMock()
-        mock_writer = MagicMock()
-        mock_writer.close = MagicMock()
-        mock_writer.wait_closed = AsyncMock()
-
-        async def mock_receive(reader):
-            raise Exception("Test error")
-
-        with patch.object(socket_server, "_receive_message", side_effect=mock_receive):
-            await socket_server._handle_client(mock_reader, mock_writer)
-
-        # Should exit without exception
-        assert True
-
-    @pytest.mark.asyncio
-    async def test_handle_client_cleanup_on_exit(self, socket_server, mock_writer):
-        """测试客户端退出时清理资源"""
-        mock_reader = MagicMock()
-
-        async def mock_receive(reader):
-            return None
-
-        with patch.object(socket_server, "_receive_message", side_effect=mock_receive):
-            await socket_server._handle_client(mock_reader, mock_writer)
-
-        assert socket_server.client_writer is None
-        assert socket_server.client_connected is False
-        mock_writer.close.assert_called_once()
-
-
-# ==================== Test Message Receiving ====================
-
-
-class TestSocketServerReceiveMessage:
-    """测试接收消息"""
-
-    @pytest.mark.asyncio
-    async def test_receive_message_success(self, socket_server, mock_reader):
-        """测试成功接收消息"""
-        message_data = {"type": "test", "data": {"key": "value"}}
-        json_bytes = json.dumps(message_data).encode("utf-8")
-        length_bytes = struct.pack(">I", len(json_bytes))
-
-        mock_reader.readexactly = AsyncMock(side_effect=[length_bytes, json_bytes])
-
-        result = await socket_server._receive_message(mock_reader)
-
-        assert result == message_data
-
-    @pytest.mark.asyncio
-    async def test_receive_message_incomplete_read(self, socket_server, mock_reader):
-        """测试接收不完整"""
-        mock_reader.readexactly = AsyncMock(side_effect=asyncio.IncompleteReadError(partial=b"", expected=4))
-
-        result = await socket_server._receive_message(mock_reader)
-
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_receive_message_json_error(self, socket_server, mock_reader):
-        """测试JSON解析错误"""
-        length_bytes = struct.pack(">I", 10)
-        invalid_json = b"not valid json"
-
-        mock_reader.readexactly = AsyncMock(side_effect=[length_bytes, invalid_json])
-
-        result = await socket_server._receive_message(mock_reader)
-
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_receive_message_unicode(self, socket_server, mock_reader):
-        """测试接收Unicode消息"""
-        message_data = {"type": "test", "data": {"message": "你好世界"}}
-        json_bytes = json.dumps(message_data, ensure_ascii=False).encode("utf-8")
-        length_bytes = struct.pack(">I", len(json_bytes))
-
-        mock_reader.readexactly = AsyncMock(side_effect=[length_bytes, json_bytes])
-
-        result = await socket_server._receive_message(mock_reader)
-
-        assert result == message_data
-
-
-# ==================== Test Message Handling ====================
-
-
-class TestSocketServerHandleMessage:
-    """测试消息处理"""
-
-    @pytest.mark.asyncio
-    async def test_handle_message_ping(self, socket_server):
-        """测试处理ping消息"""
-        message = {
-            "type": "ping",
-            "request_id": "test_id",
-            "data": {}
-        }
-
-        with patch.object(socket_server, "_send_response", new=AsyncMock()) as mock_send:
-            await socket_server._handle_message(message)
-
-            response = mock_send.call_args[0][0]
-            assert response["type"] == "response"
-            assert response["request_id"] == "test_id"
-
-    @pytest.mark.asyncio
-    async def test_handle_message_with_handler(self, socket_server):
-        """测试处理带处理器的消息"""
-        async def test_handler(data: dict) -> str:
-            return "test_result"
-
-        socket_server.register_handler("test_type", test_handler)
-
-        message = {
-            "type": "test_type",
-            "request_id": "test_id",
-            "data": {"key": "value"}
-        }
-
-        with patch.object(socket_server, "_send_response", new=AsyncMock()) as mock_send:
-            await socket_server._handle_message(message)
-
-            response = mock_send.call_args[0][0]
-            assert response["status"] == "success"
-            assert response["data"] == "test_result"
-
-    @pytest.mark.asyncio
-    async def test_handle_message_sync_handler(self, socket_server):
-        """测试同步处理器"""
-        def test_handler(data: dict) -> str:
-            return "sync_result"
-
-        socket_server.register_handler("test_type", test_handler)
-
-        message = {
-            "type": "test_type",
-            "request_id": "test_id",
-            "data": {}
-        }
-
-        with patch.object(socket_server, "_send_response", new=AsyncMock()):
-            await socket_server._handle_message(message)
-
-    @pytest.mark.asyncio
-    async def test_handle_message_no_type(self, socket_server):
-        """测试无type字段"""
-        message = {
-            "request_id": "test_id",
-            "data": {}
-        }
-
-        with patch.object(socket_server, "_send_response", new=AsyncMock()) as mock_send:
-            await socket_server._handle_message(message)
-
-            response = mock_send.call_args[0][0]
-            assert response["status"] == "error"
-
-    @pytest.mark.asyncio
-    async def test_handle_message_no_request_id(self, socket_server):
-        """测试无request_id字段"""
-        message = {
-            "type": "test_type",
-            "data": {}
-        }
-
-        with patch.object(socket_server, "_send_response", new=AsyncMock()) as mock_send:
-            await socket_server._handle_message(message)
-
-            response = mock_send.call_args[0][0]
-            assert response["status"] == "error"
-
-    @pytest.mark.asyncio
-    async def test_handle_message_unknown_type(self, socket_server):
-        """测试未知消息类型"""
-        message = {
-            "type": "unknown_type",
-            "request_id": "test_id",
-            "data": {}
-        }
-
-        with patch.object(socket_server, "_send_response", new=AsyncMock()) as mock_send:
-            await socket_server._handle_message(message)
-
-            response = mock_send.call_args[0][0]
-            assert response["status"] == "error"
-
-
-# ==================== Test Send Response ====================
-
-
-class TestSocketServerSendResponse:
-    """测试发送响应"""
-
-    @pytest.mark.asyncio
-    async def test_send_response_success(self, socket_server, mock_writer):
-        """测试成功发送响应"""
-        socket_server.client_writer = mock_writer
-        socket_server.client_connected = True
-
-        response = {
-            "type": "response",
-            "request_id": "test_id",
-            "status": "success",
-            "data": {"result": "ok"}
-        }
-
-        await socket_server._send_response(response)
-
-        assert mock_writer.write.call_count == 2  # length + data
-        mock_writer.drain.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_send_response_not_connected(self, socket_server):
-        """测试未连接时发送响应"""
-        socket_server.client_writer = None
-        socket_server.client_connected = False
-
-        response = {"type": "response"}
-
-        # Should not raise exception
-        await socket_server._send_response(response)
-
-    @pytest.mark.asyncio
-    async def test_send_response_serialization_error(self, socket_server, mock_writer):
-        """测试序列化错误处理"""
-        socket_server.client_writer = mock_writer
-        socket_server.client_connected = True
-
-        # Create an object that can't be serialized normally
-        class Unserializable:
-            pass
-
-        response = {
-            "type": "response",
-            "request_id": "test_id",
-            "data": Unserializable()
-        }
-
-        # Should not raise exception
-        await socket_server._send_response(response)
-
-
-# ==================== Test Send Message ====================
-
-
-class TestSocketServerSendMessage:
-    """测试发送消息"""
-
-    @pytest.mark.asyncio
-    async def test_send_message_success(self, socket_server, mock_writer):
-        """测试成功发送消息"""
-        socket_server.client_writer = mock_writer
-        socket_server.client_connected = True
-
-        result = await socket_server.send_message("test_type", {"key": "value"})
-
-        assert result is True
-        assert mock_writer.write.call_count == 2  # length + data
-        mock_writer.drain.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_send_message_not_connected(self, socket_server):
-        """测试未连接时发送消息"""
-        socket_server.client_writer = None
-        socket_server.client_connected = False
-
-        result = await socket_server.send_message("test_type", {"key": "value"})
-
-        assert result is False
-
-    @pytest.mark.asyncio
-    async def test_send_message_exception(self, socket_server, mock_writer):
-        """测试发送消息异常"""
-        socket_server.client_writer = mock_writer
-        socket_server.client_connected = True
-        mock_writer.write.side_effect = Exception("Write error")
-
-        result = await socket_server.send_message("test_type", {"key": "value"})
-
-        assert result is False
-
-
-# ==================== Test Is Connected ====================
-
-
-class TestSocketServerIsConnected:
-    """测试连接状态检查"""
-
-    def test_is_connected_true(self, socket_server):
-        """测试已连接"""
-        socket_server.client_connected = True
-
-        result = socket_server.is_connected()
-
-        assert result is True
-
-    def test_is_connected_false(self, socket_server):
-        """测试未连接"""
-        socket_server.client_connected = False
-
-        result = socket_server.is_connected()
-
-        assert result is False
-
-
-# ==================== Test Send Heartbeat ====================
-
-
-class TestSocketServerSendHeartbeat:
-    """测试发送心跳"""
-
-    @pytest.mark.asyncio
-    async def test_send_heartbeat_success(self, socket_server, mock_writer):
-        """测试成功发送心跳"""
-        socket_server.client_writer = mock_writer
-        socket_server.client_connected = True
-
-        result = await socket_server.send_heartbeat()
-
-        assert result is True
-
-    @pytest.mark.asyncio
-    async def test_send_heartbeat_not_connected(self, socket_server):
-        """测试未连接时发送心跳"""
-        socket_server.client_writer = None
-        socket_server.client_connected = False
-
-        result = await socket_server.send_heartbeat()
-
-        assert result is False
-
-
-# ==================== Edge Cases ====================
-
-
-class TestSocketServerEdgeCases:
-    """测试边界情况"""
-
-    @pytest.mark.asyncio
-    async def test_handle_request_missing_type(self, socket_server):
-        """测试处理请求缺少type"""
-        with pytest.raises(ValueError, match="消息中缺少 'type' 字段"):
-            await socket_server._handle_request(None, "req_id", {})
-
-    @pytest.mark.asyncio
-    async def test_handle_request_missing_request_id(self, socket_server):
-        """测试处理请求缺少request_id"""
-        with pytest.raises(ValueError, match="消息中缺少 'request_id' 字段"):
-            await socket_server._handle_request("test_type", None, {})
-
-    @pytest.mark.asyncio
-    async def test_send_message_with_nan(self, socket_server, mock_writer):
-        """测试发送包含NaN的消息"""
-        socket_server.client_writer = mock_writer
-        socket_server.client_connected = True
-
-        result = await socket_server.send_message("test", {"value": float('nan')})
-
-        # Should handle NaN without error
-        assert result is True
-
-    @pytest.mark.asyncio
-    async def test_start_permission_error(self, socket_server, tmp_path):
-        """测试启动时权限错误"""
-        socket_path = tmp_path / "test.sock"
-        socket_path.touch()
-        # Make file read-only
-        socket_path.chmod(0o444)
-        socket_server.socket_path = str(socket_path)
-
-        with patch("asyncio.start_unix_server") as mock_start:
-            mock_server = AsyncMock()
-            mock_start.return_value = mock_server
-
-            # Should not raise exception
-            await socket_server.start()
-
-    @pytest.mark.asyncio
-    async def test_writer_close_exception(self, socket_server):
-        """测试writer关闭异常"""
-        mock_writer = MagicMock()
-        mock_writer.close = MagicMock()
-        mock_writer.wait_closed = AsyncMock(side_effect=Exception("Close error"))
-        socket_server.client_writer = mock_writer
-
-        # Should not raise exception
-        await socket_server.stop()
+    async def test_client_disconnect_updates_connection_count(self, pair):
+        server, socket_path = pair
+        client = SocketClient(socket_path, "MGR")
+        assert await client.connect(max_retries=5, retry_interval=0.05) is True
+        for _ in range(50):
+            await asyncio.sleep(0.02)
+            if server.get_connection_count() == 1:
+                break
+        assert server.get_connection_count() == 1
+
+        await client.disconnect()
+        for _ in range(50):
+            await asyncio.sleep(0.02)
+            if server.get_connection_count() == 0:
+                break
+        assert server.get_connection_count() == 0

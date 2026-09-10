@@ -14,7 +14,14 @@ export const orderCmdApi = {
   },
 
   async sendOrderCmd(
-    data: { symbol: string; direction: 'BUY' | 'SELL'; offset: string; volume: number; price: number },
+    data: {
+      symbol: string
+      direction: 'BUY' | 'SELL'
+      offset: string
+      volume: number
+      price: number
+      source?: string
+    },
     accountId?: string
   ): Promise<{ cmd_id: string }> {
     const params: any = {}

@@ -21,32 +21,6 @@ from qtrader.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
-def _run_async(coro, timeout: float = 300):
-    """
-    在当前运行的事件循环中运行协程并等待结果
-
-    Args:
-        coro: 协程对象
-        timeout: 超时时间（秒），默认300秒
-
-    Returns:
-        协程的返回值，超时或失败返回 None
-    """
-    try:
-        loop = asyncio.get_running_loop()
-        future = asyncio.run_coroutine_threadsafe(coro, loop)
-        return future.result(timeout=timeout)
-    except RuntimeError:
-        logger.warning("没有运行的事件循环，无法执行异步任务")
-        return None
-    except asyncio.TimeoutError:
-        logger.error(f"异步任务执行超时（{timeout}秒）")
-        return None
-    except Exception as e:
-        logger.error(f"异步任务执行失败: {e}")
-        return None
-
-
 class JobManager:
     """任务执行管理器类"""
 
@@ -172,7 +146,7 @@ class JobManager:
         """执行换仓操作"""
         logger.info("开始执行换仓任务")
         try:
-            await self.position_manager.execute_position_rotation(instruction)
+            await self.position_manager.execute_position_rotation(instruction or "")
             logger.info("换仓任务完成")
         except Exception as e:
             logger.exception(f"换仓任务执行失败: {e}")
@@ -182,7 +156,7 @@ class JobManager:
         logger.info("开始执行遗留持仓平仓任务")
         try:
             ctx = get_app_context()
-            strategy_manager: StrategyManager = ctx.get_strategy_manager()
+            strategy_manager = ctx.get_strategy_manager()
             if not strategy_manager:
                 logger.warning("策略管理器未初始化，跳过遗留持仓平仓任务")
                 return
@@ -232,7 +206,10 @@ class JobManager:
         from qtrader.app_context import get_app_context
 
         ctx = get_app_context()
-        strategy_manager: StrategyManager = ctx.get_strategy_manager()
+        strategy_manager = ctx.get_strategy_manager()
+        if strategy_manager is None:
+            logger.warning("策略管理器未初始化，跳过重置策略任务")
+            return
         logger.info("开始重置所有策略")
         try:
             await strategy_manager.reset_strategies()
@@ -420,7 +397,7 @@ class JobManager:
         Returns:
             list[str]: 缺失的文件列表，格式为 "strategy_id: params_file"
         """
-        missing_files = []
+        missing_files: list[str] = []
 
         if not self.config.strategies:
             return missing_files
@@ -506,8 +483,9 @@ class JobManager:
             account_id = account.account_id
 
             dao = SettlementDao()
-            await asyncio.to_thread(dao.save_settlement, account_id, settle_date, account)
-            await asyncio.to_thread(dao.save_positions, account_id, settle_date, positions)
+            await asyncio.to_thread(
+                dao.save_settlement_snapshot, account_id, settle_date, account, positions
+            )
 
             logger.info(f"每日结算快照任务完成: {account_id} {settle_date}")
         except Exception as e:
@@ -536,7 +514,10 @@ class JobManager:
 
             # 3. 策略持仓结算
             app_context = get_app_context()
-            strategy_manager: StrategyManager = app_context.get_strategy_manager()
+            strategy_manager = app_context.get_strategy_manager()
+            if strategy_manager is None:
+                logger.warning("策略管理器未初始化，跳过策略持仓结算")
+                return
             strategy_manager.settle_positions()
 
             # 4. 持久化策略持仓状态
@@ -556,7 +537,7 @@ class JobManager:
         """
         try:
             ctx = get_app_context()
-            strategy_manager: StrategyManager = ctx.get_strategy_manager()
+            strategy_manager = ctx.get_strategy_manager()
             if not strategy_manager:
                 logger.warning("策略管理器未初始化，跳过策略持仓持久化")
                 return

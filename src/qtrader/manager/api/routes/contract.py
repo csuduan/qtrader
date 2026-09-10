@@ -4,6 +4,7 @@
 
 from fastapi import APIRouter, Query, Request
 
+from qtrader.app_context import get_app_context
 from qtrader.manager.api.responses import error_response, success_response
 from qtrader.models.po import ContractPo
 from qtrader.utils.database import get_database
@@ -20,12 +21,13 @@ async def get_contracts(
     exchange_id: str | None = Query(None, description="交易所筛选"),
     product_type: str | None = Query(None, description="产品类型筛选"),
     symbol_keyword: str | None = Query(None, description="合约代码关键词"),
+    is_main: bool | None = Query(None, description="是否主力合约筛选"),
     account_id: str | None = Query(None, description="账户ID，不传则查询所有账户"),
 ):
     """
     获取合约列表
 
-    支持按交易所、产品类型、合约代码关键词筛选
+    支持按交易所、产品类型、合约代码关键词、是否主力筛选
     从合约数据库(ContractPo)中查询合约信息
     """
     try:
@@ -45,6 +47,9 @@ async def get_contracts(
 
             if symbol_keyword:
                 query = query.filter(ContractPo.symbol.contains(symbol_keyword))
+
+            if is_main is not None:
+                query = query.filter(ContractPo.is_main == is_main)
 
             # 只查询活跃合约
             query = query.filter(ContractPo.is_active.is_(True))
@@ -70,6 +75,7 @@ async def get_contracts(
                         "option_strike": float(c.option_strike) if c.option_strike else None,
                         "option_underlying": c.option_underlying,
                         "option_type": c.option_type,
+                        "is_main": c.is_main,
                         "update_date": c.update_date,
                         "updated_at": c.updated_at.isoformat() if c.updated_at else None,
                     }
@@ -129,7 +135,7 @@ async def refresh_contracts(
     """
     try:
         ctx = get_app_context()
-        trading_manager: TradingManager = ctx.get_trading_manager()
+        trading_manager = ctx.get_trading_manager()
 
         if not trading_manager:
             return error_response(code=500, message="交易管理器未初始化")
@@ -142,7 +148,7 @@ async def refresh_contracts(
         if any_success:
             return success_response(data=result, message="合约信息刷新成功")
         else:
-            return error_response(code=500, message="合约信息刷新失败", data=result)
+            return error_response(code=500, message="合约信息刷新失败")
     except Exception as e:
         logger.error(f"刷新合约信息失败: {e}", exc_info=True)
         return error_response(code=500, message=f"刷新合约信息失败: {str(e)}")
