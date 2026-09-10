@@ -274,27 +274,40 @@ class TestCacheAndPersist:
 
         mock_persist.assert_not_called()
 
-    def test_do_batch_persist_no_db(self, trader):
-        with patch("qtrader.utils.database.get_database", return_value=None):
-            assert trader._do_batch_persist({"balance": 1.0}, {}) is False
+    @pytest.mark.asyncio
+    async def test_do_batch_persist_no_db(self, trader):
+        with patch("qtrader.utils.async_database.get_async_session", return_value=None):
+            assert await trader._do_batch_persist({"balance": 1.0}, {}) is False
 
-    def test_do_batch_persist_success(self, trader):
+    @pytest.mark.asyncio
+    async def test_do_batch_persist_success(self, trader):
         session = MagicMock()
         db = MagicMock()
-        db.get_session.return_value.__enter__.return_value = session
+        db.get_session.return_value.__aenter__.return_value = session
+        db.get_session.return_value.__aexit__.return_value = False
 
-        with patch("qtrader.utils.database.get_database", return_value=db):
-            result = trader._do_batch_persist({"balance": 1.0}, {"SHFE.rb2505": {"pos_long_td": 1}})
+        with (
+            patch("qtrader.utils.async_database.get_async_session", db.get_session),
+            patch.object(trader._account_dao, "save_dict") as mock_save_account,
+            patch.object(trader._position_dao, "save_dict") as mock_save_position,
+        ):
+            result = await trader._do_batch_persist(
+                {"balance": 1.0}, {"SHFE.rb2505": {"pos_long_td": 1}}
+            )
 
         assert result is True
-        session.commit.assert_called_once()
+        mock_save_account.assert_awaited_once_with(session, trader.account_id, {"balance": 1.0})
+        mock_save_position.assert_awaited_once_with(
+            session, trader.account_id, "SHFE.rb2505", {"pos_long_td": 1}
+        )
 
-    def test_do_batch_persist_exception_returns_false(self, trader):
-        db = MagicMock()
-        db.get_session.side_effect = RuntimeError("db down")
-
-        with patch("qtrader.utils.database.get_database", return_value=db):
-            assert trader._do_batch_persist({"balance": 1.0}, {}) is False
+    @pytest.mark.asyncio
+    async def test_do_batch_persist_exception_returns_false(self, trader):
+        with patch(
+            "qtrader.utils.async_database.get_async_session",
+            side_effect=RuntimeError("db down"),
+        ):
+            assert await trader._do_batch_persist({"balance": 1.0}, {}) is False
 
 
 @pytest.mark.unit

@@ -3,27 +3,39 @@ Manager 数据服务
 通过 data-only TqApi 订阅K线：当日bar实时落库、历史K线全量落库、故障后手动同步
 
 设计约束：bar 只落库，不进入实时交易路径（Trader 的策略行情始终来自自己的网关）
+运行说明：feed 线程持有独立的事件循环与独立异步数据库实例（"feed"），
+asyncpg 连接池绑定事件循环，不能与主循环共享实例。
 """
 
+import asyncio
 import threading
 import time
 from datetime import datetime, timedelta
 from typing import Callable
 
 import pandas as pd
-from sqlalchemy import or_
+from sqlalchemy import or_, select
 from tqsdk import TqApi, TqAuth
 
 from qtrader.models.object import BarData
 from qtrader.models.po import ContractPo
 from qtrader.trader.dao.bar_dao import BarDao
-from qtrader.utils.database import session_scope
+from qtrader.utils.async_database import (
+    close_async_database,
+    get_async_session,
+    init_async_database,
+)
+from qtrader.utils.config_loader import get_config_loader
+from qtrader.utils.db_url import build_async_db_url
 from qtrader.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 # 当日bar写入账户标记（bars_today.account_id）
 FEED_ACCOUNT_ID = "MANAGER"
+
+# feed 线程专用异步数据库实例名
+FEED_DB_NAME = "feed"
 
 # 自动全量同步间隔（秒），同时用于发现新增订阅（如换月后的新合约）
 AUTO_SYNC_INTERVAL = 300.0
@@ -83,7 +95,7 @@ class ManagerDataFeed:
         self._thread: threading.Thread | None = None
         self._resync_requested = False  # 手动同步标志（API线程设置，feed线程执行）
         self._last_sync_time = 0.0
-        self._dao = BarDao()
+        self._dao = BarDao(db_name=FEED_DB_NAME)
 
     @property
     def connected(self) -> bool:
@@ -123,24 +135,46 @@ class ManagerDataFeed:
     # ==================== 内部实现 ====================
 
     def _run(self) -> None:
-        """feed主线程：连接tqsdk、订阅K线、循环检测新bar落库"""
+        """feed主线程入口：创建独立事件循环与数据库实例后运行异步主逻辑"""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         try:
+            loop.run_until_complete(self._run_async())
+        finally:
+            loop.run_until_complete(close_async_database(FEED_DB_NAME))
+            loop.close()
+            asyncio.set_event_loop(None)
+
+    async def _run_async(self) -> None:
+        """feed异步主逻辑：初始化feed库、连接tqsdk、订阅K线、循环检测新bar落库"""
+        try:
+            # 初始化 feed 线程专用数据库实例（连接池绑定本线程事件循环）
+            db_config = get_config_loader()._load_app_config().data_base
+            if db_config:
+                await init_async_database(
+                    build_async_db_url(db_config),
+                    account_id=FEED_ACCOUNT_ID,
+                    pool_size=2,
+                    max_overflow=2,
+                    name=FEED_DB_NAME,
+                )
+
             self.api = TqApi(auth=TqAuth(self.username, self.password))
             logger.info("ManagerDataFeed TqApi 连接成功")
 
             # 首次全量同步（启动缺口自愈）
-            self._sync_all()
+            await self._sync_all()
 
             while self._running:
                 try:
                     has_data = self.api.wait_update(deadline=time.time() + 3)
                     if has_data:
-                        self._push_new_bars()
+                        await self._push_new_bars()
                     if self._resync_requested or (
                         time.time() - self._last_sync_time > AUTO_SYNC_INTERVAL
                     ):
                         self._resync_requested = False
-                        self._sync_all()
+                        await self._sync_all()
                 except Exception as e:
                     logger.exception(f"ManagerDataFeed 轮询异常: {e}")
                     time.sleep(1)
@@ -152,7 +186,7 @@ class ManagerDataFeed:
                 self.api = None
             logger.info("ManagerDataFeed 线程已退出")
 
-    def _subscribe(self, symbol: str, interval: str) -> bool:
+    async def _subscribe(self, symbol: str, interval: str) -> bool:
         """
         订阅K线（补齐新订阅）
 
@@ -169,7 +203,7 @@ class ManagerDataFeed:
         if key in self._klines:
             return True
 
-        tq_symbol = self._resolve_tq_symbol(symbol)
+        tq_symbol = await self._resolve_tq_symbol(symbol)
         if tq_symbol is None:
             logger.warning(f"无法确定合约交易所，跳过订阅: {symbol}")
             return False
@@ -188,7 +222,7 @@ class ManagerDataFeed:
             logger.exception(f"ManagerDataFeed 订阅K线失败: {tq_symbol} {interval}: {e}")
             return False
 
-    def _resolve_tq_symbol(self, symbol: str) -> str | None:
+    async def _resolve_tq_symbol(self, symbol: str) -> str | None:
         """
         将项目合约代码转换为tqsdk格式（EXCHANGE.symbol）
 
@@ -201,17 +235,17 @@ class ManagerDataFeed:
             tqsdk合约代码（如CFFEX.IM2609），未找到返回None
         """
         try:
-            with session_scope() as session:
+            async with get_async_session(FEED_DB_NAME) as session:
                 row = (
-                    session.query(ContractPo.symbol, ContractPo.exchange_id)
-                    .filter(
-                        or_(
-                            ContractPo.symbol == symbol,
-                            ContractPo.symbol.endswith(f".{symbol}"),
+                    await session.execute(
+                        select(ContractPo.symbol, ContractPo.exchange_id).filter(
+                            or_(
+                                ContractPo.symbol == symbol,
+                                ContractPo.symbol.endswith(f".{symbol}"),
+                            )
                         )
                     )
-                    .first()
-                )
+                ).first()
             if not row or not row.exchange_id:
                 return None
             bare_symbol = row.symbol.split(".")[1] if "." in row.symbol else row.symbol
@@ -220,7 +254,7 @@ class ManagerDataFeed:
             logger.exception(f"查询合约交易所失败: {symbol}: {e}")
             return None
 
-    def _push_new_bars(self) -> None:
+    async def _push_new_bars(self) -> None:
         """检测新完成的bar并写入当日表（feed线程调用）"""
         if self.api is None:
             return
@@ -252,12 +286,12 @@ class ManagerDataFeed:
                         )
                     )
             if new_bars:
-                self._dao.upsert_today_bars(FEED_ACCOUNT_ID, new_bars, trading_day)
+                await self._dao.upsert_today_bars(FEED_ACCOUNT_ID, new_bars, trading_day)
                 logger.debug(f"ManagerDataFeed 当日bar落库: {len(new_bars)}根")
         except Exception as e:
             logger.exception(f"ManagerDataFeed 新bar落库失败: {e}")
 
-    def _sync_all(self) -> None:
+    async def _sync_all(self) -> None:
         """
         全量同步（feed线程调用）：补订阅新合约 + 全量K线落库
 
@@ -268,7 +302,7 @@ class ManagerDataFeed:
         try:
             # 1. 补订阅（支持换月后的新合约）
             for symbol, interval in self._subscriptions_getter():
-                self._subscribe(symbol, interval)
+                await self._subscribe(symbol, interval)
 
             if self.api is None or not self._klines:
                 return
@@ -319,9 +353,9 @@ class ManagerDataFeed:
                     )
 
             if history_rows:
-                self._dao.upsert_history_bars(history_rows, "tq")
+                await self._dao.upsert_history_bars(history_rows, "tq")
             if today_bars:
-                self._dao.upsert_today_bars(FEED_ACCOUNT_ID, today_bars, trading_day)
+                await self._dao.upsert_today_bars(FEED_ACCOUNT_ID, today_bars, trading_day)
             logger.info(
                 f"ManagerDataFeed 全量同步完成: {len(self._klines)}个订阅, {len(history_rows)}根"
             )

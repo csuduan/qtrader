@@ -397,7 +397,7 @@ class StrategyReqHandler(BaseReqHandler):
                     from qtrader.trader.dao.position_dao import StrategyPositionService
 
                     service = StrategyPositionService()
-                    service.clear_position(account_id, strategy_id, symbol)
+                    await service.clear_position(account_id, strategy_id, symbol)
 
             logger.info(f"策略 [{strategy_id}] {symbol} 持仓已删除")
             return {"success": True, "message": "持仓已删除"}

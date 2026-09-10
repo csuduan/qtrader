@@ -70,7 +70,7 @@ def mock_async_engine():
 def reset_global_async_db():
     """每个用例后清理全局异步数据库实例"""
     yield
-    db_mod._async_db = None
+    db_mod._async_dbs.clear()
 
 
 @pytest.mark.unit
@@ -80,7 +80,11 @@ class TestAsyncDatabaseInit:
     def test_init_creates_engine(self, mock_async_engine):
         db = AsyncDatabase(PG_URL)
         mock_async_engine.create.assert_called_once_with(
-            PG_URL, echo=False, pool_size=5, max_overflow=10
+            PG_URL,
+            echo=False,
+            pool_size=5,
+            max_overflow=10,
+            connect_args={"server_settings": {"statement_timeout": "30000"}},
         )
         assert db.db_url == PG_URL
         assert db.engine is mock_async_engine.engine
@@ -170,7 +174,7 @@ class TestGlobalAsyncDatabase:
         conn, base = mock_async_engine.conn, mock_async_engine.base
         db = await init_async_database(PG_URL, account_id="TEST")
 
-        assert db is db_mod._async_db
+        assert db is db_mod._async_dbs[db_mod.DEFAULT_DB_NAME]
         assert db is not None
         # 建表被调用
         conn.run_sync.assert_awaited_once_with(base.metadata.create_all, checkfirst=True)

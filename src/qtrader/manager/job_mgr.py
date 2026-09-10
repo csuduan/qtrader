@@ -7,9 +7,11 @@ import asyncio
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from sqlalchemy import delete, func, select
+
 from qtrader.manager.service.alarm_service import AlarmService
 from qtrader.models.po import AccountHistoryPo, AlarmPo
-from qtrader.utils.database import get_session
+from qtrader.utils.async_database import get_async_session
 from qtrader.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -76,23 +78,22 @@ class ManagerJobManager:
         except Exception as e:
             logger.exception(f"Trader 健康检查任务执行失败: {e}")
 
-    def cleanup_alarms(self) -> None:
+    async def cleanup_alarms(self) -> None:
         """
         清理 3 天前的告警记录
 
         清理 Manager 数据库中 3 天前的告警记录
         """
-        from qtrader.utils.database import session_scope
-
         logger.info("开始清理旧告警记录")
 
         try:
-            with session_scope() as session:
+            async with get_async_session() as session:
                 three_days_ago = datetime.now() - timedelta(days=3)
 
-                deleted_count = (
-                    session.query(AlarmPo).filter(AlarmPo.created_at < three_days_ago).delete()
+                result = await session.execute(
+                    delete(AlarmPo).where(AlarmPo.created_at < three_days_ago)
                 )
+                deleted_count = int(result.rowcount or 0)
 
                 if deleted_count > 0:
                     logger.info(f"已清理 {deleted_count} 条旧告警记录")
@@ -154,7 +155,7 @@ class ManagerJobManager:
         except Exception as e:
             logger.exception(f"清理日志文件失败: {e}")
 
-    def pre_market_check(self) -> None:
+    async def pre_market_check(self) -> None:
         """
         开盘前检查任务
 
@@ -162,59 +163,53 @@ class ManagerJobManager:
         1. 检查网关是否都已连接
         2. [预留] 其他检查项（待补充）
         """
-        from qtrader.utils.database import session_scope
-
         logger.info("开始执行开盘前检查任务")
 
         try:
-            with session_scope() as session:
-                now = datetime.now()
-                all_issues = []
+            all_issues = []
 
-                # ========== 检查项 1: 网关连接状态 ==========
-                disconnected_gateways = self._check_gateway_connection()
-                for account_id in disconnected_gateways:
-                    all_issues.append(
-                        {
-                            "account_id": account_id,
-                            "source": "PRE_MARKET_CHECK",
-                            "title": f"账户 {account_id} 网关未连接",
-                            "detail": "开盘前检查：网关未连接，请检查Trader进程和网关状态",
-                        }
-                    )
+            # ========== 检查项 1: 网关连接状态 ==========
+            disconnected_gateways = self._check_gateway_connection()
+            for account_id in disconnected_gateways:
+                all_issues.append(
+                    {
+                        "account_id": account_id,
+                        "source": "PRE_MARKET_CHECK",
+                        "title": f"账户 {account_id} 网关未连接",
+                        "detail": "开盘前检查：网关未连接，请检查Trader进程和网关状态",
+                    }
+                )
 
-                # ========== 检查项 2: 策略运行状态 ==========
-                # 检查各账户策略是否正常运行，策略异常时创建告警
-                # 实现方式：通过 TraderProxy 查询策略心跳/状态
+            # ========== 检查项 2: 策略运行状态 ==========
+            # 检查各账户策略是否正常运行，策略异常时创建告警
+            # 实现方式：通过 TraderProxy 查询策略心跳/状态
 
-                # ========== 检查项 3: 资金充足性 ==========
-                # 检查账户可用资金是否低于警戒线
-                # 实现方式：对比 account.available_balance 与阈值
+            # ========== 检查项 3: 资金充足性 ==========
+            # 检查账户可用资金是否低于警戒线
+            # 实现方式：对比 account.available_balance 与阈值
 
-                # ========== 检查项 4: 持仓一致性 ==========
-                # 检查本地持仓记录与网关持仓是否一致
-                # 实现方式：对比 position_dao 与 gateway.get_positions()
+            # ========== 检查项 4: 持仓一致性 ==========
+            # 检查本地持仓记录与网关持仓是否一致
+            # 实现方式：对比 position_dao 与 gateway.get_positions()
 
-                # ========== 检查项 5: 风控限额状态 ==========
-                # 检查当日报单/撤单次数是否接近限制
-                # 实现方式：读取 risk_control.get_status() 并判断
+            # ========== 检查项 5: 风控限额状态 ==========
+            # 检查当日报单/撤单次数是否接近限制
+            # 实现方式：读取 risk_control.get_status() 并判断
 
-                # 创建告警
-                for issue in all_issues:
-                    self._create_alarm(
-                        session=session,
-                        account_id=issue["account_id"],
-                        source=issue["source"],
-                        title=issue["title"],
-                        detail=issue["detail"],
-                        now=now,
-                        alarm_type="exception",
-                    )
+            # 创建告警
+            for issue in all_issues:
+                self._create_alarm(
+                    account_id=issue["account_id"],
+                    source=issue["source"],
+                    title=issue["title"],
+                    detail=issue["detail"],
+                    alarm_type="exception",
+                )
 
-                if not all_issues:
-                    logger.info("开盘前检查完成：所有检查项通过")
-                else:
-                    logger.warning(f"开盘前检查完成：发现 {len(all_issues)} 个问题")
+            if not all_issues:
+                logger.info("开盘前检查完成：所有检查项通过")
+            else:
+                logger.warning(f"开盘前检查完成：发现 {len(all_issues)} 个问题")
 
         except Exception as e:
             logger.exception(f"开盘前检查任务执行失败: {e}")
@@ -241,24 +236,20 @@ class ManagerJobManager:
 
     def _create_alarm(
         self,
-        session,
         account_id: str,
         source: str,
         title: str,
         detail: str,
-        now: datetime,
         alarm_type: str = "exception",  # 告警类型: notification/exception
     ) -> None:
         """
         创建告警记录（通过 AlarmService 统一处理）
 
         Args:
-            session: 数据库会话（未使用，保留参数兼容旧代码）
             account_id: 账户ID
             source: 告警来源
             title: 告警标题
             detail: 告警详情
-            now: 当前时间（未使用，保留参数兼容旧代码）
             alarm_type: 告警类型，exception-异常告警，notification-通知告警
         """
         alarm_service = self.trading_manager.alarm_service
@@ -279,93 +270,61 @@ class ManagerJobManager:
             alarm_type=alarm_type_enum,
         )
 
-    def refresh_contracts(self) -> None:
+    async def refresh_contracts(self) -> None:
         """定时刷新合约信息（由调度器调用）"""
         logger.info("开始定时刷新合约信息...")
         try:
-            import asyncio
-
-            from qtrader.app_context import get_app_context
-
             pd_service = self.trading_manager.public_data_service
             if pd_service and not pd_service.has_fresh_contracts():
-                ctx = get_app_context()
-                loop = ctx.get_event_loop()
-                if loop and loop.is_running():
-                    asyncio.run_coroutine_threadsafe(
-                        self.trading_manager._refresh_contracts_from_tq(), loop
-                    )
-                else:
-                    logger.warning("事件循环未运行，无法执行合约刷新")
+                await self.trading_manager._refresh_contracts_from_tq()
             else:
                 logger.info("合约信息新鲜，无需刷新")
         except Exception as e:
             logger.exception(f"定时刷新合约信息失败: {e}")
 
-    def restart_all_traders(self) -> None:
+    async def restart_all_traders(self) -> None:
         """
         重启所有 Trader 进程
 
         用于定时清理内存、重置状态。建议在非交易时段执行。
         """
-        import asyncio
-
         logger.info("开始执行重启所有 Trader 任务")
 
-        async def _restart_all():
-            success_count = 0
-            failed_count = 0
+        success_count = 0
+        failed_count = 0
 
-            for account_id, trader_proxy in self.trading_manager.traders.items():
-                # 检查账户是否启用
-                account_config = self.trading_manager.account_configs_map.get(account_id)
-                if not account_config or not account_config.enabled:
-                    continue
+        for account_id, trader_proxy in self.trading_manager.traders.items():
+            # 检查账户是否启用
+            account_config = self.trading_manager.account_configs_map.get(account_id)
+            if not account_config or not account_config.enabled:
+                continue
 
-                try:
-                    logger.info(f"正在重启 Trader [{account_id}]...")
-                    success = await self.trading_manager.restart_trader(account_id)
-                    if success:
-                        success_count += 1
-                        logger.info(f"Trader [{account_id}] 重启成功")
-                    else:
-                        failed_count += 1
-                        logger.error(f"Trader [{account_id}] 重启失败")
-                except Exception as e:
+            try:
+                logger.info(f"正在重启 Trader [{account_id}]...")
+                success = await self.trading_manager.restart_trader(account_id)
+                if success:
+                    success_count += 1
+                    logger.info(f"Trader [{account_id}] 重启成功")
+                else:
                     failed_count += 1
-                    logger.exception(f"重启 Trader [{account_id}] 时发生异常: {e}")
+                    logger.error(f"Trader [{account_id}] 重启失败")
+            except Exception as e:
+                failed_count += 1
+                logger.exception(f"重启 Trader [{account_id}] 时发生异常: {e}")
 
-            logger.info(f"批量重启完成: 成功 {success_count} 个, 失败 {failed_count} 个")
+        logger.info(f"批量重启完成: 成功 {success_count} 个, 失败 {failed_count} 个")
 
-        try:
-            from qtrader.app_context import get_app_context
-
-            ctx = get_app_context()
-            loop = ctx.get_event_loop()
-            if loop and loop.is_running():
-                asyncio.run_coroutine_threadsafe(_restart_all(), loop)
-            else:
-                logger.warning("事件循环未运行，无法执行 Trader 重启")
-        except Exception as e:
-            logger.exception(f"执行重启所有 Trader 任务失败: {e}")
-
-    def check_threshold_alerts(self) -> None:
+    async def check_threshold_alerts(self) -> None:
         """
         检查阈值告警
 
         统计各账户在指定时间窗口内的异常日志数量，
         如果达到阈值则发送阈值告警通知。
         """
-        from datetime import datetime, timedelta
-
-        from qtrader.utils.database import session_scope
-
         logger.info("开始检查阈值告警")
 
         try:
-            with session_scope() as session:
-                from qtrader.models.po import AlarmPo
-
+            async with get_async_session() as session:
                 now = datetime.now()
 
                 # 从全局配置获取阈值告警配置
@@ -388,16 +347,18 @@ class ManagerJobManager:
                     # 统计该账户在时间窗口内的异常告警数量
                     # 来源为 TRADER_HEALTH_CHECK 或包含 "异常" 的告警
                     error_count = (
-                        session.query(AlarmPo)
-                        .filter(
-                            AlarmPo.account_id == account_id,
-                            AlarmPo.created_at >= window_start,
-                            AlarmPo.source.in_(
-                                ["HEALTH_CHECK", "PRE_MARKET_CHECK", "THRESHOLD_ALERT"]
-                            ),
+                        await session.execute(
+                            select(func.count())
+                            .select_from(AlarmPo)
+                            .filter(
+                                AlarmPo.account_id == account_id,
+                                AlarmPo.created_at >= window_start,
+                                AlarmPo.source.in_(
+                                    ["HEALTH_CHECK", "PRE_MARKET_CHECK", "THRESHOLD_ALERT"]
+                                ),
+                            )
                         )
-                        .count()
-                    )
+                    ).scalar_one()
 
                     if error_count >= threshold_count:
                         # 发送阈值告警（非免打扰时段）
@@ -522,7 +483,7 @@ class ManagerJobManager:
         except Exception as e:
             logger.exception(f"执行所有账户换仓任务失败: {e}")
 
-    def fetch_history_bars(self) -> None:
+    async def fetch_history_bars(self) -> None:
         """
         盘后历史K线固化任务（交易日收盘后执行）
 
@@ -546,12 +507,12 @@ class ManagerJobManager:
             logger.info(f"数据服务同步已触发: {message}")
 
             # 清理过期当日K线
-            BarDao().cleanup_today_bars(date.today())
+            await BarDao().cleanup_today_bars(date.today())
             logger.info("历史K线固化任务完成")
         except Exception as e:
             logger.exception(f"历史K线固化任务执行失败: {e}")
 
-    def send_weekly_settlement_report(self) -> None:
+    async def send_weekly_settlement_report(self) -> None:
         """
         发送本周结算权益周报邮件（每周五执行）
 
@@ -582,7 +543,7 @@ class ManagerJobManager:
                 logger.info("config.yaml 中无有效账户配置，跳过周报发送")
                 return
 
-            records = SettlementDao().query_settlements(configured_accounts, monday, today)
+            records = await SettlementDao().query_settlements(configured_accounts, monday, today)
             if not records:
                 logger.warning(f"本周({monday} ~ {today})无结算权益数据，跳过周报发送")
                 return

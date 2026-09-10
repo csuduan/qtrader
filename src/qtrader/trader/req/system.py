@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -22,23 +21,29 @@ class SystemReqHandler(BaseReqHandler):
     @request("list_system_params")
     async def _req_list_system_params(self, data: dict) -> list:
         """处理获取系统参数列表请求"""
-        from qtrader.models.po import SystemParamPo
-        from qtrader.utils.database import get_database
+        from sqlalchemy import select
 
-        db = get_database()
+        from qtrader.models.po import SystemParamPo
+        from qtrader.utils.async_database import get_async_database
+
+        db = get_async_database()
         group = data.get("group")
         if db is None:
             return []
 
-        with db.get_session() as session:
-            query = session.query(SystemParamPo).filter(
+        async with db.get_session() as session:
+            stmt = select(SystemParamPo).filter(
                 (SystemParamPo.account_id == self.account_id) | (SystemParamPo.account_id.is_(None))
             )
 
             if group:
-                query = query.filter(SystemParamPo.group == group)
+                stmt = stmt.filter(SystemParamPo.group == group)
 
-            params = query.order_by(SystemParamPo.group, SystemParamPo.param_key).all()
+            params = (
+                (await session.execute(stmt.order_by(SystemParamPo.group, SystemParamPo.param_key)))
+                .scalars()
+                .all()
+            )
 
             return [
                 {
@@ -57,23 +62,23 @@ class SystemReqHandler(BaseReqHandler):
     @request("get_system_param")
     async def _req_get_system_param(self, data: dict) -> dict | None:
         """处理获取单个系统参数请求"""
-        from qtrader.models.po import SystemParamPo
-        from qtrader.utils.database import get_database
+        from sqlalchemy import select
 
-        db = get_database()
+        from qtrader.models.po import SystemParamPo
+        from qtrader.utils.async_database import get_async_database
+
+        db = get_async_database()
         param_key = data.get("param_key")
         if db is None:
             return None
 
-        with db.get_session() as session:
-            param = (
-                session.query(SystemParamPo)
-                .filter(
+        async with db.get_session() as session:
+            param = await session.scalar(
+                select(SystemParamPo).filter(
                     SystemParamPo.param_key == param_key,
                     (SystemParamPo.account_id == self.account_id)
                     | (SystemParamPo.account_id.is_(None)),
                 )
-                .first()
             )
 
             if param:
@@ -93,24 +98,24 @@ class SystemReqHandler(BaseReqHandler):
         """处理更新系统参数请求"""
         from datetime import datetime
 
-        from qtrader.models.po import SystemParamPo
-        from qtrader.utils.database import get_database
+        from sqlalchemy import select
 
-        db = get_database()
+        from qtrader.models.po import SystemParamPo
+        from qtrader.utils.async_database import get_async_database
+
+        db = get_async_database()
         param_key = data.get("param_key")
         param_value = data.get("param_value")
         if db is None:
             return {"success": False, "message": "数据库未初始化"}
 
-        with db.get_session() as session:
-            param = (
-                session.query(SystemParamPo)
-                .filter(
+        async with db.get_session() as session:
+            param = await session.scalar(
+                select(SystemParamPo).filter(
                     SystemParamPo.param_key == param_key,
                     (SystemParamPo.account_id == self.account_id)
                     | (SystemParamPo.account_id.is_(None)),
                 )
-                .first()
             )
 
             if not param:
@@ -119,8 +124,8 @@ class SystemReqHandler(BaseReqHandler):
             param.param_value = param_value  # type: ignore[assignment]
             param.updated_at = datetime.now()  # type: ignore[assignment]
 
-            session.commit()
-            session.refresh(param)
+            await session.commit()
+            await session.refresh(param)
 
             logger.info(f"Trader [{self.account_id}] 系统参数已更新: {param_key} = {param_value}")
 
@@ -137,22 +142,28 @@ class SystemReqHandler(BaseReqHandler):
     @request("get_system_params_by_group")
     async def _req_get_system_params_by_group(self, data: dict) -> dict | None:
         """处理根据分组获取系统参数请求"""
-        from qtrader.models.po import SystemParamPo
-        from qtrader.utils.database import get_database
+        from sqlalchemy import select
 
-        db = get_database()
+        from qtrader.models.po import SystemParamPo
+        from qtrader.utils.async_database import get_async_database
+
+        db = get_async_database()
         group = data.get("group")
         if db is None:
             return {}
 
-        with db.get_session() as session:
+        async with db.get_session() as session:
             params = (
-                session.query(SystemParamPo)
-                .filter(
-                    SystemParamPo.group == group,
-                    (SystemParamPo.account_id == self.account_id)
-                    | (SystemParamPo.account_id.is_(None)),
+                (
+                    await session.execute(
+                        select(SystemParamPo).filter(
+                            SystemParamPo.group == group,
+                            (SystemParamPo.account_id == self.account_id)
+                            | (SystemParamPo.account_id.is_(None)),
+                        )
+                    )
                 )
+                .scalars()
                 .all()
             )
 
@@ -183,8 +194,7 @@ class SystemReqHandler(BaseReqHandler):
         if self.trader.trading_engine is None:
             logger.error(f"Trader [{self.account_id}] 交易引擎未初始化")
             return {"success": False}
-        # 热加载含同步DB查询，放入线程避免阻塞事件循环
-        await asyncio.to_thread(self.trader.trading_engine.reload_risk_control_config)
+        await self.trader.trading_engine.reload_risk_control_config()
         return {"success": True}
 
     @request("update_alert_wechat")

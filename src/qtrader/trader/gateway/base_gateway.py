@@ -130,11 +130,11 @@ class BaseGateway(ABC):
                 return symbol
             return contract.symbol
 
-    def load_contracts(self) -> (dict[str, ContractData]) | None:
+    async def load_contracts(self) -> (dict[str, ContractData]) | None:
         """
         从数据库加载合约信息
 
-        从共享数据库（qtrader.db）读取合约信息，该数据库由 Manager 进程维护。
+        从共享数据库（PostgreSQL）读取合约信息，该数据库由 Manager 进程维护。
 
         Returns:
             合约信息字典，如果没有则返回None
@@ -142,12 +142,20 @@ class BaseGateway(ABC):
         update_date = datetime.now().strftime("%Y-%m-%d")
 
         try:
-            from qtrader.models.po import ContractPo
-            from qtrader.utils.database import session_scope
+            from sqlalchemy import select
 
-            with session_scope() as session:
+            from qtrader.models.po import ContractPo
+            from qtrader.utils.async_database import get_async_session
+
+            async with get_async_session() as session:
                 contract_pos = (
-                    session.query(ContractPo).filter(ContractPo.update_date == update_date).all()
+                    (
+                        await session.execute(
+                            select(ContractPo).filter(ContractPo.update_date == update_date)
+                        )
+                    )
+                    .scalars()
+                    .all()
                 )
 
                 if not contract_pos:

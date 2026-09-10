@@ -5,31 +5,25 @@
 """
 
 import asyncio
-import csv
 import hashlib
-import os
-import shutil
+import re
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
-from sqlalchemy.orm import Session as SQLASession
+from sqlalchemy import select, update
 
 from qtrader.models.object import OrderCmdFinishReason
 from qtrader.models.po import RotationInstructionPo
 from qtrader.models.po import SwitchPosImportPo as OrderFile
 from qtrader.trader.order_cmd import OrderCmd, SplitStrategyType
 from qtrader.trader.trading_engine import TradingEngine
-from qtrader.utils.config_loader import AccountConfig, AppConfig, get_config_loader
-from qtrader.utils.database import session_scope
+from qtrader.utils.async_database import fetch_all, fetch_one, get_async_session
+from qtrader.utils.config_loader import AccountConfig, get_config_loader
 from qtrader.utils.helpers import parse_symbol
 from qtrader.utils.logger import get_logger
 
 logger = get_logger(__name__)
-
-# Type alias for Session that can be None
-OptionalSession = SQLASession | None
 
 
 class OrderInstruction:
@@ -82,11 +76,10 @@ class SwitchPosManager:
         self.all_instructions = []
         self._stop_requested = False
 
-    def start(self):
+    async def start(self):
         """启动换仓管理器"""
         # 加载所有换仓指令
-        self.load_rotation_instructions()
-        pass
+        await self.load_rotation_instructions()
 
     def stop_rotation(self) -> None:
         """请求停止换仓"""
@@ -101,7 +94,7 @@ class SwitchPosManager:
         today = datetime.now().strftime("%Y%m%d")
         return [x for x in self.all_instructions if x.trading_date == today]
 
-    def update_instruction(self, data: dict) -> "RotationInstructionPo":
+    async def update_instruction(self, data: dict) -> "RotationInstructionPo":
         """更新换仓指令"""
         instruction_id = data.get("instruction_id")
         if not instruction_id:
@@ -128,36 +121,36 @@ class SwitchPosManager:
         instruction.updated_at = datetime.now()
 
         # 更新数据库
-        with session_scope() as session:
-            session.merge(instruction)
+        async with get_async_session() as session:
+            await session.merge(instruction)
 
         return instruction
 
-    def delete_instruction(self, ids: list[str]):
+    async def delete_instruction(self, ids: list[str]):
         """删除换仓指令"""
         self.all_instructions = [x for x in self.all_instructions if x.id not in ids]
         # 更新数据库
-        with session_scope() as session:
-            session.query(RotationInstructionPo).filter(RotationInstructionPo.id.in_(ids)).update(
-                {"is_deleted": True}, synchronize_session=False
+        async with get_async_session() as session:
+            await session.execute(
+                update(RotationInstructionPo)
+                .where(RotationInstructionPo.id.in_(ids))
+                .values(is_deleted=True)
             )
 
-    def load_rotation_instructions(self):
+    async def load_rotation_instructions(self):
         """加载所有换仓指令"""
         try:
             # 从数据库加载今日换仓指令
-            with session_scope() as session:
+            async with get_async_session() as session:
                 today = datetime.now().strftime("%Y%m%d")
-                instructions = (
-                    session.query(RotationInstructionPo)
-                    .filter(
+                self.all_instructions = await fetch_all(
+                    session,
+                    select(RotationInstructionPo).filter(
                         RotationInstructionPo.trading_date == today,
-                        RotationInstructionPo.is_deleted == False,
+                        RotationInstructionPo.is_deleted == False,  # noqa: E712
                         RotationInstructionPo.account_id == self.config.account_id,
-                    )
-                    .all()
+                    ),
                 )
-                self.all_instructions = instructions
 
             # 订阅所有指令中的合约
             symbols = list(set([instruction.symbol for instruction in self.all_instructions]))
@@ -167,12 +160,14 @@ class SwitchPosManager:
             logger.error(f"获取所有指令列表时出错: {e}")
         logger.info(f"加载换仓指令完成，共 {len(self.all_instructions)} 条")
 
-    def import_csv(self, csv_text: str, filename: str, mode: str = "replace") -> dict:
+    async def import_csv(self, csv_text: str, filename: str, mode: str = "replace") -> dict:
         """
         导入换仓指令文件
 
         Args:
-            file_path: 换仓指令文件路径
+            csv_text: 换仓指令文件内容
+            filename: 文件名（用于提取交易日）
+            mode: 导入模式（replace/append）
         """
         lines = csv_text.strip().split("\n")
         if len(lines) < 2:
@@ -187,8 +182,6 @@ class SwitchPosManager:
 
         trading_date = None
         if filename:
-            import re
-
             matchs = re.findall(r"\d{8}", filename)
             if matchs:
                 trading_date = matchs[0]
@@ -203,7 +196,7 @@ class SwitchPosManager:
                 if len(values) < 6:
                     logger.warning(f"第{line_num}行数据不完整，跳过: {line}")
                     failed_count += 1
-                    continue 
+                    continue
 
                 account_id = values[0].strip()
                 strategy_id = values[1].strip()
@@ -280,24 +273,26 @@ class SwitchPosManager:
                 errors.append({"row": line_num, "error": str(e), "content": line})
                 continue
 
-        if mode == "replace":
-            with session_scope() as session:
+        async with get_async_session() as session:
+            if mode == "replace":
                 # 先删除本账户已存在的记录
-                session.query(RotationInstructionPo).filter_by(
-                    trading_date=trading_date, account_id=self.config.account_id
-                ).update({"is_deleted": True})
-                session.bulk_save_objects(add_instruction)
-        else:
-            with session_scope() as session:
-                session.bulk_save_objects(add_instruction)
+                await session.execute(
+                    update(RotationInstructionPo)
+                    .where(
+                        RotationInstructionPo.trading_date == trading_date,
+                        RotationInstructionPo.account_id == self.config.account_id,
+                    )
+                    .values(is_deleted=True)
+                )
+            session.add_all(add_instruction)
 
         # 重新加载数据
-        self.load_rotation_instructions()
+        await self.load_rotation_instructions()
         logger.info(f"CSV导入完成，成功: {imported_count}, 失败: {failed_count}")
         data = {"imported": imported_count, "failed": failed_count, "errors": errors[:10]}
         return data
 
-    def scan_and_process_orders(self) -> None:
+    async def scan_and_process_orders(self) -> None:
         """扫描并处理交易指令文件"""
         try:
             today_dir = Path(self.switchPos_files_dir) / datetime.now().strftime("%Y%m%d")
@@ -328,13 +323,14 @@ class SwitchPosManager:
             )
 
             # logger.info(f"扫描到 {len(csv_files)} 个换仓文件")
-            with session_scope() as session:
+            async with get_async_session() as session:
                 for csv_file in csv_files:
                     # 检查该文件是否已导入
-                    existing = (
-                        session.query(OrderFile)
-                        .filter_by(account_id=self.config.account_id, file_name=csv_file.name)
-                        .first()
+                    existing = await fetch_one(
+                        session,
+                        select(OrderFile).filter_by(
+                            account_id=self.config.account_id, file_name=csv_file.name
+                        ),
                     )
                     if existing:
                         continue
@@ -348,7 +344,7 @@ class SwitchPosManager:
 
                     # 导入文件
                     try:
-                        self.import_csv(content, csv_file.name, mode="replace")
+                        await self.import_csv(content, csv_file.name, mode="replace")
                     except Exception as e:
                         # 导入失败不写导入记录，下轮扫描重试
                         logger.error(f"导入文件 {csv_file.name} 时出错: {e}")
@@ -375,6 +371,7 @@ class SwitchPosManager:
         执行换仓逻辑（使用OrderCmd）
 
         Args:
+            trading_type: 交易类型
             is_manual: 是否手动换仓
         """
         if self.working:
@@ -390,7 +387,7 @@ class SwitchPosManager:
             for x in self.get_today_instructions()
             if x.status != "COMPLETED"
             and x.enabled
-            and x.is_deleted == False
+            and x.is_deleted == False  # noqa: E712
             and x.account_id == self.config.account_id
         ]
         if not todo_instructions:
@@ -452,7 +449,7 @@ class SwitchPosManager:
             logger.exception(f"换仓执行时出错: {e}")
         finally:
             snapshots = [self._snapshot_instruction(inst) for inst in todo_instructions]
-            await asyncio.to_thread(self._update_instructions, snapshots)
+            await self._update_instructions(snapshots)
             self.working = False
             logger.info("换仓任务结束")
 
@@ -532,9 +529,9 @@ class SwitchPosManager:
                         instruction.error_message = finish_reason
                     instruction.current_order_id = None
 
-            # 每次循环都更新数据库，确保前端能实时看到进度（快照后放到线程执行，避免阻塞事件循环）
+            # 每次循环都更新数据库，确保前端能实时看到进度
             snapshots = [self._snapshot_instruction(inst) for inst in active_instructions]
-            await asyncio.to_thread(self._update_instructions, snapshots)
+            await self._update_instructions(snapshots)
 
             # 检查是否全部完成
             if all_finished:
@@ -551,8 +548,8 @@ class SwitchPosManager:
         """
         提取指令待更新字段的快照
 
-        监控循环会持续改写 PO 对象，写库线程直接 merge PO 会并发读写同一对象，
-        先在事件循环线程中提取快照，写库线程只处理不可变数据。
+        监控循环会持续改写 PO 对象，写库时直接 merge PO 会并发读写同一对象，
+        先提取快照，写库只处理不可变数据。
         """
         return {
             "id": instruction.id,
@@ -565,7 +562,7 @@ class SwitchPosManager:
             "updated_at": datetime.now(),
         }
 
-    def _update_instructions(self, snapshots: list[dict]) -> None:
+    async def _update_instructions(self, snapshots: list[dict]) -> None:
         """
         更新指令状态（接收 _snapshot_instruction 生成的快照，按 id 批量更新）
 
@@ -576,12 +573,14 @@ class SwitchPosManager:
             return
 
         try:
-            with session_scope() as session:
+            async with get_async_session() as session:
                 for snap in snapshots:
                     values = {k: v for k, v in snap.items() if k != "id"}
-                    session.query(RotationInstructionPo).filter(
-                        RotationInstructionPo.id == snap["id"]
-                    ).update(values, synchronize_session=False)
+                    await session.execute(
+                        update(RotationInstructionPo)
+                        .where(RotationInstructionPo.id == snap["id"])
+                        .values(**values)
+                    )
         except Exception as e:
             logger.error(f"更新指令状态时出错: {e}")
 
@@ -619,7 +618,7 @@ class SwitchPosManager:
 
         return True
 
-    def _update_instruction(self, instruction: RotationInstructionPo) -> None:
+    async def _update_instruction(self, instruction: RotationInstructionPo) -> None:
         """
         更新指令状态
 
@@ -627,7 +626,7 @@ class SwitchPosManager:
             instruction: 待更新的指令
         """
         try:
-            with session_scope() as session:
-                session.merge(instruction)
+            async with get_async_session() as session:
+                await session.merge(instruction)
         except Exception as e:
             logger.error(f"更新指令状态时出错: {e}")

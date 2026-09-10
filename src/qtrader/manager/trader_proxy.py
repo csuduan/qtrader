@@ -380,17 +380,30 @@ class TraderProxy:
 
     # ==================== 消息处理 ====================
     def _load_account_from_db(self) -> None:
-        """从DB加载账户数据到内存缓存（初始化时调用一次）"""
+        """从DB加载账户数据到内存缓存（初始化时调用一次，异步任务执行）"""
         try:
-            from qtrader.models.po import AccountPo
-            from qtrader.utils.database import get_database
+            asyncio.get_running_loop()
+            asyncio.create_task(self._load_account_from_db_async())
+        except RuntimeError:
+            # 无事件循环（测试等场景），跳过
+            pass
 
-            db = get_database()
+    async def _load_account_from_db_async(self) -> None:
+        """异步加载账户数据"""
+        try:
+            from sqlalchemy import select
+
+            from qtrader.models.po import AccountPo
+            from qtrader.utils.async_database import get_async_database
+
+            db = get_async_database()
             if not db:
                 return
 
-            with db.get_session() as session:
-                account_po = session.query(AccountPo).filter_by(account_id=self.account_id).first()
+            async with db.get_session() as session:
+                account_po = await session.scalar(
+                    select(AccountPo).filter_by(account_id=self.account_id)
+                )
                 if account_po:
                     self._account_cache = AccountData.model_construct(
                         account_id=str(account_po.account_id),
@@ -612,14 +625,14 @@ class TraderProxy:
                 logger.warning("告警服务未初始化，无法处理通知")
                 return
 
-            # 异步处理通知（notify_alarm 为同步方法，放线程池避免阻塞事件循环）
-            import asyncio
+            # 异步处理通知（notify_alarm 为同步方法，走默认线程池避免阻塞事件循环）
+            from qtrader.utils.executors import submit_task
 
             account_id = data.get("account_id", "SYSTEM")
             title = data.get("title", "")
             detail = data.get("detail", "")
             asyncio.create_task(
-                asyncio.to_thread(alarm_service.notify_alarm, account_id, "Trader", title, detail)
+                submit_task(alarm_service.notify_alarm, account_id, "Trader", title, detail)
             )
         except Exception as e:
             logger.exception(f"处理通知推送失败: {e}")
@@ -663,25 +676,29 @@ class TraderProxy:
         """
         处理异常告警数据（来自Trader的ERROR日志）
 
-        保存异常记录到数据库，交由AlarmService的定时任务统计阈值
+        异步保存异常记录到数据库，交由AlarmService的定时任务统计阈值
         并触发告警更新事件推送前端
 
         Args:
             data: 告警数据
         """
+        asyncio.create_task(self._save_alarm_data_async(data))
+
+    async def _save_alarm_data_async(self, data: dict) -> None:
+        """异步保存异常告警到数据库"""
         from datetime import datetime
 
         from qtrader.models.object import AlarmType
         from qtrader.models.po import AlarmPo
-        from qtrader.utils.database import get_database
+        from qtrader.utils.async_database import get_async_database
 
-        db = get_database()
+        db = get_async_database()
         if db is None:
             logger.error("数据库未初始化，无法保存告警")
             return
 
         try:
-            with db.get_session() as session:
+            async with db.get_session() as session:
                 now = datetime.now()
                 alarm = AlarmPo(
                     account_id=data.get("account_id", self.account_id),
@@ -694,8 +711,8 @@ class TraderProxy:
                     status=data.get("status", "UNCONFIRMED"),
                 )
                 session.add(alarm)
-                session.commit()
-                session.refresh(alarm)
+                await session.commit()
+                await session.refresh(alarm)
 
                 logger.info(f"异常告警已保存到数据库: [{self.account_id}] {alarm.title}")
 

@@ -12,7 +12,7 @@ from sqlalchemy import select
 from qtrader.manager.api.responses import error_response, success_response
 from qtrader.manager.api.routes.auth import hash_password, require_admin
 from qtrader.models.po import UserPo
-from qtrader.utils.database import get_database
+from qtrader.utils.async_database import get_async_database
 from qtrader.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -63,11 +63,11 @@ async def get_users(current_user: dict = Depends(require_admin)):
     Returns:
         统一响应格式: {code: 0, message: "success", data: [用户列表]}
     """
-    db = get_database()
+    db = get_async_database()
 
-    with db.get_session() as session:
+    async with db.get_session() as session:
         stmt = select(UserPo).order_by(UserPo.created_at.desc())
-        result = session.execute(stmt)
+        result = await session.execute(stmt)
         users = result.scalars().all()
 
         user_list = []
@@ -98,12 +98,12 @@ async def create_user(request: UserCreateRequest, current_user: dict = Depends(r
     Returns:
         统一响应格式: {code: 0, message: "success", data: 用户信息}
     """
-    db = get_database()
+    db = get_async_database()
 
-    with db.get_session() as session:
+    async with db.get_session() as session:
         # 检查用户名是否已存在
         stmt = select(UserPo).where(UserPo.user_id == request.username)
-        result = session.execute(stmt)
+        result = await session.execute(stmt)
         if result.scalar_one_or_none():
             return error_response(message="用户名已存在", code=4001)
 
@@ -119,7 +119,7 @@ async def create_user(request: UserCreateRequest, current_user: dict = Depends(r
             is_active=True,
         )
         session.add(new_user)
-        session.commit()
+        await session.commit()
 
         logger.info(
             f"管理员 {current_user['user_id']} 创建用户: {request.username}, 角色: {request.role}"
@@ -152,12 +152,12 @@ async def update_user(
     Returns:
         统一响应格式: {code: 0, message: "success", data: 用户信息}
     """
-    db = get_database()
+    db = get_async_database()
 
-    with db.get_session() as session:
+    async with db.get_session() as session:
         # 查询用户
         stmt = select(UserPo).where(UserPo.user_id == user_id)
-        result = session.execute(stmt)
+        result = await session.execute(stmt)
         user = result.scalar_one_or_none()
 
         if not user:
@@ -171,7 +171,7 @@ async def update_user(
         if request.username and request.username != user_id:
             # 检查新用户名是否已存在
             stmt = select(UserPo).where(UserPo.user_id == request.username)
-            result = session.execute(stmt)
+            result = await session.execute(stmt)
             if result.scalar_one_or_none():
                 return error_response(message="用户名已存在", code=4001)
             # 注意：这里不实际修改 user_id，因为那是主键
@@ -186,7 +186,7 @@ async def update_user(
             user.role = request.role
 
         user.updated_at = datetime.now()
-        session.commit()
+        await session.commit()
 
         logger.info(f"管理员 {current_user['user_id']} 更新用户: {user_id}")
 
@@ -218,20 +218,20 @@ async def delete_user(user_id: str, current_user: dict = Depends(require_admin))
     if user_id == current_user["user_id"]:
         return error_response(message="不能删除当前登录用户", code=403)
 
-    db = get_database()
+    db = get_async_database()
 
-    with db.get_session() as session:
+    async with db.get_session() as session:
         # 查询用户
         stmt = select(UserPo).where(UserPo.user_id == user_id)
-        result = session.execute(stmt)
+        result = await session.execute(stmt)
         user = result.scalar_one_or_none()
 
         if not user:
             return error_response(message="用户不存在", code=404)
 
         # 删除用户
-        session.delete(user)
-        session.commit()
+        await session.delete(user)
+        await session.commit()
 
         logger.info(f"管理员 {current_user['user_id']} 删除用户: {user_id}")
 

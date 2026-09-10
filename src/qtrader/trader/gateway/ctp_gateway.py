@@ -90,9 +90,6 @@ class CtpGateway(BaseGateway):
         # 订阅配置（来自全局config.yaml）
         self.subs_config = acct_config.subs
 
-        # 加载合约
-        self.load_contracts()
-
         logger.info(f"CTP Gateway 初始化，账户: {self.account_id}")
 
     async def connect(self) -> bool:
@@ -100,6 +97,9 @@ class CtpGateway(BaseGateway):
         if self.connected:
             logger.warning("CTP Gateway 已连接")
             return True
+
+        # 加载合约
+        await self.load_contracts()
 
         if self._running:
             logger.warning("CTP Gateway 运行中，先断开连接")

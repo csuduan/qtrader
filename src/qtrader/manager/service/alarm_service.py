@@ -41,15 +41,17 @@ class AlarmService:
 
         流程：查询各账户各指标异常数 -> 检查阈值 -> 未压制则触发告警 -> 设置压制状态
         """
+        from sqlalchemy import func, select
+
         from qtrader.models.po import AlarmPo
-        from qtrader.utils.database import session_scope
+        from qtrader.utils.async_database import get_async_session
 
         app_config = self.trading_manager.app_config
         if not app_config or not app_config.alert.exception.enabled:
             return
 
         try:
-            with session_scope() as session:
+            async with get_async_session() as session:
                 now = datetime.now()
                 for account_id in self.trading_manager.account_configs_map.keys():
                     for indicator_config in app_config.alert.exception.indicators:
@@ -59,16 +61,17 @@ class AlarmService:
 
                         # 查询数据库统计窗口内异常数
                         window_start = now - timedelta(seconds=window)
-                        count = (
-                            session.query(AlarmPo)
-                            .filter(
-                                AlarmPo.account_id == account_id,
-                                AlarmPo.created_at >= window_start,
-                                AlarmPo.alarm_type == AlarmType.EXCEPTION,
-                                AlarmPo.source != "EXCEPTION_MONITOR",  # 排除阈值告警本身
-                            )
-                            .count()
+                        base_filter = (
+                            AlarmPo.account_id == account_id,
+                            AlarmPo.created_at >= window_start,
+                            AlarmPo.alarm_type == AlarmType.EXCEPTION,
+                            AlarmPo.source != "EXCEPTION_MONITOR",  # 排除阈值告警本身
                         )
+                        count = (
+                            await session.execute(
+                                select(func.count()).select_from(AlarmPo).filter(*base_filter)
+                            )
+                        ).scalar_one()
 
                         if count >= threshold:
                             if self._is_suppressed(account_id, indicator):
@@ -76,16 +79,10 @@ class AlarmService:
                                 continue
 
                             # 查询最近一次异常作为详情
-                            last_alarm = (
-                                session.query(AlarmPo)
-                                .filter(
-                                    AlarmPo.account_id == account_id,
-                                    AlarmPo.created_at >= window_start,
-                                    AlarmPo.alarm_type == AlarmType.EXCEPTION,
-                                    AlarmPo.source != "EXCEPTION_MONITOR",
-                                )
+                            last_alarm = await session.scalar(
+                                select(AlarmPo)
+                                .filter(*base_filter)
                                 .order_by(AlarmPo.created_at.desc())
-                                .first()
                             )
 
                             source_data = {"title": last_alarm.title if last_alarm else "未知异常"}

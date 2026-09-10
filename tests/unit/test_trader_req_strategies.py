@@ -395,6 +395,7 @@ class TestDeleteStrategyPosition:
         s.strategy_manager.trading_engine = engine
         with patch("qtrader.trader.dao.position_dao.StrategyPositionService") as svc_cls:
             svc = svc_cls.return_value
+            svc.clear_position = AsyncMock(return_value=True)
 
             r = await handler._req_delete_strategy_position(
                 {"strategy_id": "rsi_001", "symbol": "IM2603"}
@@ -402,7 +403,7 @@ class TestDeleteStrategyPosition:
 
             assert r["success"] is True
             assert "IM2603" not in s._positions
-            svc.clear_position.assert_called_once_with("test_account_001", "rsi_001", "IM2603")
+            svc.clear_position.assert_awaited_once_with("test_account_001", "rsi_001", "IM2603")
 
     @pytest.mark.asyncio
     async def test_success_without_strategy_manager(self, mock_trader, handler):
@@ -637,7 +638,7 @@ class TestRotationHandlers:
     @pytest.mark.asyncio
     async def test_update_instruction(self, mock_trader, handler):
         spm = MagicMock()
-        spm.update_instruction.return_value = "po_obj"
+        spm.update_instruction = AsyncMock(return_value="po_obj")
         mock_trader.switchPos_manager = spm
 
         r = await handler._req_update_rotation_instruction(
@@ -645,12 +646,14 @@ class TestRotationHandlers:
         )
 
         assert r == "po_obj"
-        spm.update_instruction.assert_called_once_with({"instruction_id": 1, "status": "CANCELLED"})
+        spm.update_instruction.assert_awaited_once_with(
+            {"instruction_id": 1, "status": "CANCELLED"}
+        )
 
     @pytest.mark.asyncio
     async def test_import_csv(self, mock_trader, handler):
         spm = MagicMock()
-        spm.import_csv.return_value = {"imported": 2, "skipped": 0, "errors": []}
+        spm.import_csv = AsyncMock(return_value={"imported": 2, "skipped": 0, "errors": []})
         mock_trader.switchPos_manager = spm
 
         r = await handler._req_import_rotation_instructions(

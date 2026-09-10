@@ -25,10 +25,9 @@ from qtrader.utils.config_loader import (
     SocketConfig,
     get_config_loader,
 )
-from qtrader.utils.db_url import build_db_url
+from qtrader.utils.executors import submit_long_task
 from qtrader.utils.logger import get_logger
 from qtrader.utils.scheduler import TaskScheduler
-from qtrader.utils.shared_database import SharedDatabase, init_shared_database
 
 ctx: AppContext = get_app_context()
 
@@ -79,9 +78,6 @@ class TradingManager:
 
         # Scheduler（将在 start() 中初始化）
         self._scheduler: TaskScheduler | None = None
-
-        # 共享数据库（公共数据）
-        self._shared_db: SharedDatabase | None = None
 
         # 公共数据服务
         self.public_data_service: PublicDataService | None = None
@@ -1040,26 +1036,11 @@ class TradingManager:
             logger.exception(f"启动数据服务失败: {e}")
 
     async def _init_public_data(self) -> None:
-        """初始化共享数据库和公共数据服务"""
+        """初始化公共数据服务"""
         try:
-            loader = get_config_loader()
-            app_config = loader._load_app_config()
-
-            # 使用 PostgreSQL 数据库
-            db_config = app_config.data_base
-            if db_config is None:
-                logger.warning("数据库配置缺失，公共数据服务未初始化")
-                return
-            db_url = build_db_url(db_config)
-            self._shared_db = init_shared_database(
-                db_url,
-                pool_size=db_config.pg.pool_size,
-                max_overflow=db_config.pg.max_overflow,
-            )
-
-            # 创建公共数据服务并加载历史数据
-            self.public_data_service = PublicDataService(self._shared_db)
-            count = self.public_data_service.load_from_database()
+            # 创建公共数据服务并加载历史数据（使用全局异步数据库实例）
+            self.public_data_service = PublicDataService()
+            count = await self.public_data_service.load_from_database()
 
             # 检查合约新鲜度，过期则从 TqSdk + 米筐刷新
             if not self.public_data_service.has_fresh_contracts():
@@ -1082,8 +1063,8 @@ class TradingManager:
             from qtrader.manager.tq_contract_fetcher import TqContractFetcher
 
             fetcher = TqContractFetcher(tq_config["username"], tq_config["password"])
-            # TqSdk 连接超时由库内部控制
-            contracts = await asyncio.to_thread(fetcher.fetch_contracts)
+            # TqSdk 同步SDK重IO调用，走独立IO线程池
+            contracts = await submit_long_task(fetcher.fetch_contracts)
 
             if contracts is None:
                 logger.error("从 TqSdk 获取合约信息失败（连接超时或认证失败）")
@@ -1100,7 +1081,7 @@ class TradingManager:
                     from qtrader.manager.rq_contract_fetcher import RqContractFetcher
 
                     rq_fetcher = RqContractFetcher(rq_config["username"], rq_config["password"])
-                    min_order_map = await asyncio.to_thread(rq_fetcher.fetch_min_order_quantities)
+                    min_order_map = await submit_long_task(rq_fetcher.fetch_min_order_quantities)
                     logger.info(f"从米筐获取了 {len(min_order_map)} 个合约的最小开仓手数")
                 except Exception as e:
                     logger.warning(f"从米筐获取最小开仓手数失败（不影响主流程）: {e}")
@@ -1112,12 +1093,10 @@ class TradingManager:
                 raw_symbol = contract["symbol"]  # Tq格式: "rb2505" (无交易所前缀)
                 contract["min_open_volume"] = min_order_map_upper.get(raw_symbol.upper(), 1)
 
-            # 4. 写入共享库（批量 upsert，放线程避免阻塞事件循环）
+            # 4. 写入共享库（异步批量 upsert）
             if self.public_data_service is None:
                 return
-            count = await asyncio.to_thread(
-                self.public_data_service.upsert_contracts, contracts, "tq"
-            )
+            count = await self.public_data_service.upsert_contracts(contracts, "tq")
             logger.info(f"从 TqSdk + 米筐刷新了 {count} 个合约信息")
         except Exception as e:
             logger.exception(f"刷新合约信息失败: {e}")
@@ -1210,11 +1189,6 @@ class TradingManager:
             ctx.remove(ctx.KEY_ALARM_SERVICE)
             self.alarm_service = None
             logger.info("告警服务已清理")
-
-        # 关闭共享数据库
-        from qtrader.utils.shared_database import close_shared_database
-
-        close_shared_database()
 
         logger.info("交易管理器已停止")
 

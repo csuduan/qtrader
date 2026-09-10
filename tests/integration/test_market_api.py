@@ -8,55 +8,24 @@
 - qtrader.manager.api.routes.target_position（/api/target-position，目标仓位比对/导入导出）
 
 Trader 侧数据通过覆盖 mock_trading_manager 的方法构造确定返回值；
-BarDao 与合约数据库分别以替身类替换。
+BarDao 以 AsyncMock 替换，合约库用临时 SQLite 异步数据库承载。
 
 client / mock_trading_manager 夹具来自 conftest.py。
 """
 
-from contextlib import contextmanager
+from contextlib import asynccontextmanager
 from datetime import datetime
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.orm import sessionmaker
 
 from qtrader.models.object import Exchange, TickData
-from qtrader.models.po import ContractPo
-
-# ============ 数据库查询替身 ============
-
-
-class _ChainQuery:
-    """模拟 SQLAlchemy Query：filter/order_by 返回自身以适配任意链长"""
-
-    def __init__(self, all_items=None):
-        self.all_items = all_items if all_items is not None else []
-
-    def filter(self, *criteria):
-        return self
-
-    def order_by(self, *args, **kwargs):
-        return self
-
-    def all(self):
-        return self.all_items
-
-
-class _FakeDb:
-    """模拟 Database：get_session 上下文管理器 + 会话 query"""
-
-    def __init__(self, query: _ChainQuery):
-        self.query_obj = query
-        self.get_session_calls = 0
-
-    @contextmanager
-    def get_session(self):
-        self.get_session_calls += 1
-        yield self
-
-    def query(self, *entities):
-        return self.query_obj
-
+from qtrader.models.po import Base, ContractPo
 
 # ============ 数据构造 ============
 
@@ -232,7 +201,7 @@ class TestBarsQueryAPI:
             make_bar("2026-09-01T09:02:00", 3455.0),
         ]
         dao = MagicMock()
-        dao.query_bars = MagicMock(return_value=bars)
+        dao.query_bars = AsyncMock(return_value=bars)
         with patch("qtrader.manager.api.routes.bars.BarDao", return_value=dao):
             resp = client.get(
                 "/api/bars",
@@ -354,35 +323,60 @@ class TestBarsFeedAPI:
 # ============ 合约信息 API ============
 
 
+def make_contract_db(tmp_path, contracts: list[ContractPo]) -> SimpleNamespace:
+    """构造仅包含合约表的临时 SQLite 数据库并预置合约（get_session 语义与生产一致）"""
+    sync_engine = create_engine(f"sqlite:///{tmp_path}/contracts.db")
+    Base.metadata.create_all(sync_engine, tables=[ContractPo.__table__])
+    with sessionmaker(bind=sync_engine, expire_on_commit=False)() as session:
+        session.add_all(contracts)
+        session.commit()
+
+    async_engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path}/contracts.db")
+
+    @asynccontextmanager
+    async def get_session():
+        async with async_sessionmaker(async_engine, expire_on_commit=False)() as session:
+            try:
+                yield session
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+
+    return SimpleNamespace(get_session=get_session)
+
+
 @pytest.mark.integration
 class TestContractQueryAPI:
     """合约查询端点（GET /api/contract/list、GET /api/contract/exchanges）"""
 
-    def test_list_contracts(self, client):
-        db = _FakeDb(
-            _ChainQuery(
-                all_items=[make_contract("rb2505", "SHFE"), make_contract("IM2609", "CFFEX")]
-            )
+    def test_list_contracts(self, client, tmp_path):
+        db = make_contract_db(
+            tmp_path, [make_contract("rb2505", "SHFE"), make_contract("IM2609", "CFFEX")]
         )
-        with patch("qtrader.manager.api.routes.contract.get_database", return_value=db):
+        with patch("qtrader.manager.api.routes.contract.get_async_database", return_value=db):
             resp = client.get("/api/contract/list")
 
         assert resp.status_code == 200
         body = resp.json()
         assert body["code"] == 0
         assert len(body["data"]) == 2
+        # 按 (exchange_id, symbol) 排序，CFFEX 在前
         first = body["data"][0]
-        assert first["symbol"] == "rb2505"
-        assert first["exchange_id"] == "SHFE"
-        assert first["name"] == "螺纹钢2505"
-        assert first["volume_multiple"] == 10
-        assert first["price_tick"] == 1.0
-        assert first["min_open_volume"] == first["min_volume"]
-        assert first["update_date"] == "2026-09-01"
-        assert first["updated_at"] == "2026-09-01T08:00:00"
+        assert first["symbol"] == "IM2609"
+        assert first["exchange_id"] == "CFFEX"
+        rb = body["data"][1]
+        assert rb["symbol"] == "rb2505"
+        assert rb["exchange_id"] == "SHFE"
+        assert rb["name"] == "螺纹钢2505"
+        assert rb["volume_multiple"] == 10
+        assert rb["price_tick"] == 1.0
+        assert rb["min_open_volume"] == rb["min_volume"]
+        assert rb["update_date"] == "2026-09-01"
+        assert rb["updated_at"] == "2026-09-01T08:00:00"
 
     def test_list_contracts_without_db(self, client):
-        with patch("qtrader.manager.api.routes.contract.get_database", return_value=None):
+        with patch("qtrader.manager.api.routes.contract.get_async_database", return_value=None):
             resp = client.get("/api/contract/list")
 
         assert resp.status_code == 400
@@ -392,7 +386,7 @@ class TestContractQueryAPI:
 
     def test_list_contracts_db_error(self, client):
         with patch(
-            "qtrader.manager.api.routes.contract.get_database",
+            "qtrader.manager.api.routes.contract.get_async_database",
             side_effect=RuntimeError("connection refused"),
         ):
             resp = client.get("/api/contract/list")
@@ -401,9 +395,16 @@ class TestContractQueryAPI:
         assert resp.json()["code"] == 500
         assert "获取合约列表失败" in resp.json()["message"]
 
-    def test_list_exchanges(self, client):
-        db = _FakeDb(_ChainQuery(all_items=[("SHFE",), ("SHFE",), ("CFFEX",)]))
-        with patch("qtrader.manager.api.routes.contract.get_database", return_value=db):
+    def test_list_exchanges(self, client, tmp_path):
+        db = make_contract_db(
+            tmp_path,
+            [
+                make_contract("rb2505", "SHFE"),
+                make_contract("hc2501", "SHFE"),
+                make_contract("IM2609", "CFFEX"),
+            ],
+        )
+        with patch("qtrader.manager.api.routes.contract.get_async_database", return_value=db):
             resp = client.get("/api/contract/exchanges")
 
         assert resp.status_code == 200
@@ -416,7 +417,7 @@ class TestContractQueryAPI:
         ]
 
     def test_list_exchanges_without_db(self, client):
-        with patch("qtrader.manager.api.routes.contract.get_database", return_value=None):
+        with patch("qtrader.manager.api.routes.contract.get_async_database", return_value=None):
             resp = client.get("/api/contract/exchanges")
 
         assert resp.status_code == 400

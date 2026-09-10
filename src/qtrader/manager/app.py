@@ -5,13 +5,13 @@ Q-Trader 应用主入口
 
 import asyncio
 import importlib
-import json
 import os
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
+import orjson
 import uvicorn
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
@@ -28,6 +28,7 @@ from qtrader.manager.api.responses import (
 )
 from qtrader.manager.api.websocket_manager import websocket_manager
 from qtrader.manager.manager import TradingManager
+from qtrader.utils.async_database import AsyncDatabase, close_async_database, init_async_database
 from qtrader.utils.async_event_engine import AsyncEventEngine, Event
 from qtrader.utils.config_loader import (
     AccountConfig,
@@ -36,8 +37,8 @@ from qtrader.utils.config_loader import (
     get_database_path,
     get_log_dir,
 )
-from qtrader.utils.database import Database, get_database, init_database
-from qtrader.utils.db_url import build_db_url
+from qtrader.utils.db_url import build_async_db_url
+from qtrader.utils.executors import init_executors, shutdown_executors
 from qtrader.utils.logger import get_logger, setup_logger
 
 logger = get_logger(__name__)
@@ -84,11 +85,11 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"写入 Manager PID 文件失败: {e}")
 
-    # 初始化统一共享数据库（PostgreSQL）
+    # 初始化统一共享数据库（PostgreSQL，异步）
     db_config = _app_config.data_base
     assert db_config is not None, "数据库配置缺失"
-    db_url = build_db_url(db_config)
-    _manager_db: Database = init_database(
+    db_url = build_async_db_url(db_config)
+    _manager_db: AsyncDatabase = await init_async_database(
         db_url,
         account_id="manager",
         echo=False,
@@ -97,17 +98,14 @@ async def lifespan(app: FastAPI):
     )
     logger.info(f"共享数据库已初始化: {_manager_db}")
 
-    # 验证全局数据库是否正确设置
-    from qtrader.utils.database import get_database
-
-    global_db = get_database()
-    logger.info(f"全局数据库实例: {global_db}")
+    # 初始化执行器（注册主事件循环、创建独立线程池）
+    init_executors()
 
     # 初始化默认用户
     try:
         from qtrader.manager.api.routes.auth import init_default_users
 
-        init_default_users()
+        await init_default_users()
     except Exception as e:
         logger.error(f"初始化默认用户失败: {e}")
 
@@ -177,9 +175,10 @@ async def lifespan(app: FastAPI):
         await _event_engine.stop()
 
     # 关闭数据库
-    from qtrader.utils.database import close_database
+    await close_async_database()
 
-    close_database()
+    # 关闭执行器
+    shutdown_executors()
 
     # 清理 AppContext
     ctx.clear()
@@ -265,21 +264,20 @@ def create_app() -> FastAPI:
         try:
             # 发送连接成功消息
             await websocket.send_text(
-                json.dumps(
+                orjson.dumps(
                     {
                         "type": "connected",
                         "message": "WebSocket连接成功",
                         "timestamp": datetime.now().isoformat(),
-                    },
-                    ensure_ascii=False,
-                )
+                    }
+                ).decode("utf-8")
             )
 
             # 保持连接并接收客户端消息
             while True:
                 data = await websocket.receive_text()
                 try:
-                    msg_data = json.loads(data)
+                    msg_data = orjson.loads(data)
                     logger.debug(f"收到WebSocket消息: {data}")
 
                     msg_type = msg_data.get("type")
@@ -288,7 +286,7 @@ def create_app() -> FastAPI:
                     elif msg_type == "unsubscribe_quotes":
                         websocket_manager.set_quote_subscription(websocket, False)
 
-                except json.JSONDecodeError:
+                except orjson.JSONDecodeError:
                     logger.warning(f"WebSocket消息解析失败: {data}")
 
         except WebSocketDisconnect:

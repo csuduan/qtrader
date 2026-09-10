@@ -6,8 +6,11 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from qtrader.models.po import AccountPo
-from qtrader.utils.database import session_scope
+from qtrader.utils.async_database import fetch_one, get_async_session
 from qtrader.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -16,17 +19,17 @@ logger = get_logger(__name__)
 class AccountDao:
     """账户数据访问对象"""
 
-    def save(self, account_id: str, data) -> None:
+    async def save(self, account_id: str, data) -> None:
         """持久化账户数据"""
         try:
-            with session_scope() as session:
-                self._save_with_session(session, account_id, data)
+            async with get_async_session() as session:
+                await self._save_with_session(session, account_id, data)
         except Exception as e:
             logger.exception(f"持久化账户数据失败: {e}")
 
-    def _save_with_session(self, session, account_id: str, data) -> None:
+    async def _save_with_session(self, session: AsyncSession, account_id: str, data) -> None:
         """在指定会话中持久化账户数据"""
-        account_po = session.query(AccountPo).filter_by(account_id=account_id).first()
+        account_po = await fetch_one(session, select(AccountPo).filter_by(account_id=account_id))
         if not account_po:
             account_po = AccountPo(account_id=account_id)
 
@@ -56,9 +59,9 @@ class AccountDao:
         session.add(account_po)
         logger.debug(f"账户数据已持久化: {account_id}")
 
-    def save_dict(self, session, account_id: str, data: dict[str, Any]) -> None:
+    async def save_dict(self, session: AsyncSession, account_id: str, data: dict[str, Any]) -> None:
         """在指定会话中通过字典持久化账户数据（用于批量写入）"""
-        account_po = session.query(AccountPo).filter_by(account_id=account_id).first()
+        account_po = await fetch_one(session, select(AccountPo).filter_by(account_id=account_id))
         if not account_po:
             account_po = AccountPo(account_id=account_id)
 

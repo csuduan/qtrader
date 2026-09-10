@@ -362,8 +362,9 @@ class TestTradingControlHandlers:
 
     @pytest.mark.asyncio
     async def test_reload_risk_config(self, engine, handler):
+        engine.reload_risk_control_config = AsyncMock()
         assert await handler._req_reload_risk_config({}) == {"success": True}
-        engine.reload_risk_control_config.assert_called_once()
+        engine.reload_risk_control_config.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_reload_risk_config_no_engine(self, mock_trader, handler):

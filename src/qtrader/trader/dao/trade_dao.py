@@ -5,9 +5,12 @@
 from datetime import datetime
 from decimal import Decimal
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from qtrader.models.object import TradeData
 from qtrader.models.po import TradePo
-from qtrader.utils.database import session_scope
+from qtrader.utils.async_database import fetch_one, get_async_session
 from qtrader.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -16,21 +19,23 @@ logger = get_logger(__name__)
 class TradeDao:
     """成交数据访问对象"""
 
-    def save(self, account_id: str, data: TradeData) -> None:
+    async def save(self, account_id: str, data: TradeData) -> None:
         """持久化成交数据"""
         try:
-            with session_scope() as session:
-                self._save_with_session(session, account_id, data)
+            async with get_async_session() as session:
+                await self._save_with_session(session, account_id, data)
         except Exception as e:
             logger.exception(f"持久化成交数据失败: {e}")
 
-    def _save_with_session(self, session, account_id: str, data: TradeData) -> None:
+    async def _save_with_session(
+        self, session: AsyncSession, account_id: str, data: TradeData
+    ) -> None:
         """在指定会话中持久化成交数据"""
         trade_id = data.trade_id if hasattr(data, "trade_id") else None
         if not trade_id:
             return
 
-        existing = session.query(TradePo).filter_by(trade_id=trade_id).first()
+        existing = await fetch_one(session, select(TradePo).filter_by(trade_id=trade_id))
         if existing:
             return
 

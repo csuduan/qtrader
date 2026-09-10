@@ -10,18 +10,19 @@ SettlementDao 单元测试
 from datetime import date
 
 import pytest
+from sqlalchemy import select
 
 from qtrader.models.object import AccountData, Exchange, PositionData
 from qtrader.trader.dao.settlement_dao import SettlementDao
-from qtrader.utils.database import close_database, init_database
+from qtrader.utils.async_database import close_async_database, init_async_database
 
 
 @pytest.fixture
-def dao(tmp_path):
+async def dao(tmp_path):
     """初始化测试数据库并返回 DAO 实例"""
-    init_database(f"sqlite:///{tmp_path}/test.db")
+    await init_async_database(f"sqlite+aiosqlite:///{tmp_path}/test.db")
     yield SettlementDao()
-    close_database()
+    await close_async_database()
 
 
 @pytest.fixture
@@ -83,12 +84,12 @@ def sample_positions() -> dict[str, PositionData]:
 class TestSaveSettlement:
     """结算权益快照保存测试"""
 
-    def test_save_settlement(self, dao, sample_account):
+    async def test_save_settlement(self, dao, sample_account):
         """测试保存结算权益快照"""
         settle_date = date(2026, 7, 24)
-        dao.save_settlement_snapshot("TEST", settle_date, sample_account, {})
+        await dao.save_settlement_snapshot("TEST", settle_date, sample_account, {})
 
-        records = dao.query_settlements(None, settle_date, settle_date)
+        records = await dao.query_settlements(None, settle_date, settle_date)
         assert len(records) == 1
         record = records[0]
         assert record.account_id == "TEST"
@@ -98,25 +99,25 @@ class TestSaveSettlement:
         assert float(record.withdraw) == 0.0
         assert float(record.close_profit) == 1000.0
 
-    def test_save_settlement_upsert_same_day(self, dao, sample_account):
+    async def test_save_settlement_upsert_same_day(self, dao, sample_account):
         """测试同日重复保存覆盖旧记录"""
         settle_date = date(2026, 7, 24)
-        dao.save_settlement_snapshot("TEST", settle_date, sample_account, {})
+        await dao.save_settlement_snapshot("TEST", settle_date, sample_account, {})
 
         sample_account.balance = 1010000.0
-        dao.save_settlement_snapshot("TEST", settle_date, sample_account, {})
+        await dao.save_settlement_snapshot("TEST", settle_date, sample_account, {})
 
-        records = dao.query_settlements(None, settle_date, settle_date)
+        records = await dao.query_settlements(None, settle_date, settle_date)
         assert len(records) == 1
         assert float(records[0].balance) == 1010000.0
 
-    def test_save_settlement_none_fields(self, dao):
+    async def test_save_settlement_none_fields(self, dao):
         """测试 TQ 网关账户（无出入金字段）保存"""
         account = AccountData(account_id="TQ", balance=500000.0, available=400000.0)
         settle_date = date(2026, 7, 24)
-        dao.save_settlement_snapshot("TQ", settle_date, account, {})
+        await dao.save_settlement_snapshot("TQ", settle_date, account, {})
 
-        records = dao.query_settlements(None, settle_date, settle_date)
+        records = await dao.query_settlements(None, settle_date, settle_date)
         assert len(records) == 1
         assert records[0].deposit is None
         assert records[0].withdraw is None
@@ -125,20 +126,26 @@ class TestSaveSettlement:
 class TestSavePositions:
     """结算持仓快照保存测试"""
 
-    def test_save_positions(self, dao, sample_positions):
+    async def test_save_positions(self, dao, sample_positions):
         """测试保存持仓快照，空仓被过滤"""
+        from qtrader.models.po import PositionHistoryPo
+        from qtrader.utils.async_database import get_async_session
+
         settle_date = date(2026, 7, 24)
-        dao.save_settlement_snapshot(
+        await dao.save_settlement_snapshot(
             "TEST", settle_date, AccountData(account_id="TEST", balance=0.0), sample_positions
         )
 
-        from qtrader.models.po import PositionHistoryPo
-        from qtrader.utils.database import session_scope
-
-        with session_scope() as session:
-            positions = (
-                session.query(PositionHistoryPo)
-                .filter_by(account_id="TEST", settle_date=settle_date)
+        async with get_async_session() as session:
+            positions = list(
+                (
+                    await session.execute(
+                        select(PositionHistoryPo).filter_by(
+                            account_id="TEST", settle_date=settle_date
+                        )
+                    )
+                )
+                .scalars()
                 .all()
             )
         assert len(positions) == 2
@@ -150,85 +157,93 @@ class TestSavePositions:
         assert rb.pos_short == 0
         assert float(rb.hold_price_long) == 3500.0
 
-    def test_save_positions_overwrite_same_day(self, dao, sample_positions):
+    async def test_save_positions_overwrite_same_day(self, dao, sample_positions):
         """测试同日重复保存先删旧记录"""
+        from qtrader.models.po import PositionHistoryPo
+        from qtrader.utils.async_database import get_async_session
+
         settle_date = date(2026, 7, 24)
-        dao.save_settlement_snapshot(
+        await dao.save_settlement_snapshot(
             "TEST", settle_date, AccountData(account_id="TEST", balance=0.0), sample_positions
         )
 
         # 第二次只保存一个持仓
         new_positions = {"rb2505": sample_positions["rb2505"]}
-        dao.save_settlement_snapshot("TEST", settle_date, AccountData(account_id="TEST", balance=0.0), new_positions)
+        await dao.save_settlement_snapshot(
+            "TEST", settle_date, AccountData(account_id="TEST", balance=0.0), new_positions
+        )
 
-        from qtrader.models.po import PositionHistoryPo
-        from qtrader.utils.database import session_scope
-
-        with session_scope() as session:
-            positions = (
-                session.query(PositionHistoryPo)
-                .filter_by(account_id="TEST", settle_date=settle_date)
+        async with get_async_session() as session:
+            positions = list(
+                (
+                    await session.execute(
+                        select(PositionHistoryPo).filter_by(
+                            account_id="TEST", settle_date=settle_date
+                        )
+                    )
+                )
+                .scalars()
                 .all()
             )
         assert len(positions) == 1
         assert positions[0].symbol == "rb2505"
 
-    def test_snapshot_is_atomic(self, dao, sample_account, sample_positions):
+    async def test_snapshot_is_atomic(self, dao, sample_account, sample_positions):
         """权益与持仓在同一事务写入，持仓写入异常时权益也不落库"""
         settle_date = date(2026, 7, 24)
         bad_positions = dict(sample_positions)
         bad_positions["bad"] = None  # 触发属性访问异常
 
         with pytest.raises(AttributeError):
-            dao.save_settlement_snapshot("TEST", settle_date, sample_account, bad_positions)
+            await dao.save_settlement_snapshot("TEST", settle_date, sample_account, bad_positions)
 
         # 权益快照也应回滚
-        records = dao.query_settlements(None, settle_date, settle_date)
+        records = await dao.query_settlements(None, settle_date, settle_date)
         assert records == []
 
 
 class TestQuerySettlements:
     """结算权益查询测试"""
 
-    def test_query_by_date_range_and_accounts(self, dao, sample_account):
+    async def test_query_by_date_range_and_accounts(self, dao, sample_account):
         """测试按日期范围和账户过滤查询"""
         monday = date(2026, 7, 20)
         for i in range(5):
             day = date(2026, 7, 20 + i)
             sample_account.balance = 1000000.0 + i * 1000
-            dao.save_settlement_snapshot("TEST", day, sample_account, {})
-            dao.save_settlement_snapshot("OTHER", day, sample_account, {})
+            await dao.save_settlement_snapshot("TEST", day, sample_account, {})
+            await dao.save_settlement_snapshot("OTHER", day, sample_account, {})
 
         # 查询全部账户整周
-        records = dao.query_settlements(None, monday, date(2026, 7, 24))
+        records = await dao.query_settlements(None, monday, date(2026, 7, 24))
         assert len(records) == 10
 
         # 按账户过滤
-        records = dao.query_settlements(["TEST"], monday, date(2026, 7, 24))
+        records = await dao.query_settlements(["TEST"], monday, date(2026, 7, 24))
         assert len(records) == 5
         assert all(r.account_id == "TEST" for r in records)
         # 按日期排序
         assert [r.settle_date for r in records] == sorted(r.settle_date for r in records)
 
         # 部分日期范围
-        records = dao.query_settlements(["TEST"], date(2026, 7, 22), date(2026, 7, 23))
+        records = await dao.query_settlements(["TEST"], date(2026, 7, 22), date(2026, 7, 23))
         assert len(records) == 2
 
 
 class TestBuildReportHtml:
     """周报 HTML 拼接测试"""
 
-    def test_build_report_html(self, dao, sample_account):
+    async def test_build_report_html(self, dao, sample_account):
         """测试按账户分组生成 HTML 表格"""
         from qtrader.manager.job_mgr import _build_settlement_report_html
 
         monday = date(2026, 7, 20)
         friday = date(2026, 7, 24)
-        dao.save_settlement_snapshot("AAA", monday, sample_account, {})
-        dao.save_settlement_snapshot("AAA", friday, sample_account, {})
-        dao.save_settlement_snapshot("BBB", friday, sample_account, {})
+        await dao.save_settlement_snapshot("AAA", monday, sample_account, {})
+        await dao.save_settlement_snapshot("AAA", friday, sample_account, {})
+        await dao.save_settlement_snapshot("BBB", friday, sample_account, {})
 
-        records = dao.query_settlements(None, monday, friday)
+        records = await dao.query_settlements(None, monday, friday)
         html = _build_settlement_report_html(records, friday)
 
         # 新版语义：全部账户合并一张表，每账户取最新一日数据
@@ -241,15 +256,15 @@ class TestBuildReportHtml:
         # AAA 有两条记录（周一/周五），仅取周五一条
         assert html.count(">AAA<") == 1
 
-    def test_build_report_html_none_fields(self, dao):
+    async def test_build_report_html_none_fields(self, dao):
         """测试无出入金的账户在 HTML 中显示为 -"""
         from qtrader.manager.job_mgr import _build_settlement_report_html
 
         monday = date(2026, 7, 20)
         account = AccountData(account_id="TQ", balance=500000.0, available=400000.0)
-        dao.save_settlement_snapshot("TQ", monday, account, {})
+        await dao.save_settlement_snapshot("TQ", monday, account, {})
 
-        records = dao.query_settlements(None, monday, monday)
+        records = await dao.query_settlements(None, monday, monday)
         html = _build_settlement_report_html(records, monday)
 
         assert ">TQ<" in html

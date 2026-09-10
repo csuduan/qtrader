@@ -49,6 +49,14 @@ async def proxy(tmp_path):
                 task.cancel()
 
 
+async def _wait_background_tasks() -> None:
+    """等待事件循环中已创建的后台任务结束（覆盖 create_task 包装的异步落库路径）"""
+    current = asyncio.current_task()
+    pending = {task for task in asyncio.all_tasks() if task is not current}
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+
+
 @pytest.mark.unit
 class TestTraderProxyInit:
     """初始化状态"""
@@ -540,12 +548,12 @@ class TestTraderProxyGetProcess:
 
 @pytest.mark.unit
 class TestTraderProxyLoadAccountFromDb:
-    """_load_account_from_db 初始缓存加载"""
+    """_load_account_from_db_async 初始缓存加载"""
 
     @pytest.mark.asyncio
     async def test_no_database_returns_silently(self, proxy):
-        with patch("qtrader.utils.database.get_database", return_value=None):
-            proxy._load_account_from_db()
+        with patch("qtrader.utils.async_database.get_async_database", return_value=None):
+            await proxy._load_account_from_db_async()
         assert proxy._account_cache is None
 
     @pytest.mark.asyncio
@@ -560,12 +568,12 @@ class TestTraderProxyLoadAccountFromDb:
             risk_ratio=0.2,
         )
         session = MagicMock()
-        session.query.return_value.filter_by.return_value.first.return_value = po
+        session.scalar = AsyncMock(return_value=po)
         db = MagicMock()
-        db.get_session.return_value.__enter__.return_value = session
-        db.get_session.return_value.__exit__.return_value = False
-        with patch("qtrader.utils.database.get_database", return_value=db):
-            proxy._load_account_from_db()
+        db.get_session.return_value.__aenter__.return_value = session
+        db.get_session.return_value.__aexit__.return_value = False
+        with patch("qtrader.utils.async_database.get_async_database", return_value=db):
+            await proxy._load_account_from_db_async()
         assert proxy._account_cache.balance == 1000.5
         assert proxy._account_cache.available == 800.25
         assert proxy._account_cache.margin == 200.25
@@ -578,18 +586,21 @@ class TestTraderProxyLoadAccountFromDb:
     @pytest.mark.asyncio
     async def test_no_account_row_keeps_cache_empty(self, proxy):
         session = MagicMock()
-        session.query.return_value.filter_by.return_value.first.return_value = None
+        session.scalar = AsyncMock(return_value=None)
         db = MagicMock()
-        db.get_session.return_value.__enter__.return_value = session
-        db.get_session.return_value.__exit__.return_value = False
-        with patch("qtrader.utils.database.get_database", return_value=db):
-            proxy._load_account_from_db()
+        db.get_session.return_value.__aenter__.return_value = session
+        db.get_session.return_value.__aexit__.return_value = False
+        with patch("qtrader.utils.async_database.get_async_database", return_value=db):
+            await proxy._load_account_from_db_async()
         assert proxy._account_cache is None
 
     @pytest.mark.asyncio
     async def test_db_error_swallowed(self, proxy):
-        with patch("qtrader.utils.database.get_database", side_effect=RuntimeError("db down")):
-            proxy._load_account_from_db()
+        with patch(
+            "qtrader.utils.async_database.get_async_database",
+            side_effect=RuntimeError("db down"),
+        ):
+            await proxy._load_account_from_db_async()
         assert proxy._account_cache is None
 
 
@@ -1645,25 +1656,29 @@ class TestTraderProxyEmitData:
 
     @pytest.mark.asyncio
     async def test_alarm_data_without_db_logged(self, proxy):
-        with patch("qtrader.utils.database.get_database", return_value=None):
+        with patch("qtrader.utils.async_database.get_async_database", return_value=None):
             proxy._emit_data("alarm", {"title": "t"})
+            await _wait_background_tasks()
         # 不应抛出
 
     @pytest.mark.asyncio
     async def test_alarm_data_saved_to_db(self, proxy):
         session = MagicMock()
+        session.commit = AsyncMock()
+        session.refresh = AsyncMock()
         db = MagicMock()
-        db.get_session.return_value.__enter__.return_value = session
-        db.get_session.return_value.__exit__.return_value = False
-        with patch("qtrader.utils.database.get_database", return_value=db):
+        db.get_session.return_value.__aenter__.return_value = session
+        db.get_session.return_value.__aexit__.return_value = False
+        with patch("qtrader.utils.async_database.get_async_database", return_value=db):
             proxy._emit_data(
                 "alarm", {"account_id": "test_account_001", "title": "异常", "detail": "d"}
             )
+            await _wait_background_tasks()
         alarm = session.add.call_args[0][0]
         assert alarm.account_id == "test_account_001"
         assert alarm.title == "异常"
         assert alarm.source == "TRADER"
-        session.commit.assert_called_once()
+        session.commit.assert_awaited_once()
 
 
 @pytest.mark.unit
@@ -1941,10 +1956,11 @@ class TestTraderProxyRemainingBranches:
     async def test_alarm_data_session_error_logged(self, proxy):
         """告警入库失败时仅记录错误"""
         db = MagicMock()
-        db.get_session.return_value.__enter__.side_effect = RuntimeError("db down")
-        db.get_session.return_value.__exit__.return_value = False
-        with patch("qtrader.utils.database.get_database", return_value=db):
+        db.get_session.return_value.__aenter__.side_effect = RuntimeError("db down")
+        db.get_session.return_value.__aexit__.return_value = False
+        with patch("qtrader.utils.async_database.get_async_database", return_value=db):
             proxy._emit_data("alarm", {"title": "异常"})
+            await _wait_background_tasks()
         # 不应抛出
 
     @pytest.mark.asyncio

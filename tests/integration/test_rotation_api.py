@@ -6,13 +6,14 @@
 承载 RotationInstructionPo，保证断言确定性。
 """
 
-from contextlib import contextmanager
+from contextlib import asynccontextmanager
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from qtrader.models.po import Base, RotationInstructionPo
@@ -23,18 +24,22 @@ BASE = "/api/rotation"
 
 def make_fake_db(tmp_path):
     """构造仅包含换仓指令表的临时 SQLite 数据库（get_session 语义与生产一致）"""
-    engine = create_engine(f"sqlite:///{tmp_path}/rotation.db")
-    Base.metadata.create_all(engine, tables=[RotationInstructionPo.__table__])
-    session_local = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    # 建表与种子数据写入走同步引擎；异步引擎仅供路由在请求循环内查询
+    sync_engine = create_engine(f"sqlite:///{tmp_path}/rotation.db")
+    Base.metadata.create_all(sync_engine, tables=[RotationInstructionPo.__table__])
+    session_local = sessionmaker(bind=sync_engine, autoflush=False, expire_on_commit=False)
 
-    @contextmanager
-    def get_session():
-        session = session_local()
-        try:
-            yield session
-            session.commit()
-        finally:
-            session.close()
+    async_engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path}/rotation.db")
+
+    @asynccontextmanager
+    async def get_session():
+        async with async_sessionmaker(async_engine, expire_on_commit=False)() as session:
+            try:
+                yield session
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
 
     return SimpleNamespace(get_session=get_session), session_local
 
@@ -166,7 +171,7 @@ class TestGetRotationInstructions:
             side_effect=RuntimeError("trader down")
         )
 
-        with patch("qtrader.manager.api.routes.rotation.get_database", return_value=db):
+        with patch("qtrader.utils.async_database.get_async_database", return_value=db):
             resp = client.get(BASE, params={"account_id": ACCOUNT})
 
         assert resp.status_code == 200
@@ -189,7 +194,7 @@ class TestGetRotationInstructions:
         )
         mock_trading_manager.get_rotation_instructions = AsyncMock()
 
-        with patch("qtrader.manager.api.routes.rotation.get_database", return_value=db):
+        with patch("qtrader.utils.async_database.get_async_database", return_value=db):
             resp = client.get(BASE, params={"account_id": ACCOUNT, "trading_date": "20250115"})
 
         assert resp.status_code == 200
@@ -225,7 +230,7 @@ class TestGetRotationInstruction:
     def test_detail_not_found(self, client, tmp_path):
         db, _ = make_fake_db(tmp_path)
 
-        with patch("qtrader.manager.api.routes.rotation.get_database", return_value=db):
+        with patch("qtrader.utils.async_database.get_async_database", return_value=db):
             resp = client.get(f"{BASE}/999", params={"account_id": ACCOUNT})
 
         assert resp.status_code == 400
@@ -237,7 +242,7 @@ class TestGetRotationInstruction:
         db, session_local = make_fake_db(tmp_path)
         inst_id = seed_instruction(session_local, filled_volume=2, price=3450.0)
 
-        with patch("qtrader.manager.api.routes.rotation.get_database", return_value=db):
+        with patch("qtrader.utils.async_database.get_async_database", return_value=db):
             resp = client.get(f"{BASE}/{inst_id}", params={"account_id": ACCOUNT})
 
         assert resp.status_code == 200

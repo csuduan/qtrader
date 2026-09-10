@@ -105,9 +105,6 @@ class TqGateway(BaseGateway):
         # 交易日缓存刷新标记（(日期, 是否夜盘) 变化时在 tq 线程内重算）
         self._td_check_key: tuple | None = None
 
-        # 先尝试从数据库加载合约信息
-        self.load_contracts()
-
         # 从全局订阅配置加载合约列表
         if self.subs_config.subscribe_symbols:
             self.hist_subs.update(self.subs_config.subscribe_symbols)
@@ -121,6 +118,9 @@ class TqGateway(BaseGateway):
             if self.connected:
                 logger.warning("TqSdk已连接，无需重复连接")
                 return True
+
+            # 尝试从数据库加载合约信息
+            await self.load_contracts()
 
             if self._running:
                 logger.warning("TqSdk运行中，先断开连接")

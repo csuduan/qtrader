@@ -5,9 +5,9 @@ import traceback
 from datetime import datetime
 from typing import Any, Generic, TypeVar
 
+import orjson
 from fastapi import Request, Response
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -68,24 +68,27 @@ class ErrorResponse(BaseModel):
         json_schema_extra = {"example": {"code": 9999, "message": "错误信息"}}
 
 
-def success_response(data: Any = None, message: str = "success") -> JSONResponse:
+def success_response(data: Any = None, message: str = "success") -> Response:
     """
-    成功响应包装
+    成功响应包装（orjson 序列化，FastAPI 已弃用 ORJSONResponse）
 
     Args:
         data: 响应数据
         message: 响应消息
 
     Returns:
-        JSONResponse: 包装后的响应
+        Response: 包装后的响应
     """
     # 自动转换 Pydantic 模型为 JSON 可序列化的 dict
     serialized_data = _convert_pydantic_to_dict(data)
 
-    return JSONResponse(content={"code": 0, "message": message, "data": serialized_data})
+    return Response(
+        content=orjson.dumps({"code": 0, "message": message, "data": serialized_data}),
+        media_type="application/json",
+    )
 
 
-def error_response(code: int = 9999, message: str = "操作失败") -> JSONResponse:
+def error_response(code: int = 9999, message: str = "操作失败") -> Response:
     """
     错误响应包装
 
@@ -94,12 +97,16 @@ def error_response(code: int = 9999, message: str = "操作失败") -> JSONRespo
         message: 错误信息
 
     Returns:
-        JSONResponse: 包装后的错误响应
+        Response: 包装后的错误响应
     """
-    return JSONResponse(content={"code": code, "message": message}, status_code=400)
+    return Response(
+        content=orjson.dumps({"code": code, "message": message}),
+        status_code=400,
+        media_type="application/json",
+    )
 
 
-async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+async def global_exception_handler(request: Request, exc: Exception) -> Response:
     """
     全局异常处理器
 
@@ -116,7 +123,7 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
     return error_response(code=9999, message=error_message)
 
 
-async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> Response:
     """
     HTTP异常处理器
 
@@ -126,9 +133,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException) 
     return error_response(code=exc.status_code, message=exc.detail if exc.detail else "请求失败")
 
 
-async def validation_exception_handler(
-    request: Request, exc: RequestValidationError
-) -> JSONResponse:
+async def validation_exception_handler(request: Request, exc: RequestValidationError) -> Response:
     """
     请求验证异常处理器
 

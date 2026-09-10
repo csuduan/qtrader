@@ -13,8 +13,9 @@
 
 注：qtrader_test 库采用角色级 search_path 隔离（tester→tester schema、dev→dev schema），
 连接 URL 无需再传 options，角色设置自动生效。
+异步驱动：async_database 基于 asyncpg，环境变量中的 psycopg 驱动自动替换为 asyncpg。
 
-回退：每个用例结束后 TRUNCATE 涉及表（DAO 内部 session_scope 自行 commit，
+回退：每个用例结束后 TRUNCATE 涉及表（DAO 内部 get_async_session 自行 commit，
 外部事务回滚管不到，直接清表最可靠）。
 """
 
@@ -22,7 +23,8 @@ import os
 from datetime import date, datetime
 
 import pytest
-from sqlalchemy import text
+import pytest_asyncio
+from sqlalchemy import select, text
 
 from qtrader.models.object import (
     AccountData,
@@ -36,12 +38,21 @@ from qtrader.models.object import (
     ProductType,
     TradeData,
 )
-from qtrader.utils.database import close_database, init_database, session_scope
+from qtrader.utils.async_database import (
+    close_async_database,
+    get_async_session,
+    init_async_database,
+)
 
-TEST_DB_URL = os.environ.get("QTRADER_TEST_DB_URL", "")
+TEST_DB_URL = (
+    os.environ.get("QTRADER_TEST_DB_URL", "")
+    .replace("postgresql+psycopg://", "postgresql+asyncpg://")
+    .replace("postgresql://", "postgresql+asyncpg://")
+)
 
 pytestmark = [
     pytest.mark.integration,
+    pytest.mark.asyncio(loop_scope="module"),
     pytest.mark.skipif(
         not TEST_DB_URL,
         reason="未设置 QTRADER_TEST_DB_URL，跳过真实 PostgreSQL 集成测试",
@@ -61,34 +72,28 @@ _TABLES = (
 )
 
 
-@pytest.fixture(scope="module")
-def pg_db():
+@pytest_asyncio.fixture(scope="module", loop_scope="module")
+async def pg_db():
     """模块级：初始化真实 PG 连接并建表，模块结束释放"""
-    init_database(TEST_DB_URL)
-    from qtrader.models.po import Base
-    from qtrader.utils.database import _db
-
-    Base.metadata.create_all(_db.engine)
+    await init_async_database(TEST_DB_URL)
     yield
-    close_database()
+    await close_async_database()
 
 
 @pytest.fixture()
-def clean_tables(pg_db, ensure_account):
+async def clean_tables(pg_db, ensure_account):
     """用例级：测完 TRUNCATE 回退数据（含外键引用的 accounts 表）"""
     yield
-    with session_scope() as session:
-        session.execute(
-            text(f"TRUNCATE TABLE {', '.join(_TABLES)} RESTART IDENTITY CASCADE")
-        )
+    async with get_async_session() as session:
+        await session.execute(text(f"TRUNCATE TABLE {', '.join(_TABLES)} RESTART IDENTITY CASCADE"))
 
 
 @pytest.fixture()
-def ensure_account(pg_db):
+async def ensure_account(pg_db):
     """positions/orders/trades 均有 accounts 外键，先插入账户记录"""
     from qtrader.models.po import AccountPo
 
-    with session_scope() as session:
+    async with get_async_session() as session:
         session.add(AccountPo(account_id="ITEST"))
     return "ITEST"
 
@@ -113,38 +118,38 @@ def make_bar_dict(bar_time: datetime, close: float) -> dict:
 class TestBarDaoUpsert:
     """BarDAO PG 专有 upsert（SQLite 无法编译执行，真实库是唯一可测路径）"""
 
-    def test_upsert_history_insert_then_update(self):
+    async def test_upsert_history_insert_then_update(self):
         """首次写入插入，重复写入（同 symbol/interval/bar_time）覆盖旧值"""
         from qtrader.trader.dao.bar_dao import BarDao
 
         dao = BarDao()
         t = datetime(2026, 9, 9, 21, 0)
-        assert dao.upsert_history_bars([make_bar_dict(t, 3500.0)], source="itests") == 1
+        assert await dao.upsert_history_bars([make_bar_dict(t, 3500.0)], source="itests") == 1
 
         # 冲突更新：同K线改收盘价再写
-        assert dao.upsert_history_bars([make_bar_dict(t, 3600.0)], source="itests") == 1
+        assert await dao.upsert_history_bars([make_bar_dict(t, 3600.0)], source="itests") == 1
 
-        bars = dao.query_history_bars(
+        bars = await dao.query_history_bars(
             "SHFE.rb2701", "1m", datetime(2026, 9, 9, 20, 0), datetime(2026, 9, 9, 22, 0)
         )
         assert len(bars) == 1
         assert float(bars[0].close_price) == 3600.0
 
-    def test_upsert_history_batch_distinct_times(self):
+    async def test_upsert_history_batch_distinct_times(self):
         """不同 bar_time 互不冲突，批量写入全量保留"""
         from qtrader.trader.dao.bar_dao import BarDao
 
         dao = BarDao()
         bars = [make_bar_dict(datetime(2026, 9, 9, 21, i), 3500.0 + i) for i in range(5)]
-        assert dao.upsert_history_bars(bars, source="itests") == 5
+        assert await dao.upsert_history_bars(bars, source="itests") == 5
 
-        got = dao.query_history_bars(
+        got = await dao.query_history_bars(
             "SHFE.rb2701", "1m", datetime(2026, 9, 9, 21, 0), datetime(2026, 9, 9, 21, 4)
         )
         assert len(got) == 5
         assert [float(b.close_price) for b in got] == [3500.0, 3501.0, 3502.0, 3503.0, 3504.0]
 
-    def test_upsert_today_conflict_nothing(self):
+    async def test_upsert_today_conflict_nothing(self):
         """当日K线 upsert（on_conflict_do_nothing）：重复写入不报错不重复"""
         from qtrader.trader.dao.bar_dao import BarDao
 
@@ -160,10 +165,10 @@ class TestBarDaoUpsert:
             close_price=3502.0,
             volume=100,
         )
-        assert dao.upsert_today_bars("ITEST", [bar], date(2026, 9, 9)) in (1, -1)
-        dao.upsert_today_bars("ITEST", [bar], date(2026, 9, 9))
+        assert await dao.upsert_today_bars("ITEST", [bar], date(2026, 9, 9)) in (1, -1)
+        await dao.upsert_today_bars("ITEST", [bar], date(2026, 9, 9))
 
-        got = dao.query_today_bars(
+        got = await dao.query_today_bars(
             "SHFE.rb2701", "1m", datetime(2026, 9, 9, 20, 0), datetime(2026, 9, 9, 22, 0)
         )
         assert len(got) == 1
@@ -173,7 +178,7 @@ class TestBarDaoUpsert:
 class TestPositionDao:
     """StrategyPositionService：策略持仓在真实 PG 下的增改查删"""
 
-    def test_save_load_update_clear(self):
+    async def test_save_load_update_clear(self):
         from qtrader.trader.dao.position_dao import StrategyPositionService
 
         svc = StrategyPositionService()
@@ -187,27 +192,27 @@ class TestPositionDao:
         )
         pos.extras["account_id"] = "ITEST"
 
-        assert svc.save_position(pos) is True
+        assert await svc.save_position(pos) is True
 
-        loaded = svc.load_positions("ITEST", "ITEST_STRAT")
+        loaded = await svc.load_positions("ITEST", "ITEST_STRAT")
         assert len(loaded) == 1
         assert loaded[0].pos_long_td == 2
 
         # 更新：同键再存覆盖
         pos.pos_long_td = 5
-        assert svc.save_position(pos) is True
-        assert svc.load_positions("ITEST", "ITEST_STRAT")[0].pos_long_td == 5
+        assert await svc.save_position(pos) is True
+        assert (await svc.load_positions("ITEST", "ITEST_STRAT"))[0].pos_long_td == 5
 
         # 删除
-        assert svc.clear_position("ITEST", "ITEST_STRAT", "SHFE.rb2701") is True
-        assert svc.load_positions("ITEST", "ITEST_STRAT") == []
+        assert await svc.clear_position("ITEST", "ITEST_STRAT", "SHFE.rb2701") is True
+        assert await svc.load_positions("ITEST", "ITEST_STRAT") == []
 
 
 @pytest.mark.usefixtures("clean_tables")
 class TestOrderTradeDao:
     """OrderDao/TradeDao：委托与成交在真实 PG 下的持久化与幂等"""
 
-    def test_order_save_and_update(self, ensure_account):
+    async def test_order_save_and_update(self, ensure_account):
         """订单保存后更新状态（同 account+order_id 覆盖）"""
         from qtrader.trader.dao.order_dao import OrderDao
 
@@ -222,21 +227,25 @@ class TestOrderTradeDao:
             account_id="ITEST",
             status=OrderStatus.PENDING,
         )
-        dao.save("ITEST", order)
+        await dao.save("ITEST", order)
 
         order.status = OrderStatus.FINISHED
         order.traded = 2
-        dao.save("ITEST", order)
+        await dao.save("ITEST", order)
 
-        with session_scope() as session:
+        async with get_async_session() as session:
             from qtrader.models.po import OrderPo
 
-            rows = session.query(OrderPo).filter_by(account_id="ITEST").all()
+            rows = (
+                (await session.execute(select(OrderPo).filter_by(account_id="ITEST")))
+                .scalars()
+                .all()
+            )
             assert len(rows) == 1
             assert rows[0].status == "FINISHED"
             assert rows[0].volume_left == 0
 
-    def test_trade_save_idempotent(self, ensure_account):
+    async def test_trade_save_idempotent(self, ensure_account):
         """成交按 trade_id 幂等：重复保存不产生重复记录"""
         from qtrader.trader.dao.trade_dao import TradeDao
 
@@ -252,13 +261,17 @@ class TestOrderTradeDao:
             account_id="ITEST",
             trade_time=datetime(2026, 9, 9, 21, 0, 0),
         )
-        dao.save("ITEST", trade)
-        dao.save("ITEST", trade)
+        await dao.save("ITEST", trade)
+        await dao.save("ITEST", trade)
 
-        with session_scope() as session:
+        async with get_async_session() as session:
             from qtrader.models.po import TradePo
 
-            rows = session.query(TradePo).filter_by(account_id="ITEST").all()
+            rows = (
+                (await session.execute(select(TradePo).filter_by(account_id="ITEST")))
+                .scalars()
+                .all()
+            )
             assert len(rows) == 1
             assert float(rows[0].price) == 3500.0
 
@@ -267,7 +280,7 @@ class TestOrderTradeDao:
 class TestSettlementDao:
     """SettlementDao：结算快照同日覆盖与范围查询"""
 
-    def test_save_same_day_overwrite_and_query(self, ensure_account):
+    async def test_save_same_day_overwrite_and_query(self, ensure_account):
         from qtrader.trader.dao.settlement_dao import SettlementDao
 
         dao = SettlementDao()
@@ -277,10 +290,10 @@ class TestSettlementDao:
             available=90000.0,
         )
         d = date(2026, 9, 9)
-        dao.save_settlement_snapshot("ITEST", d, account, {})
+        await dao.save_settlement_snapshot("ITEST", d, account, {})
         account.balance = 105000.0
-        dao.save_settlement_snapshot("ITEST", d, account, {})
+        await dao.save_settlement_snapshot("ITEST", d, account, {})
 
-        records = dao.query_settlements(["ITEST"], date(2026, 9, 1), date(2026, 9, 30))
+        records = await dao.query_settlements(["ITEST"], date(2026, 9, 1), date(2026, 9, 30))
         assert len(records) == 1
         assert float(records[0].balance) == 105000.0

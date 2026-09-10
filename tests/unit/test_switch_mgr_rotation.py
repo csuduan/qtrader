@@ -67,11 +67,19 @@ def make_instruction(**overrides) -> RotationInstructionPo:
 
 
 def scope_with(session: MagicMock) -> MagicMock:
-    """返回一个模拟的 session_scope，进入时返回给定 session"""
+    """返回一个模拟的 get_async_session，进入时返回给定 session"""
     cm = MagicMock()
-    cm.__enter__.return_value = session
-    cm.__exit__.return_value = False
+    cm.__aenter__.return_value = session
+    cm.__aexit__.return_value = False
     return MagicMock(return_value=cm)
+
+
+def async_session() -> MagicMock:
+    """构造 AsyncSession 模拟对象（merge/execute 为 await 调用）"""
+    session = MagicMock()
+    session.merge = AsyncMock()
+    session.execute = AsyncMock()
+    return session
 
 
 @pytest.mark.unit
@@ -91,11 +99,11 @@ class TestSwitchMgrInit:
         assert mgr.all_instructions == []
         assert mgr._stop_requested is False
 
-    def test_start_loads_instructions(self):
+    async def test_start_loads_instructions(self):
         """start() 应触发指令加载"""
         mgr = build_manager()
-        mgr.load_rotation_instructions = MagicMock()
-        mgr.start()
+        mgr.load_rotation_instructions = AsyncMock()
+        await mgr.start()
         mgr.load_rotation_instructions.assert_called_once()
 
     def test_stop_rotation_without_working(self):
@@ -127,7 +135,7 @@ class TestSwitchMgrInit:
 class TestSwitchMgrLoadInstructions:
     """load_rotation_instructions 加载与订阅"""
 
-    def test_load_populates_and_subscribes_symbols(self):
+    async def test_load_populates_and_subscribes_symbols(self):
         """加载成功后应填充指令列表并订阅去重后的合约"""
         mgr = build_manager()
         instructions = [
@@ -135,10 +143,12 @@ class TestSwitchMgrLoadInstructions:
             make_instruction(id=2, symbol="SHFE.rb2509"),
             make_instruction(id=3, symbol="SHFE.hc2509"),
         ]
-        session = MagicMock()
-        session.query.return_value.filter.return_value.all.return_value = instructions
-        with patch("qtrader.trader.switch_mgr.session_scope", scope_with(session)):
-            mgr.load_rotation_instructions()
+        session = async_session()
+        with (
+            patch("qtrader.trader.switch_mgr.get_async_session", scope_with(session)),
+            patch("qtrader.trader.switch_mgr.fetch_all", AsyncMock(return_value=instructions)),
+        ):
+            await mgr.load_rotation_instructions()
         assert mgr.all_instructions == instructions
         mgr.trading_engine.subscribe_symbol.assert_called_once()
         assert set(mgr.trading_engine.subscribe_symbol.call_args[0][0]) == {
@@ -146,14 +156,14 @@ class TestSwitchMgrLoadInstructions:
             "SHFE.hc2509",
         }
 
-    def test_load_with_db_error_keeps_empty_list(self):
+    async def test_load_with_db_error_keeps_empty_list(self):
         """数据库异常时不应抛出，指令列表保持为空"""
         mgr = build_manager()
         with patch(
-            "qtrader.trader.switch_mgr.session_scope",
+            "qtrader.trader.switch_mgr.get_async_session",
             MagicMock(side_effect=RuntimeError("db down")),
         ):
-            mgr.load_rotation_instructions()
+            await mgr.load_rotation_instructions()
         assert mgr.all_instructions == []
         mgr.trading_engine.subscribe_symbol.assert_not_called()
 
@@ -162,27 +172,27 @@ class TestSwitchMgrLoadInstructions:
 class TestSwitchMgrUpdateDeleteInstruction:
     """update_instruction / delete_instruction"""
 
-    def test_update_instruction_requires_id(self):
+    async def test_update_instruction_requires_id(self):
         """缺少指令ID时应抛出 ValueError"""
         mgr = build_manager()
         with pytest.raises(ValueError, match="缺少指令ID"):
-            mgr.update_instruction({})
+            await mgr.update_instruction({})
 
-    def test_update_instruction_unknown_id(self):
+    async def test_update_instruction_unknown_id(self):
         """指令不存在时应抛出 ValueError"""
         mgr = build_manager()
         mgr.all_instructions = [make_instruction(id=1)]
         with pytest.raises(ValueError, match="指令不存在"):
-            mgr.update_instruction({"instruction_id": 99})
+            await mgr.update_instruction({"instruction_id": 99})
 
-    def test_update_instruction_applies_fields_and_persists(self):
+    async def test_update_instruction_applies_fields_and_persists(self):
         """应更新字段、同步剩余手数并 merge 入库"""
         mgr = build_manager()
         inst = make_instruction(id=7, volume=5, filled_volume=2, remaining_volume=3)
         mgr.all_instructions = [inst]
-        session = MagicMock()
-        with patch("qtrader.trader.switch_mgr.session_scope", scope_with(session)):
-            updated = mgr.update_instruction(
+        session = async_session()
+        with patch("qtrader.trader.switch_mgr.get_async_session", scope_with(session)):
+            updated = await mgr.update_instruction(
                 {
                     "instruction_id": 7,
                     "enabled": False,
@@ -201,9 +211,9 @@ class TestSwitchMgrUpdateDeleteInstruction:
         # volume 更新时同步剩余手数: max(0, 4-2) = 2
         assert inst.remaining_volume == 2
         assert inst.updated_at is not None
-        session.merge.assert_called_once_with(inst)
+        session.merge.assert_awaited_once_with(inst)
 
-    def test_delete_instruction_filters_memory_and_db(self):
+    async def test_delete_instruction_filters_memory_and_db(self):
         """删除指令应同时过滤内存列表并标记入库 is_deleted"""
         mgr = build_manager()
         mgr.all_instructions = [
@@ -211,13 +221,12 @@ class TestSwitchMgrUpdateDeleteInstruction:
             make_instruction(id=2),
             make_instruction(id=3),
         ]
-        session = MagicMock()
-        with patch("qtrader.trader.switch_mgr.session_scope", scope_with(session)):
-            mgr.delete_instruction([1, 3])
+        session = async_session()
+        with patch("qtrader.trader.switch_mgr.get_async_session", scope_with(session)):
+            await mgr.delete_instruction([1, 3])
         assert [x.id for x in mgr.all_instructions] == [2]
-        session.query.return_value.filter.return_value.update.assert_called_once_with(
-            {"is_deleted": True}, synchronize_session=False
-        )
+        session.execute.assert_awaited_once()
+        assert session.execute.await_args[0][0].compile().params["is_deleted"] is True
 
 
 @pytest.mark.unit
@@ -227,71 +236,71 @@ class TestSwitchMgrImportCsvValidation:
     def setup_method(self):
         self.mgr = build_manager()
         self.mgr.trading_engine.std_symbol = lambda s: s
-        self.mgr.load_rotation_instructions = MagicMock()
+        self.mgr.load_rotation_instructions = AsyncMock()
 
-    def test_import_csv_empty_text_raises(self):
+    async def test_import_csv_empty_text_raises(self):
         """只有表头时视为空文件，抛出 ValueError"""
         with pytest.raises(ValueError, match="CSV文件为空"):
-            self.mgr.import_csv("account,strategy\n", "20260818_DQ.csv")
+            await self.mgr.import_csv("account,strategy\n", "20260818_DQ.csv")
 
-    def test_import_csv_filename_without_date_raises(self):
+    async def test_import_csv_filename_without_date_raises(self):
         """文件名中无 8 位日期时抛出 ValueError"""
         with pytest.raises(ValueError, match="无法提取交易日"):
-            self.mgr.import_csv(
+            await self.mgr.import_csv(
                 "account,strategy,symbol,offset,direction,volume\nDQ,S1,rb2509,Open,Buy,1\n",
                 "rotation.csv",
             )
 
-    def test_import_csv_incomplete_row_skipped(self):
+    async def test_import_csv_incomplete_row_skipped(self):
         """列数不足 6 的行跳过并计入失败"""
-        session = MagicMock()
-        with patch("qtrader.trader.switch_mgr.session_scope", scope_with(session)):
-            result = self.mgr.import_csv(
+        session = async_session()
+        with patch("qtrader.trader.switch_mgr.get_async_session", scope_with(session)):
+            result = await self.mgr.import_csv(
                 "account,strategy,symbol,offset,direction,volume\nDQ,S1\n",
                 "20260818_DQ.csv",
             )
         assert result["imported"] == 0
         assert result["failed"] == 1
 
-    def test_import_csv_account_mismatch_skipped(self):
+    async def test_import_csv_account_mismatch_skipped(self):
         """账户 ID 与配置不一致的行跳过"""
-        session = MagicMock()
-        with patch("qtrader.trader.switch_mgr.session_scope", scope_with(session)):
-            result = self.mgr.import_csv(
+        session = async_session()
+        with patch("qtrader.trader.switch_mgr.get_async_session", scope_with(session)):
+            result = await self.mgr.import_csv(
                 "account,strategy,symbol,offset,direction,volume\nXX,S1,rb2509,Open,Buy,1\n",
                 "20260818_DQ.csv",
             )
         assert result["imported"] == 0
         assert result["failed"] == 1
 
-    def test_import_csv_invalid_volume_skipped(self):
+    async def test_import_csv_invalid_volume_skipped(self):
         """手数非数字时跳过"""
-        session = MagicMock()
-        with patch("qtrader.trader.switch_mgr.session_scope", scope_with(session)):
-            result = self.mgr.import_csv(
+        session = async_session()
+        with patch("qtrader.trader.switch_mgr.get_async_session", scope_with(session)):
+            result = await self.mgr.import_csv(
                 "account,strategy,symbol,offset,direction,volume\nDQ,S1,rb2509,Open,Buy,abc\n",
                 "20260818_DQ.csv",
             )
         assert result["imported"] == 0
         assert result["failed"] == 1
 
-    def test_import_csv_nonpositive_volume_skipped(self):
+    async def test_import_csv_nonpositive_volume_skipped(self):
         """手数小于等于 0 时跳过"""
-        session = MagicMock()
-        with patch("qtrader.trader.switch_mgr.session_scope", scope_with(session)):
-            result = self.mgr.import_csv(
+        session = async_session()
+        with patch("qtrader.trader.switch_mgr.get_async_session", scope_with(session)):
+            result = await self.mgr.import_csv(
                 "account,strategy,symbol,offset,direction,volume\nDQ,S1,rb2509,Open,Buy,0\n",
                 "20260818_DQ.csv",
             )
         assert result["imported"] == 0
         assert result["failed"] == 1
 
-    def test_import_csv_row_error_recorded(self):
+    async def test_import_csv_row_error_recorded(self):
         """行内解析异常时应记入 errors 并计入失败"""
         self.mgr.trading_engine.std_symbol = MagicMock(side_effect=ValueError("bad symbol"))
-        session = MagicMock()
-        with patch("qtrader.trader.switch_mgr.session_scope", scope_with(session)):
-            result = self.mgr.import_csv(
+        session = async_session()
+        with patch("qtrader.trader.switch_mgr.get_async_session", scope_with(session)):
+            result = await self.mgr.import_csv(
                 "account,strategy,symbol,offset,direction,volume\nDQ,S1,rb2509,Open,Buy,1\n",
                 "20260818_DQ.csv",
             )
@@ -307,52 +316,51 @@ class TestSwitchMgrImportCsvModes:
     def setup_method(self):
         self.mgr = build_manager()
         self.mgr.trading_engine.std_symbol = lambda s: s
-        self.mgr.load_rotation_instructions = MagicMock()
+        self.mgr.load_rotation_instructions = AsyncMock()
 
-    def _import_two_rows(self, mode):
+    async def _import_two_rows(self, mode):
         """导入两行数据并返回 (result, session)"""
         csv_text = (
             "account,strategy,symbol,offset,direction,volume,order_time\n"
             "DQ,S1,rb2509,开仓,买入,1,09:00:00\n"
             "DQ,S2,rb2509,平仓,卖出,2,09:30:00\n"
         )
-        session = MagicMock()
-        with patch("qtrader.trader.switch_mgr.session_scope", scope_with(session)):
-            result = self.mgr.import_csv(csv_text, "20260818_DQ.csv", mode=mode)
+        session = async_session()
+        with patch("qtrader.trader.switch_mgr.get_async_session", scope_with(session)):
+            result = await self.mgr.import_csv(csv_text, "20260818_DQ.csv", mode=mode)
         return result, session
 
-    def test_import_csv_replace_mode(self):
+    async def test_import_csv_replace_mode(self):
         """replace 模式应先软删除已有记录再批量写入"""
-        result, session = self._import_two_rows("replace")
+        result, session = await self._import_two_rows("replace")
         assert result["imported"] == 2
         assert result["failed"] == 0
-        session.query.return_value.filter_by.return_value.update.assert_called_once_with(
-            {"is_deleted": True}
-        )
-        saved = session.bulk_save_objects.call_args[0][0]
+        session.execute.assert_awaited_once()
+        assert session.execute.await_args[0][0].compile().params["is_deleted"] is True
+        saved = session.add_all.call_args[0][0]
         assert len(saved) == 2
 
-    def test_import_csv_append_mode_keeps_existing(self):
+    async def test_import_csv_append_mode_keeps_existing(self):
         """append 模式不应触发删除，只批量写入"""
-        result, session = self._import_two_rows("append")
+        result, session = await self._import_two_rows("append")
         assert result["imported"] == 2
-        session.query.assert_not_called()
-        assert len(session.bulk_save_objects.call_args[0][0]) == 2
+        session.execute.assert_not_awaited()
+        assert len(session.add_all.call_args[0][0]) == 2
 
-    def test_import_csv_maps_chinese_and_english_terms(self):
+    async def test_import_csv_maps_chinese_and_english_terms(self):
         """开平/方向应完成中文与英文关键字到枚举值的映射"""
-        _, session = self._import_two_rows("append")
-        saved = session.bulk_save_objects.call_args[0][0]
+        _, session = await self._import_two_rows("append")
+        saved = session.add_all.call_args[0][0]
         by_strategy = {po.strategy_id: po for po in saved}
         assert by_strategy["S1"].offset == "OPEN"
         assert by_strategy["S1"].direction == "BUY"
         assert by_strategy["S2"].offset == "CLOSE"
         assert by_strategy["S2"].direction == "SELL"
 
-    def test_import_csv_builds_po_fields(self):
+    async def test_import_csv_builds_po_fields(self):
         """生成的 PO 应带齐解析出的字段与文件来源信息"""
-        _, session = self._import_two_rows("append")
-        po = session.bulk_save_objects.call_args[0][0][0]
+        _, session = await self._import_two_rows("append")
+        po = session.add_all.call_args[0][0][0]
         assert po.account_id == "DQ"
         assert po.symbol == "rb2509"
         assert po.volume == 1
@@ -374,7 +382,7 @@ class TestExecutePositionRotation:
     def setup_method(self):
         self.mgr = build_manager()
         self.mgr.config.trading.risk_control.max_split_volume = 10
-        self.mgr._update_instructions = MagicMock()
+        self.mgr._update_instructions = AsyncMock()
 
     @pytest.mark.asyncio
     async def test_skips_when_already_working(self):
@@ -478,7 +486,7 @@ class TestMonitorOrderCommands:
 
     def setup_method(self):
         self.mgr = build_manager()
-        self.mgr._update_instructions = MagicMock()
+        self.mgr._update_instructions = AsyncMock()
 
     @pytest.mark.asyncio
     async def test_returns_when_no_active_instructions(self):
@@ -648,45 +656,45 @@ class TestSnapshotAndUpdateInstructions:
         assert snap["error_message"] is None
         assert snap["updated_at"] is not None
 
-    def test_update_empty_snapshots_is_noop(self):
+    async def test_update_empty_snapshots_is_noop(self):
         mgr = build_manager()
-        with patch("qtrader.trader.switch_mgr.session_scope") as mock_scope:
-            mgr._update_instructions([])
+        with patch("qtrader.trader.switch_mgr.get_async_session") as mock_scope:
+            await mgr._update_instructions([])
         mock_scope.assert_not_called()
 
-    def test_update_builds_query_without_id(self):
+    async def test_update_builds_query_without_id(self):
         mgr = build_manager()
-        session = MagicMock()
+        session = async_session()
         snapshots = [{"id": 1, "status": "COMPLETED", "filled_volume": 2}]
-        with patch("qtrader.trader.switch_mgr.session_scope", scope_with(session)):
-            mgr._update_instructions(snapshots)
-        update_mock = session.query.return_value.filter.return_value.update
-        update_mock.assert_called_once_with(
-            {"status": "COMPLETED", "filled_volume": 2}, synchronize_session=False
-        )
+        with patch("qtrader.trader.switch_mgr.get_async_session", scope_with(session)):
+            await mgr._update_instructions(snapshots)
+        session.execute.assert_awaited_once()
+        params = session.execute.await_args[0][0].compile().params
+        assert params["status"] == "COMPLETED"
+        assert params["filled_volume"] == 2
 
-    def test_update_db_error_swallowed(self):
+    async def test_update_db_error_swallowed(self):
         """写库异常不应向外抛出"""
         mgr = build_manager()
         with patch(
-            "qtrader.trader.switch_mgr.session_scope",
+            "qtrader.trader.switch_mgr.get_async_session",
             MagicMock(side_effect=RuntimeError("db down")),
         ):
-            mgr._update_instructions([{"id": 1, "status": "FAILED"}])
+            await mgr._update_instructions([{"id": 1, "status": "FAILED"}])
 
 
 @pytest.mark.unit
 class TestSwitchMgrEdgeBranches:
     """其余边界分支：必填字段缺失、_on_cmd_changed、_update_instruction"""
 
-    def test_import_csv_blank_required_field_skipped(self):
+    async def test_import_csv_blank_required_field_skipped(self):
         """必填字段（账户/策略/合约）为空时跳过该行"""
         mgr = build_manager()
         mgr.trading_engine.std_symbol = lambda s: s
-        mgr.load_rotation_instructions = MagicMock()
-        session = MagicMock()
-        with patch("qtrader.trader.switch_mgr.session_scope", scope_with(session)):
-            result = mgr.import_csv(
+        mgr.load_rotation_instructions = AsyncMock()
+        session = async_session()
+        with patch("qtrader.trader.switch_mgr.get_async_session", scope_with(session)):
+            result = await mgr.import_csv(
                 "account,strategy,symbol,offset,direction,volume\n ,S1,rb2509,Open,Buy,1\n",
                 "20260818_DQ.csv",
             )
@@ -703,23 +711,23 @@ class TestSwitchMgrEdgeBranches:
         mgr = build_manager()
         mgr._on_cmd_changed(Mock(is_finished=True))
 
-    def test_update_instruction_merges_to_db(self):
+    async def test_update_instruction_merges_to_db(self):
         """旧版 _update_instruction 应 merge 入库"""
         mgr = build_manager()
         inst = make_instruction(id=3)
-        session = MagicMock()
-        with patch("qtrader.trader.switch_mgr.session_scope", scope_with(session)):
-            mgr._update_instruction(inst)
-        session.merge.assert_called_once_with(inst)
+        session = async_session()
+        with patch("qtrader.trader.switch_mgr.get_async_session", scope_with(session)):
+            await mgr._update_instruction(inst)
+        session.merge.assert_awaited_once_with(inst)
 
-    def test_update_instruction_db_error_swallowed(self):
+    async def test_update_instruction_db_error_swallowed(self):
         """旧版 _update_instruction 写库异常不应抛出"""
         mgr = build_manager()
         with patch(
-            "qtrader.trader.switch_mgr.session_scope",
+            "qtrader.trader.switch_mgr.get_async_session",
             MagicMock(side_effect=RuntimeError("db down")),
         ):
-            mgr._update_instruction(make_instruction(id=3))
+            await mgr._update_instruction(make_instruction(id=3))
 
     def test_check_instruction_error_returns_true(self):
         """检查过程抛异常时应返回 True（放行由后续流程兜底）"""
@@ -739,7 +747,7 @@ class TestMonitorOrderCommandsEdge:
 
     def setup_method(self):
         self.mgr = build_manager()
-        self.mgr._update_instructions = MagicMock()
+        self.mgr._update_instructions = AsyncMock()
 
     @pytest.mark.asyncio
     async def test_running_instruction_without_cmd_id_skipped(self):
@@ -782,69 +790,75 @@ class TestScanAndProcessOrdersEdge:
         self.mgr = build_manager()
         self.today = datetime.now().strftime("%Y%m%d")
 
-    def test_scan_no_directory_returns(self, tmp_path):
+    async def test_scan_no_directory_returns(self, tmp_path):
         """目录不存在时直接返回"""
         self.mgr.switchPos_files_dir = str(tmp_path / "missing")
-        self.mgr.import_csv = MagicMock()
-        with patch("qtrader.trader.switch_mgr.session_scope"):
-            self.mgr.scan_and_process_orders()
+        self.mgr.import_csv = AsyncMock()
+        with patch("qtrader.trader.switch_mgr.get_async_session"):
+            await self.mgr.scan_and_process_orders()
         self.mgr.import_csv.assert_not_called()
 
-    def test_scan_all_files_fresh_returns(self, tmp_path):
+    async def test_scan_all_files_fresh_returns(self, tmp_path):
         """全部文件均为新写入时不导入"""
         self.mgr.switchPos_files_dir = str(tmp_path)
-        self.mgr.import_csv = MagicMock()
+        self.mgr.import_csv = AsyncMock()
         self._make_file(tmp_path, f"{self.today}_DQ_fresh.csv", time.time())
-        with patch("qtrader.trader.switch_mgr.session_scope"):
-            self.mgr.scan_and_process_orders()
+        with patch("qtrader.trader.switch_mgr.get_async_session"):
+            await self.mgr.scan_and_process_orders()
         self.mgr.import_csv.assert_not_called()
 
-    def test_scan_skips_already_imported_file(self, tmp_path):
+    async def test_scan_skips_already_imported_file(self, tmp_path):
         """已导入过的文件不再导入"""
         self.mgr.switchPos_files_dir = str(tmp_path)
-        self.mgr.import_csv = MagicMock()
+        self.mgr.import_csv = AsyncMock()
         self._make_file(tmp_path, f"{self.today}_DQ_done.csv", time.time() - 100)
         session = MagicMock()
-        session.query.return_value.filter_by.return_value.first.return_value = Mock()
-        with patch("qtrader.trader.switch_mgr.session_scope", scope_with(session)):
-            self.mgr.scan_and_process_orders()
+        with (
+            patch("qtrader.trader.switch_mgr.get_async_session", scope_with(session)),
+            patch("qtrader.trader.switch_mgr.fetch_one", AsyncMock(return_value=Mock())),
+        ):
+            await self.mgr.scan_and_process_orders()
         self.mgr.import_csv.assert_not_called()
         session.add.assert_not_called()
 
-    def test_scan_unreadable_file_skipped(self, tmp_path):
+    async def test_scan_unreadable_file_skipped(self, tmp_path):
         """读取文件失败（编码错误）时跳过且不写导入记录"""
         self.mgr.switchPos_files_dir = str(tmp_path)
-        self.mgr.import_csv = MagicMock()
+        self.mgr.import_csv = AsyncMock()
         f = self._make_file(tmp_path, f"{self.today}_DQ_bad.csv", time.time() - 100)
         # 写入无法用 gbk 解码的内容，并回设稳定修改时间
         f.write_bytes(b"\xff\x00\xff\x00")
         old = time.time() - 100
         os.utime(f, (old, old))
         session = MagicMock()
-        session.query.return_value.filter_by.return_value.first.return_value = None
-        with patch("qtrader.trader.switch_mgr.session_scope", scope_with(session)):
-            self.mgr.scan_and_process_orders()
+        with (
+            patch("qtrader.trader.switch_mgr.get_async_session", scope_with(session)),
+            patch("qtrader.trader.switch_mgr.fetch_one", AsyncMock(return_value=None)),
+        ):
+            await self.mgr.scan_and_process_orders()
         self.mgr.import_csv.assert_not_called()
         session.add.assert_not_called()
 
-    def test_scan_import_failure_not_recorded(self, tmp_path):
+    async def test_scan_import_failure_not_recorded(self, tmp_path):
         """导入失败时不写导入记录（下轮重试）"""
         self.mgr.switchPos_files_dir = str(tmp_path)
-        self.mgr.import_csv = MagicMock(side_effect=ValueError("bad csv"))
+        self.mgr.import_csv = AsyncMock(side_effect=ValueError("bad csv"))
         self._make_file(tmp_path, f"{self.today}_DQ_err.csv", time.time() - 100)
         session = MagicMock()
-        session.query.return_value.filter_by.return_value.first.return_value = None
-        with patch("qtrader.trader.switch_mgr.session_scope", scope_with(session)):
-            self.mgr.scan_and_process_orders()
+        with (
+            patch("qtrader.trader.switch_mgr.get_async_session", scope_with(session)),
+            patch("qtrader.trader.switch_mgr.fetch_one", AsyncMock(return_value=None)),
+        ):
+            await self.mgr.scan_and_process_orders()
         session.add.assert_not_called()
 
-    def test_scan_session_error_swallowed(self, tmp_path):
+    async def test_scan_session_error_swallowed(self, tmp_path):
         """会话异常由外层捕获，不向外抛出"""
         self.mgr.switchPos_files_dir = str(tmp_path)
-        self.mgr.import_csv = MagicMock()
+        self.mgr.import_csv = AsyncMock()
         self._make_file(tmp_path, f"{self.today}_DQ_x.csv", time.time() - 100)
         with patch(
-            "qtrader.trader.switch_mgr.session_scope",
+            "qtrader.trader.switch_mgr.get_async_session",
             MagicMock(side_effect=RuntimeError("db down")),
         ):
-            self.mgr.scan_and_process_orders()
+            await self.mgr.scan_and_process_orders()

@@ -17,43 +17,43 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/api/order", tags=["委托单"])
 
 
-def _query_orders_from_db(
+async def _query_orders_from_db(
     status: str,
     account_id: str | None,
     limit: int,
     offset: int,
 ):
     """从PG查询历史委托单（已成交/废单），默认过滤当前交易日数据"""
-    from sqlalchemy import func
+    from sqlalchemy import func, select
 
     from qtrader.models.po import OrderPo
-    from qtrader.utils.database import get_database
+    from qtrader.utils.async_database import get_async_database
 
-    db = get_database()
+    db = get_async_database()
     if not db:
         return error_response(code=500, message="数据库未初始化")
 
-    with db.get_session() as session:
-        query = session.query(OrderPo)
+    async with db.get_session() as session:
+        stmt = select(OrderPo)
         if account_id:
-            query = query.filter(OrderPo.account_id == account_id)
+            stmt = stmt.filter(OrderPo.account_id == account_id)
 
         if status == "FINISHED":
-            query = query.filter(
+            stmt = stmt.filter(
                 (OrderPo.status == "FINISHED") & (OrderPo.volume_left < OrderPo.volume_orign)
             )
         elif status == "REJECTED":
-            query = query.filter(
+            stmt = stmt.filter(
                 (OrderPo.status == "REJECTED")
                 | ((OrderPo.status == "FINISHED") & (OrderPo.volume_left == OrderPo.volume_orign))
             )
 
         # 默认最近2天的数据
         last_day = date.today() - timedelta(days=1)
-        query = query.filter(func.date(OrderPo.insert_date_time) >= last_day)
+        stmt = stmt.filter(func.date(OrderPo.insert_date_time) >= last_day)
 
-        query = query.order_by(OrderPo.insert_date_time.desc())
-        order_pos = query.offset(offset).limit(limit).all()
+        stmt = stmt.order_by(OrderPo.insert_date_time.desc())
+        order_pos = (await session.execute(stmt.offset(offset).limit(limit))).scalars().all()
 
         return success_response(
             data=[
@@ -104,7 +104,7 @@ async def get_orders(
             orders_list = await trading_manager.get_active_orders(account_id)
         elif status in ("FINISHED", "REJECTED"):
             # 查询已完成和废单只查询当前交易日数据
-            return _query_orders_from_db(status, account_id, limit, offset)
+            return await _query_orders_from_db(status, account_id, limit, offset)
         else:
             # status 为空：优先走 RPC 查询 Trader 所有订单
             orders_list = await trading_manager.get_orders(account_id)

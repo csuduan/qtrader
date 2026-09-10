@@ -8,7 +8,7 @@
 """
 
 from datetime import date, timedelta
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -43,7 +43,7 @@ def _make_email_config(**overrides) -> EmailConfig:
     return EmailConfig(**defaults)
 
 
-def _run_report(
+async def _run_report(
     job_manager: ManagerJobManager,
     email_config: EmailConfig,
     records,
@@ -60,8 +60,8 @@ def _run_report(
         mock_loader.return_value.load_config.return_value = Mock(
             email=email_config, account_ids=account_ids
         )
-        mock_dao.return_value.query_settlements.return_value = records
-        job_manager.send_weekly_settlement_report()
+        mock_dao.return_value.query_settlements = AsyncMock(return_value=records)
+        await job_manager.send_weekly_settlement_report()
     _run_report.last_dao_mock = mock_dao
     return mock_send
 
@@ -75,27 +75,27 @@ def job_manager() -> ManagerJobManager:
 class TestWeeklySettlementReport:
     """结算权益周报任务测试"""
 
-    def test_blacklist_accounts_excluded(self, job_manager):
+    async def test_blacklist_accounts_excluded(self, job_manager):
         """黑名单账户被排除：query_settlements 只查询非黑名单账户"""
         email_config = _make_email_config(exclude_accounts=["TEST"])
 
-        mock_send = _run_report(job_manager, email_config, _make_records())
+        mock_send = await _run_report(job_manager, email_config, _make_records())
 
         mock_send.assert_called_once()
         queried = _run_report.last_dao_mock.return_value.query_settlements.call_args[0][0]
         assert queried == ["DQ", "GW"]
 
-    def test_all_accounts_blacklisted_skips_send(self, job_manager):
+    async def test_all_accounts_blacklisted_skips_send(self, job_manager):
         """全部账户都在黑名单时不发送邮件"""
         email_config = _make_email_config(exclude_accounts=["DQ", "GW", "TEST"])
 
-        mock_send = _run_report(job_manager, email_config, _make_records())
+        mock_send = await _run_report(job_manager, email_config, _make_records())
 
         mock_send.assert_not_called()
 
-    def test_only_configured_accounts_sent(self, job_manager):
+    async def test_only_configured_accounts_sent(self, job_manager):
         """仅查询 config.yaml 中配置的账户：未配置账户（TEST）不进入查询参数"""
-        mock_send = _run_report(
+        mock_send = await _run_report(
             job_manager, _make_email_config(), _make_records(), account_ids=["DQ", "GW"]
         )
 
@@ -103,9 +103,9 @@ class TestWeeklySettlementReport:
         queried = _run_report.last_dao_mock.return_value.query_settlements.call_args[0][0]
         assert queried == ["DQ", "GW"]
 
-    def test_no_blacklist_sends_all_accounts(self, job_manager):
+    async def test_no_blacklist_sends_all_accounts(self, job_manager):
         """未配置黑名单时发送全部账户"""
-        mock_send = _run_report(job_manager, _make_email_config(), _make_records())
+        mock_send = await _run_report(job_manager, _make_email_config(), _make_records())
 
         mock_send.assert_called_once()
         html_body = mock_send.call_args.kwargs["html_body"]
@@ -113,9 +113,9 @@ class TestWeeklySettlementReport:
         assert ">GW<" in html_body
         assert ">TEST<" in html_body
 
-    def test_single_table_latest_day_per_account(self, job_manager):
+    async def test_single_table_latest_day_per_account(self, job_manager):
         """所有账户合并为一张表，每账户仅显示最新一天数据"""
-        mock_send = _run_report(job_manager, _make_email_config(), _make_records())
+        mock_send = await _run_report(job_manager, _make_email_config(), _make_records())
 
         html_body = mock_send.call_args.kwargs["html_body"]
         # 单张表格：表头 + 每账户一行
@@ -129,41 +129,41 @@ class TestWeeklySettlementReport:
         # 正文标题只包含区间结束日期（当天）
         assert f"Q-Trader 结算权益周报（{date.today()}）" in html_body
 
-    def test_no_profit_columns(self, job_manager):
+    async def test_no_profit_columns(self, job_manager):
         """表格不含盈亏列"""
-        mock_send = _run_report(job_manager, _make_email_config(), _make_records())
+        mock_send = await _run_report(job_manager, _make_email_config(), _make_records())
 
         html_body = mock_send.call_args.kwargs["html_body"]
         assert "平仓盈亏" not in html_body
         assert "持仓盈亏" not in html_body
 
-    def test_multiple_recipients_sent_at_once(self, job_manager):
+    async def test_multiple_recipients_sent_at_once(self, job_manager):
         """多个收件人一次发送，recipients 完整透传"""
         recipients = ["a@qq.com", "b@qq.com", "c@qq.com"]
 
-        mock_send = _run_report(
+        mock_send = await _run_report(
             job_manager, _make_email_config(recipients=recipients), _make_records()
         )
 
         mock_send.assert_called_once()
         assert mock_send.call_args.kwargs["recipients"] == recipients
 
-    def test_subject_uses_end_date(self, job_manager):
+    async def test_subject_uses_end_date(self, job_manager):
         """邮件主题只包含区间结束日期（当天）"""
-        mock_send = _run_report(job_manager, _make_email_config(), _make_records())
+        mock_send = await _run_report(job_manager, _make_email_config(), _make_records())
 
         subject = mock_send.call_args.kwargs["subject"]
         assert subject == f"Q-Trader 结算权益周报 ({date.today():%m-%d})"
 
-    def test_email_disabled_skips_send(self, job_manager):
+    async def test_email_disabled_skips_send(self, job_manager):
         """邮件功能未启用时不发送"""
-        mock_send = _run_report(job_manager, _make_email_config(enabled=False), _make_records())
+        mock_send = await _run_report(job_manager, _make_email_config(enabled=False), _make_records())
 
         mock_send.assert_not_called()
 
-    def test_no_records_skips_send(self, job_manager):
+    async def test_no_records_skips_send(self, job_manager):
         """本周无结算数据时不发送"""
-        mock_send = _run_report(job_manager, _make_email_config(), [])
+        mock_send = await _run_report(job_manager, _make_email_config(), [])
 
         mock_send.assert_not_called()
 

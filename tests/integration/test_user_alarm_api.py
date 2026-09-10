@@ -2,21 +2,22 @@
 用户管理与告警 API 集成测试
 
 覆盖路由模块：
-- qtrader.manager.api.routes.user（/api/admin/users，require_admin + DB 会话）
-- qtrader.manager.api.routes.alarm（/api/alarm，app.state.db + AppContext 告警服务）
+- qtrader.manager.api.routes.user（/api/admin/users，require_admin + 异步 DB 会话）
+- qtrader.manager.api.routes.alarm（/api/alarm，异步 DB 会话 + AppContext 告警服务）
 
-数据来源均以 _FakeDb/_FakeSession 替换（不连真实 PostgreSQL），
+数据来源均以 _FakeDb/_FakeAsyncSession 替换（不连真实 PostgreSQL），
 AppContext 中的告警服务用 MagicMock 注入并在用例结束后清理。
 
 client / anon_client / mock_trading_manager 夹具来自 conftest.py。
 """
 
-from contextlib import contextmanager
+from contextlib import asynccontextmanager
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from sqlalchemy import BooleanClauseList
 
 from qtrader.app_context import AppContext, get_app_context
 from qtrader.manager.api.routes.auth import create_access_token
@@ -26,15 +27,16 @@ from qtrader.models.po import AlarmPo, UserPo
 ADMIN_USER_ID = "itest_admin"
 
 
-# ============ 数据库替身（模拟 SQLAlchemy 会话链式调用） ============
+# ============ 数据库替身（模拟 AsyncSession 异步会话） ============
 
 
 class _FakeExecResult:
-    """模拟 session.execute() 返回值：支持 scalars().all() 与 scalar_one_or_none()"""
+    """模拟 session.execute() 返回值：支持 scalars().all()、scalar_one_or_none() 与 rowcount"""
 
-    def __init__(self, scalars_all=None, scalar_one=None):
+    def __init__(self, scalars_all=None, scalar_one=None, rowcount=None):
         self._scalars_all = scalars_all if scalars_all is not None else []
         self._scalar_one = scalar_one
+        self.rowcount = rowcount
 
     def scalars(self):
         return self
@@ -46,89 +48,68 @@ class _FakeExecResult:
         return self._scalar_one
 
 
-class _FakeQuery:
-    """模拟 SQLAlchemy Query：filter/order_by 返回自身以适配任意链长"""
-
-    def __init__(self, items=None, first=None, scalar=0, update_count=0):
-        self.items = items if items is not None else []
-        self.first_result = first
-        self.scalar_result = scalar
-        self.update_result = update_count
-        self.filters: list = []
-        self.update_values: dict | None = None
-
-    def filter(self, *criteria):
-        self.filters.append(criteria)
-        return self
-
-    def order_by(self, *args, **kwargs):
-        return self
-
-    def all(self):
-        return self.items
-
-    def first(self):
-        return self.first_result
-
-    def scalar(self):
-        return self.scalar_result
-
-    def update(self, values, synchronize_session=False):
-        self.update_values = values
-        return self.update_result
+def _where_criteria(stmt) -> int:
+    """统计语句 WHERE 条件数量（无条件时为 0）"""
+    clause = stmt.whereclause
+    if clause is None:
+        return 0
+    if isinstance(clause, BooleanClauseList):
+        return len(clause.clauses)
+    return 1
 
 
-class _FakeSession:
-    """模拟 SQLAlchemy Session：execute 结果按调用顺序依次消费"""
+class _FakeAsyncSession:
+    """模拟 AsyncSession：execute 结果按调用顺序依次消费，并记录语句供断言"""
 
-    def __init__(self, query: _FakeQuery | None = None):
-        self.query_obj = query or _FakeQuery()
+    def __init__(self):
         self.exec_results: list[_FakeExecResult] = []
+        self.exec_stmts: list = []
+        self.scalar_result: int = 0
         self.added: list = []
         self.deleted: list = []
         self.commit_count = 0
-        self.rollback_count = 0
         self.closed = False
+        self.fail_with: Exception | None = None
 
-    def query(self, *entities):
-        return self.query_obj
-
-    def execute(self, stmt):
+    async def execute(self, stmt):
+        self.exec_stmts.append(stmt)
+        if self.fail_with:
+            raise self.fail_with
         assert self.exec_results, "测试未预期的 session.execute 调用"
         return self.exec_results.pop(0)
+
+    async def scalar(self, stmt):
+        if self.fail_with:
+            raise self.fail_with
+        return self.scalar_result
 
     def add(self, obj):
         self.added.append(obj)
 
-    def delete(self, obj):
+    async def delete(self, obj):
         self.deleted.append(obj)
 
-    def commit(self):
+    async def commit(self):
         self.commit_count += 1
-
-    def rollback(self):
-        self.rollback_count += 1
 
     def close(self):
         self.closed = True
 
 
 class _FakeDb:
-    """模拟 Database：get_session 上下文管理器 + get_session_sync"""
+    """模拟 AsyncDatabase：get_session 异步上下文管理器"""
 
-    def __init__(self, session: _FakeSession):
+    def __init__(self, session: _FakeAsyncSession):
         self.session = session
         self.get_session_calls = 0
-        self.get_session_sync_calls = 0
 
-    @contextmanager
-    def get_session(self):
+    @asynccontextmanager
+    async def get_session(self):
         self.get_session_calls += 1
-        yield self.session
-
-    def get_session_sync(self):
-        self.get_session_sync_calls += 1
-        return self.session
+        try:
+            yield self.session
+        finally:
+            self.session.close()
 
 
 # ============ 数据构造 ============
@@ -168,20 +149,20 @@ def make_alarm(alarm_id: int = 1, account_id: str = "DQ", status: str = "UNCONFI
 
 @pytest.fixture
 def user_db(client):
-    """将 user 路由的 get_database() 替换为 FakeDb，返回可检视的 db/session"""
-    session = _FakeSession()
+    """将 user 路由的 get_async_database() 替换为 FakeDb，返回可检视的 db/session"""
+    session = _FakeAsyncSession()
     db = _FakeDb(session)
-    with patch("qtrader.manager.api.routes.user.get_database", return_value=db):
+    with patch("qtrader.manager.api.routes.user.get_async_database", return_value=db):
         yield SimpleNamespace(db=db, session=session)
 
 
 @pytest.fixture
 def alarm_db(client):
-    """将 alarm 路由读取的 app.state.db 替换为 FakeDb"""
-    session = _FakeSession()
+    """将 alarm 路由的 get_async_database() 替换为 FakeDb"""
+    session = _FakeAsyncSession()
     db = _FakeDb(session)
-    client.app.state.db = db
-    yield SimpleNamespace(db=db, session=session, query=session.query_obj)
+    with patch("qtrader.manager.api.routes.alarm.get_async_database", return_value=db):
+        yield SimpleNamespace(db=db, session=session)
 
 
 @pytest.fixture
@@ -418,7 +399,9 @@ class TestAlarmListAPI:
     """告警列表端点（GET /api/alarm/list）"""
 
     def test_list_today_alarms(self, client, alarm_db):
-        alarm_db.query.items = [make_alarm(1), make_alarm(2, status="CONFIRMED")]
+        alarm_db.session.exec_results = [
+            _FakeExecResult(scalars_all=[make_alarm(1), make_alarm(2, status="CONFIRMED")])
+        ]
 
         resp = client.get("/api/alarm/list")
 
@@ -434,7 +417,7 @@ class TestAlarmListAPI:
 
     def test_list_alarms_applies_filters(self, client, alarm_db):
         """account_id 与 status_filter 均转化为查询过滤条件"""
-        alarm_db.query.items = []
+        alarm_db.session.exec_results = [_FakeExecResult()]
 
         resp = client.get(
             "/api/alarm/list", params={"account_id": "DQ", "status_filter": "UNCONFIRMED"}
@@ -443,10 +426,10 @@ class TestAlarmListAPI:
         assert resp.status_code == 200
         assert resp.json()["code"] == 0
         # 基础日期过滤 + 账户过滤 + 状态过滤
-        assert len(alarm_db.query.filters) == 3
+        assert _where_criteria(alarm_db.session.exec_stmts[0]) == 3
 
     def test_list_alarms_db_error(self, client, alarm_db):
-        alarm_db.session.query_obj = None  # 触发链式调用异常
+        alarm_db.session.fail_with = RuntimeError("db down")
 
         resp = client.get("/api/alarm/list")
 
@@ -460,7 +443,7 @@ class TestAlarmStatsAPI:
     """告警统计端点（GET /api/alarm/stats）"""
 
     def test_stats_counts(self, client, alarm_db):
-        alarm_db.query.scalar_result = 7
+        alarm_db.session.scalar_result = 7
 
         resp = client.get("/api/alarm/stats", params={"account_id": "DQ"})
 
@@ -475,7 +458,7 @@ class TestAlarmStatsAPI:
         assert alarm_db.session.closed is True
 
     def test_stats_db_error(self, client, alarm_db):
-        alarm_db.session.query_obj = None
+        alarm_db.session.fail_with = RuntimeError("db down")
 
         resp = client.get("/api/alarm/stats")
 
@@ -490,7 +473,7 @@ class TestAlarmConfirmAPI:
 
     def test_confirm_alarm(self, client, alarm_db):
         alarm = make_alarm(3)
-        alarm_db.query.first_result = alarm
+        alarm_db.session.exec_results = [_FakeExecResult(scalar_one=alarm)]
 
         resp = client.post("/api/alarm/confirm/3", json={})
 
@@ -499,10 +482,9 @@ class TestAlarmConfirmAPI:
         assert body["code"] == 0
         assert body["message"] == "确认成功"
         assert alarm.status == "CONFIRMED"
-        assert alarm_db.session.commit_count == 1
 
     def test_confirm_alarm_not_found(self, client, alarm_db):
-        alarm_db.query.first_result = None
+        alarm_db.session.exec_results = [_FakeExecResult(scalar_one=None)]
 
         resp = client.post("/api/alarm/confirm/99", json={})
 
@@ -522,7 +504,7 @@ class TestAlarmConfirmAllAPI:
     """批量确认端点（POST /api/alarm/confirm_all）"""
 
     def test_confirm_all(self, client, alarm_db):
-        alarm_db.query.update_result = 5
+        alarm_db.session.exec_results = [_FakeExecResult(rowcount=5)]
 
         resp = client.post("/api/alarm/confirm_all", json={})
 
@@ -531,22 +513,22 @@ class TestAlarmConfirmAllAPI:
         assert body["code"] == 0
         assert body["data"] == {"confirmed_count": 5}
         assert "已确认 5 条告警" in body["message"]
-        assert alarm_db.query.update_values == {"status": "CONFIRMED"}
-        assert alarm_db.session.commit_count == 1
+        # 更新条件仅 状态+日期 两项，状态值固定为 CONFIRMED
+        stmt = alarm_db.session.exec_stmts[0]
+        assert _where_criteria(stmt) == 2
+        assert stmt.compile().params["status"] == "CONFIRMED"
 
     def test_confirm_all_with_account_filter(self, client, alarm_db):
-        alarm_db.query.update_result = 2
+        alarm_db.session.exec_results = [_FakeExecResult(rowcount=2)]
 
         resp = client.post("/api/alarm/confirm_all", json={"account_id": "DQ"})
 
         assert resp.status_code == 200
-        # 两次 filter 调用：第一次携带 状态+日期 两个条件，第二次为账户过滤
-        assert len(alarm_db.query.filters) == 2
-        assert len(alarm_db.query.filters[0]) == 2
-        assert len(alarm_db.query.filters[1]) == 1
+        # 更新条件：状态 + 日期 + 账户 共 3 项
+        assert _where_criteria(alarm_db.session.exec_stmts[0]) == 3
 
     def test_confirm_all_db_error(self, client, alarm_db):
-        alarm_db.session.query_obj = None
+        alarm_db.session.fail_with = RuntimeError("db down")
 
         resp = client.post("/api/alarm/confirm_all", json={})
 

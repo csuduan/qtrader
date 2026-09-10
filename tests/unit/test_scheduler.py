@@ -240,20 +240,23 @@ class TestTaskSchedulerParseCron:
 class TestTaskSchedulerStartShutdown:
     """TaskScheduler 启动停止测试"""
 
-    def test_start_scheduler(self, scheduler: TaskScheduler):
-        """测试启动调度器"""
+    async def test_start_scheduler(self, scheduler: TaskScheduler):
+        """测试启动调度器（AsyncIOScheduler 需在运行中的事件循环内启动）"""
         scheduler.start()
 
         assert scheduler.scheduler.running is True
 
-    def test_shutdown_scheduler(self, scheduler: TaskScheduler):
-        """测试关闭调度器"""
+    async def test_shutdown_scheduler(self, scheduler: TaskScheduler):
+        """测试关闭调度器（AsyncIOScheduler 经 call_soon_threadsafe 延迟关闭，需让出循环）"""
+        import asyncio
+
         scheduler.start()
         scheduler.shutdown()
+        await asyncio.sleep(0)
 
         assert scheduler.scheduler.running is False
 
-    def test_shutdown_without_start(self, scheduler: TaskScheduler):
+    async def test_shutdown_without_start(self, scheduler: TaskScheduler):
         """测试未启动时关闭"""
         # 不应该报错
         scheduler.shutdown()

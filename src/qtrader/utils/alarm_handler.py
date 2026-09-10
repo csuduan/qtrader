@@ -3,18 +3,13 @@
 监听ERROR级别日志并自动创建告警记录
 """
 
+import re
 from datetime import datetime
 
-from sqlalchemy.orm import Session
-
 from qtrader.models.po import AlarmPo
-from qtrader.utils.database import get_session
 from qtrader.utils.logger import get_logger
 
 logger = get_logger(__name__)
-
-
-import re
 
 
 def extract_account_id_from_message(message: str) -> str | None:
@@ -45,14 +40,14 @@ def extract_account_id_from_message(message: str) -> str | None:
     return None
 
 
-def create_alarm_from_log(
+async def create_alarm_from_log(
     log_message: str,
     module: str | None = None,
     function: str | None = None,
     extra: dict | None = None,
 ) -> bool:
     """
-    从日志记录创建告警
+    从日志记录创建告警（异步落库）
 
     Args:
         log_message: 日志消息
@@ -62,10 +57,10 @@ def create_alarm_from_log(
     Returns:
         是否创建成功
     """
-    from qtrader.utils.database import session_scope
+    from qtrader.utils.async_database import get_async_session
 
     try:
-        with session_scope() as session:
+        async with get_async_session() as session:
             now = datetime.now()
             today = now.strftime("%Y-%m-%d")
             time_str = now.strftime("%H:%M:%S")
@@ -197,7 +192,13 @@ class AlarmHandler:
             except Exception:
                 pass
 
-            create_alarm_from_log(log_message, module, function, extra)
+            # sink 是同步回调，通过 submit_loop 投递到主事件循环异步落库；
+            # 循环未运行时（启动早期/退出阶段）降级为仅记日志
+            from qtrader.utils.executors import submit_loop
+
+            future = submit_loop(create_alarm_from_log(log_message, module, function, extra))
+            if future is None:
+                logger.warning(f"事件循环未运行，告警仅记录日志: {log_message}")
 
         except Exception as e:
             # 避免告警处理器自身出错导致日志系统异常

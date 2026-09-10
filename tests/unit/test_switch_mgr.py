@@ -9,7 +9,7 @@ import asyncio
 import os
 import time
 from datetime import datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -31,13 +31,24 @@ def build_manager(account_id: str = "DQ") -> SwitchPosManager:
     return mgr
 
 
-def test_import_csv_basic():
+def async_scope_with(session: MagicMock) -> MagicMock:
+    """返回一个模拟的 get_async_session，进入时返回给定 session"""
+    cm = MagicMock()
+    cm.__aenter__.return_value = session
+    cm.__aexit__.return_value = False
+    return MagicMock(return_value=cm)
+
+
+async def test_import_csv_basic():
     """CSV 正常导入生成 RotationInstructionPo"""
     mgr = build_manager()
     mgr.trading_engine.std_symbol = lambda s: s
+    mgr.load_rotation_instructions = AsyncMock()
     csv_text = "account,strategy,symbol,offset,direction,volume\nDQ,S1,a2611,Open,Buy,1\n"
-    with patch("qtrader.trader.switch_mgr.session_scope"):
-        result = mgr.import_csv(csv_text, "20260818_rotation.csv")
+    session = MagicMock()
+    session.execute = AsyncMock()
+    with patch("qtrader.trader.switch_mgr.get_async_session", async_scope_with(session)):
+        result = await mgr.import_csv(csv_text, "20260818_rotation.csv")
     assert result["imported"] == 1
 
 
@@ -88,7 +99,7 @@ async def test_execute_rotation_close_before_open():
     mgr._check_instruction = MagicMock(return_value=True)
     mgr._monitor_order_commands = MagicMock(return_value=asyncio.Future())
     mgr._monitor_order_commands.return_value.set_result(None)
-    mgr._update_instructions = MagicMock()
+    mgr._update_instructions = AsyncMock()
 
     await mgr.execute_position_rotation(is_manual=True)
 
@@ -97,17 +108,16 @@ async def test_execute_rotation_close_before_open():
     assert open_inst.status == "RUNNING"
 
 
-def _mock_session_scope():
-    """模拟 session_scope，查询结果为空（文件未导入过）"""
+def _mock_async_session_scope():
+    """模拟 get_async_session，查询结果为空（文件未导入过）"""
     session = MagicMock()
-    session.query.return_value.filter_by.return_value.first.return_value = None
     cm = MagicMock()
-    cm.__enter__.return_value = session
-    cm.__exit__.return_value = False
+    cm.__aenter__.return_value = session
+    cm.__aexit__.return_value = False
     return MagicMock(return_value=cm)
 
 
-def test_scan_skips_fresh_files(tmp_path):
+async def test_scan_skips_fresh_files(tmp_path):
     """扫描时只导入时间戳与系统时间偏差绝对值大于10秒的文件"""
     mgr = build_manager()
     today_str = datetime.now().strftime("%Y%m%d")
@@ -128,10 +138,17 @@ def test_scan_skips_fresh_files(tmp_path):
         os.utime(f, (mtime, mtime))
 
     imported = []
-    mgr.import_csv = lambda content, filename, mode="replace": imported.append(filename)
 
-    with patch("qtrader.trader.switch_mgr.session_scope", _mock_session_scope()):
-        mgr.scan_and_process_orders()
+    async def fake_import(content, filename, mode="replace"):
+        imported.append(filename)
+
+    mgr.import_csv = fake_import
+
+    with (
+        patch("qtrader.trader.switch_mgr.get_async_session", _mock_async_session_scope()),
+        patch("qtrader.trader.switch_mgr.fetch_one", AsyncMock(return_value=None)),
+    ):
+        await mgr.scan_and_process_orders()
 
     assert sorted(imported) == [
         f"{today_str}_DQ_future.csv",

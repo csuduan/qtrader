@@ -1,6 +1,6 @@
-import json
 from datetime import datetime
 
+import orjson
 import requests
 
 from qtrader.utils.logger import get_logger
@@ -37,6 +37,6 @@ def is_dnd_now(dnd_start: int = 23, dnd_end: int = 8) -> bool:
 def send_wechat(msg: str):
     data = {"msg_type": "text", "msg": msg}
     header = {"Content-Type": "application/json"}
-    rsp = requests.post(base_url, data=json.dumps(data), headers=header)
+    rsp = requests.post(base_url, data=orjson.dumps(data), headers=header)
     if rsp.status_code != 200 or rsp.json()["errcode"] != 0:
         logger.error(f"发送微信消息失败：{msg},{rsp.text}")

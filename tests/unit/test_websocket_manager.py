@@ -104,7 +104,7 @@ class TestBroadcast:
 
     @pytest.mark.asyncio
     async def test_nan_payload_serialized(self):
-        """ignore_nan 序列化：NaN 不应导致广播中断"""
+        """NaN 序列化为 null，不应导致广播中断"""
         mgr = WebSocketManager()
         ws = make_ws()
         await mgr.connect(ws)
@@ -115,7 +115,7 @@ class TestBroadcast:
 
     @pytest.mark.asyncio
     async def test_datetime_payload_serialized(self):
-        """datetime 经 datetime_handler 序列化"""
+        """datetime 由 orjson 原生序列化"""
         from datetime import datetime
 
         mgr = WebSocketManager()

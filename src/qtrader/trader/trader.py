@@ -146,7 +146,7 @@ class Trader:
         # 启动换仓管理器、作业管理器
         self.switchPos_manager = SwitchPosManager(self.account_config, self.trading_engine)
         ctx.register(AppContext.KEY_SWITCH_POS_MANAGER, self.switchPos_manager)
-        self.switchPos_manager.start()
+        await self.switchPos_manager.start()
 
         # 启动目标仓位比对管理器
         from qtrader.trader.target_pos_mgr import TargetPosManager
@@ -210,19 +210,21 @@ class Trader:
         连接到共享数据库（PostgreSQL）
         Manager 负责创建数据库和表，Trader 只需连接并读取
         """
+        from sqlalchemy import select
+
         from qtrader.models.po import SystemParamPo
+        from qtrader.utils.async_database import get_async_session, init_async_database
         from qtrader.utils.config_loader import RiskControlConfig, get_config_loader
-        from qtrader.utils.database import get_database, init_database
-        from qtrader.utils.db_url import build_db_url
+        from qtrader.utils.db_url import build_async_db_url
 
         # 从全局配置获取数据库连接
         loader = get_config_loader()
         app_config = loader._load_app_config()
         db_config = app_config.data_base
-        db_url = build_db_url(db_config)
+        db_url = build_async_db_url(db_config)
 
         # 连接到共享数据库
-        db = init_database(
+        db = await init_async_database(
             db_url,
             account_id=self.account_id,
             echo=False,
@@ -232,11 +234,9 @@ class Trader:
         logger.info(f"Trader [{self.account_id}] 已连接到共享数据库")
 
         # 初始化账户级别的系统参数（如果不存在）
-        with db.get_session() as session:
-            existing = (
-                session.query(SystemParamPo)
-                .filter(SystemParamPo.account_id == self.account_id)
-                .first()
+        async with get_async_session() as session:
+            existing = await session.scalar(
+                select(SystemParamPo).filter(SystemParamPo.account_id == self.account_id).limit(1)
             )
 
             if not existing:
@@ -299,7 +299,6 @@ class Trader:
                 )
 
                 session.add_all(params)
-                session.commit()
                 logger.info(f"Trader [{self.account_id}] 系统参数初始化完成")
 
     def get_task_scheduler(self) -> TaskScheduler | None:
@@ -410,8 +409,8 @@ class Trader:
     async def _on_order_update(self, data):
         """订单更新事件处理器 - 写入PG后直接广播完整数据"""
         try:
-            # 1. 先写入PG（放到线程执行，避免阻塞事件循环）
-            await asyncio.to_thread(self._order_dao.save, self.account_id, data)
+            # 1. 先写入PG（异步写入不阻塞事件循环）
+            await self._order_dao.save(self.account_id, data)
 
             # 2. 广播完整订单数据给Manager
             if self.socket_server:
@@ -424,8 +423,8 @@ class Trader:
     async def _on_trade_update(self, data):
         """成交更新事件处理器 - 写入PG后直接广播完整数据"""
         try:
-            # 1. 先写入PG（放到线程执行，避免阻塞事件循环）
-            await asyncio.to_thread(self._trade_dao.save, self.account_id, data)
+            # 1. 先写入PG（异步写入不阻塞事件循环）
+            await self._trade_dao.save(self.account_id, data)
 
             # 2. 广播完整成交数据给Manager
             if self.socket_server:
@@ -572,7 +571,7 @@ class Trader:
                 logger.exception(f"定时持久化任务出错: {e}")
 
     async def _batch_persist(self) -> None:
-        """批量持久化到PG（DB写入放到线程执行，避免阻塞事件循环）"""
+        """批量持久化到PG（异步写入不阻塞事件循环）"""
         if not self._cached_account and not self._pending_positions:
             return
 
@@ -580,7 +579,7 @@ class Trader:
         account_data = self._cached_account
         positions = dict(self._pending_positions)
 
-        success = await asyncio.to_thread(self._do_batch_persist, account_data, positions)
+        success = await self._do_batch_persist(account_data, positions)
         if not success:
             return
 
@@ -591,25 +590,19 @@ class Trader:
             if self._pending_positions.get(symbol) is data:
                 del self._pending_positions[symbol]
 
-    def _do_batch_persist(self, account_data: dict | None, positions: dict) -> bool:
-        """执行批量持久化（在线程中运行），返回是否成功"""
+    async def _do_batch_persist(self, account_data: dict | None, positions: dict) -> bool:
+        """执行批量持久化，返回是否成功"""
         try:
-            from qtrader.utils.database import get_database
+            from qtrader.utils.async_database import get_async_session
 
-            db = get_database()
-            if not db:
-                return False
-
-            with db.get_session() as session:
+            async with get_async_session() as session:
                 # 批量写入账户
                 if account_data:
-                    self._account_dao.save_dict(session, self.account_id, account_data)
+                    await self._account_dao.save_dict(session, self.account_id, account_data)
 
                 # 批量写入持仓
                 for symbol, data in positions.items():
-                    self._position_dao.save_dict(session, self.account_id, symbol, data)
-
-                session.commit()
+                    await self._position_dao.save_dict(session, self.account_id, symbol, data)
 
             logger.debug(f"批量持久化完成: {1 if account_data else 0} 账户, {len(positions)} 持仓")
             return True
@@ -684,7 +677,7 @@ class Trader:
         if self.trading_engine:
             # 风控计数器落库（取消延迟保存定时器，避免丢失最近的计数）
             try:
-                await asyncio.to_thread(self.trading_engine.risk_control.flush_counters)
+                await self.trading_engine.risk_control.flush_counters()
             except Exception as e:
                 logger.warning(f"风控计数器落库失败: {e}")
             await self.trading_engine.close()
@@ -692,6 +685,11 @@ class Trader:
         # 停止Socket服务器
         if self.socket_server:
             await self.socket_server.stop()
+
+        # 关闭数据库连接
+        from qtrader.utils.async_database import close_async_database
+
+        await close_async_database()
 
         # 清理PID文件和Socket文件
         if self._socket_path:

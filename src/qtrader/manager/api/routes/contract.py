@@ -3,11 +3,12 @@
 """
 
 from fastapi import APIRouter, Query, Request
+from sqlalchemy import select
 
 from qtrader.app_context import get_app_context
 from qtrader.manager.api.responses import error_response, success_response
 from qtrader.models.po import ContractPo
-from qtrader.utils.database import get_database
+from qtrader.utils.async_database import get_async_database
 from qtrader.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -31,33 +32,33 @@ async def get_contracts(
     从合约数据库(ContractPo)中查询合约信息
     """
     try:
-        db = get_database()
+        db = get_async_database()
         if not db:
             return error_response(code=500, message="数据库未初始化")
 
-        with db.get_session() as session:
-            query = session.query(ContractPo)
+        async with db.get_session() as session:
+            stmt = select(ContractPo)
 
             # 应用筛选条件
             if exchange_id:
-                query = query.filter(ContractPo.exchange_id == exchange_id)
+                stmt = stmt.filter(ContractPo.exchange_id == exchange_id)
 
             if product_type:
-                query = query.filter(ContractPo.product_type == product_type)
+                stmt = stmt.filter(ContractPo.product_type == product_type)
 
             if symbol_keyword:
-                query = query.filter(ContractPo.symbol.contains(symbol_keyword))
+                stmt = stmt.filter(ContractPo.symbol.contains(symbol_keyword))
 
             if is_main is not None:
-                query = query.filter(ContractPo.is_main == is_main)
+                stmt = stmt.filter(ContractPo.is_main == is_main)
 
             # 只查询活跃合约
-            query = query.filter(ContractPo.is_active.is_(True))
+            stmt = stmt.filter(ContractPo.is_active.is_(True))
 
             # 按交易所和合约代码排序
-            query = query.order_by(ContractPo.exchange_id, ContractPo.symbol)
+            stmt = stmt.order_by(ContractPo.exchange_id, ContractPo.symbol)
 
-            contracts = query.all()
+            contracts = (await session.execute(stmt)).scalars().all()
 
             # 转换字段名称以兼容前端
             result = []
@@ -95,15 +96,17 @@ async def get_exchanges(request: Request):
     返回数据库中存在的交易所及其合约数量
     """
     try:
-        db = get_database()
+        db = get_async_database()
         if not db:
             return error_response(code=500, message="数据库未初始化")
 
-        with db.get_session() as session:
+        async with db.get_session() as session:
             # 从数据库统计每个交易所的活跃合约数量
             contracts = (
-                session.query(ContractPo.exchange_id).filter(ContractPo.is_active.is_(True)).all()
-            )
+                await session.execute(
+                    select(ContractPo.exchange_id).filter(ContractPo.is_active.is_(True))
+                )
+            ).all()
 
             exchange_counts = {}
             for (ex_id,) in contracts:

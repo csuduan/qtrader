@@ -5,9 +5,12 @@
 from datetime import datetime
 from decimal import Decimal
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from qtrader.models.object import OrderData
 from qtrader.models.po import OrderPo
-from qtrader.utils.database import session_scope
+from qtrader.utils.async_database import fetch_one, get_async_session
 from qtrader.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -16,22 +19,24 @@ logger = get_logger(__name__)
 class OrderDao:
     """订单数据访问对象"""
 
-    def save(self, account_id: str, data: OrderData) -> None:
+    async def save(self, account_id: str, data: OrderData) -> None:
         """持久化订单数据"""
         try:
-            with session_scope() as session:
-                self._save_with_session(session, account_id, data)
+            async with get_async_session() as session:
+                await self._save_with_session(session, account_id, data)
         except Exception as e:
             logger.exception(f"持久化订单数据失败: {e}")
 
-    def _save_with_session(self, session, account_id: str, data: OrderData) -> None:
+    async def _save_with_session(
+        self, session: AsyncSession, account_id: str, data: OrderData
+    ) -> None:
         """在指定会话中持久化订单数据"""
         order_id = data.order_id if hasattr(data, "order_id") else None
         if not order_id:
             return
 
-        order_po = (
-            session.query(OrderPo).filter_by(account_id=account_id, order_id=order_id).first()
+        order_po = await fetch_one(
+            session, select(OrderPo).filter_by(account_id=account_id, order_id=order_id)
         )
         if not order_po:
             order_po = OrderPo(account_id=account_id, order_id=order_id)

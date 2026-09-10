@@ -13,8 +13,8 @@ from qtrader.manager.api.schemas import SystemStatusRes
 from qtrader.manager.manager import TradingManager
 from qtrader.models.object import AccountData
 from qtrader.models.po import JobPo, SystemParamPo
+from qtrader.utils.async_database import get_async_database
 from qtrader.utils.config_loader import get_config_loader
-from qtrader.utils.database import get_database
 from qtrader.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -22,7 +22,7 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/api/system", tags=["系统"])
 
 
-def _upsert_risk_params(param_values: dict[str, int | None], account_id: str | None) -> None:
+async def _upsert_risk_params(param_values: dict[str, int | None], account_id: str | None) -> None:
     """
     将风控参数写入 SystemParam 表（None 值跳过）
 
@@ -30,15 +30,16 @@ def _upsert_risk_params(param_values: dict[str, int | None], account_id: str | N
         param_values: {参数键: 值}，键与 Trader 侧 _load_risk_control_config 读取的键一致
         account_id: 账户ID，None 表示全局参数
     """
-    db = get_database()
+    from sqlalchemy import select
+
+    db = get_async_database()
     now = datetime.now()
-    with db.get_session() as session:
+    async with db.get_session() as session:
         for key, value in param_values.items():
             if value is None:
                 continue
-            param = (
-                session.query(SystemParamPo)
-                .filter(
+            param = await session.scalar(
+                select(SystemParamPo).filter(
                     SystemParamPo.param_key == key,
                     (
                         SystemParamPo.account_id == account_id
@@ -46,7 +47,6 @@ def _upsert_risk_params(param_values: dict[str, int | None], account_id: str | N
                         else SystemParamPo.account_id.is_(None)
                     ),
                 )
-                .first()
             )
             if param:
                 param.param_value = str(value)
@@ -135,9 +135,7 @@ async def update_risk_control(
         "risk_control.order_timeout": order_timeout,
     }
     try:
-        import asyncio
-
-        await asyncio.to_thread(_upsert_risk_params, param_values, account_id)
+        await _upsert_risk_params(param_values, account_id)
     except Exception as e:
         logger.exception(f"写入风控参数失败: {e}")
         return error_response(code=500, message="风控参数写入数据库失败")

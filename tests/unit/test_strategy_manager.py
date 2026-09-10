@@ -368,12 +368,12 @@ class TestStrategyPositions:
     def test_get_all_strategy_positions_unknown(self, manager):
         assert manager.get_all_strategy_positions("nope") == {}
 
-    def test_save_strategy_position_adds_account_id(self, manager):
+    async def test_save_strategy_position_adds_account_id(self, manager):
         pos = PositionData(symbol="SHFE.rb2505", exchange="SHFE", pos_long_td=1)
 
         with patch.object(manager, "_position_service") as mock_service:
-            mock_service.save_position.return_value = True
-            assert manager.save_strategy_position(pos) is True
+            mock_service.save_position = AsyncMock(return_value=True)
+            assert await manager.save_strategy_position(pos) is True
 
         assert pos.extras["account_id"] == "test_account_001"
 

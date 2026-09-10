@@ -6,6 +6,7 @@ ManagerJobManager 单元测试
 """
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -165,7 +166,7 @@ class TestCreateAlarm:
         alarm = MagicMock()
         tm.alarm_service = alarm
 
-        job._create_alarm(None, "DQ", "SRC", "标题", "详情", None, "notification")
+        job._create_alarm("DQ", "SRC", "标题", "详情", "notification")
 
         alarm.create_alarm.assert_called_once()
         assert alarm.create_alarm.call_args.kwargs["alarm_type"] == AlarmType.NOTIFICATION
@@ -178,23 +179,46 @@ class TestCreateAlarm:
         alarm = MagicMock()
         tm.alarm_service = alarm
 
-        job._create_alarm(None, "DQ", "SRC", "标题", "详情", None)
+        job._create_alarm("DQ", "SRC", "标题", "详情")
 
         assert alarm.create_alarm.call_args.kwargs["alarm_type"] == AlarmType.EXCEPTION
 
     def test_no_alarm_service_skips(self, tm, job):
         tm.alarm_service = None
-        job._create_alarm(None, "DQ", "SRC", "标题", "详情", None)  # 不应抛错
+        job._create_alarm("DQ", "SRC", "标题", "详情")  # 不应抛错
 
 
 @pytest.mark.unit
 class TestRestartAllTraders:
-    """批量重启守卫"""
+    """批量重启"""
 
-    def test_no_running_loop_skips(self, tm, job, monkeypatch):
-        from qtrader.app_context import get_app_context
+    async def test_no_traders_noop(self, tm, job):
+        """无 Trader 时直接完成，不抛错"""
+        await job.restart_all_traders()
 
-        ctx = get_app_context()
-        monkeypatch.setattr(ctx, "get_event_loop", lambda: None)
+    async def test_disabled_account_skips_restart(self, tm, job):
+        """禁用账户不触发重启"""
+        disabled = SimpleNamespace(enabled=False)
+        proxy = SimpleNamespace()
+        tm.traders = {"OFF": proxy}
+        tm.account_configs_map = {"OFF": disabled}
 
-        job.restart_all_traders()  # 循环未运行 → 仅告警，不抛错
+        restart = AsyncMock(return_value=True)
+        tm.restart_trader = restart
+
+        await job.restart_all_traders()
+
+        restart.assert_not_awaited()
+
+    async def test_enabled_account_restarts(self, tm, job):
+        """启用账户触发重启并计数"""
+        enabled = SimpleNamespace(enabled=True)
+        tm.traders = {"DQ": SimpleNamespace()}
+        tm.account_configs_map = {"DQ": enabled}
+
+        restart = AsyncMock(return_value=True)
+        tm.restart_trader = restart
+
+        await job.restart_all_traders()
+
+        restart.assert_awaited_once_with("DQ")

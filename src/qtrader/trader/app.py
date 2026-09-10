@@ -96,6 +96,11 @@ async def main_async(args):
     loop = asyncio.get_running_loop()
     ctx.register(AppContext.KEY_EVENT_LOOP, loop)
 
+    # 初始化执行器（注册主事件循环、创建独立线程池）
+    from qtrader.utils.executors import init_executors, shutdown_executors
+
+    init_executors()
+
     # 启动事件引擎
     event_engine = AsyncEventEngine(name=f"Trader")
     event_engine.start()
@@ -134,6 +139,8 @@ async def main_async(args):
     finally:
         if not stop_event.is_set():
             await trader.stop()
+
+        shutdown_executors()
 
         # 清理PID文件（使用绝对路径）
         pid_file = socket_dir_abs / f"qtrader_{account_id}.pid"

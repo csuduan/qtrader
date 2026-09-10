@@ -18,7 +18,7 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/api/trade", tags=["成交"])
 
 
-def _query_trades_from_db(
+async def _query_trades_from_db(
     account_id: str | None,
     date: str,
 ) -> list[dict]:
@@ -31,10 +31,12 @@ def _query_trades_from_db(
     Returns:
         成交记录字典列表
     """
-    from qtrader.models.po import TradePo
-    from qtrader.utils.database import get_database
+    from sqlalchemy import select
 
-    db = get_database()
+    from qtrader.models.po import TradePo
+    from qtrader.utils.async_database import get_async_database
+
+    db = get_async_database()
     if not db:
         return []
 
@@ -48,15 +50,17 @@ def _query_trades_from_db(
     except ValueError:
         return []
 
-    with db.get_session() as session:
-        query = session.query(TradePo).filter(
+    async with db.get_session() as session:
+        stmt = select(TradePo).filter(
             TradePo.trade_date_time >= start_ts,
             TradePo.trade_date_time <= end_ts,
         )
         if account_id:
-            query = query.filter(TradePo.account_id == account_id)
+            stmt = stmt.filter(TradePo.account_id == account_id)
 
-        trade_pos = query.order_by(TradePo.trade_date_time.desc()).all()
+        trade_pos = (
+            (await session.execute(stmt.order_by(TradePo.trade_date_time.desc()))).scalars().all()
+        )
 
         result = []
         for t in trade_pos:
@@ -140,7 +144,7 @@ async def get_trades(
                 )
         else:
             # 历史：从PG查询
-            db_trades = _query_trades_from_db(account_id, query_date)
+            db_trades = await _query_trades_from_db(account_id, query_date)
             data = [
                 TradeRes(
                     id=0,

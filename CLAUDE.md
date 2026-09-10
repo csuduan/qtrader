@@ -179,8 +179,8 @@ IPC请求: Manager → TraderProxy → SocketClient → SocketServer → TraderR
 **数据模型**: Pydantic (`qtrader.models.object`) + SQLAlchemy PO (`qtrader.models.po`)，属性访问，禁止 `.get()`
 **DAO层** (`qtrader.trader.dao`): Pydantic ↔ PO 转换和持久化
 **事件引擎**: `qtrader.utils.async_event_engine.EventTypes`，行情分发给所有策略，订单/成交按 `order_strategy_map` 分发
-**IPC协议**: `qtrader.utils.ipc.protocol`，simplejson 序列化，消息类型: `HEARTBEAT/REQUEST/RESPONSE/PUSH/ERROR`
-**数据库**: PostgreSQL (`psycopg` 同步 / `asyncpg` 异步)，`session_scope()` context manager
+**IPC协议**: `qtrader.utils.ipc.protocol`，orjson 序列化，消息类型: `HEARTBEAT/REQUEST/RESPONSE/PUSH/ERROR`
+**数据库**: PostgreSQL (asyncpg 异步驱动)，`get_async_session()` context manager
 **配置**: `config/config.yaml`(全局) + `config/account-{ID}.yaml`(含 `strategies` 字段)
 
 ## 常用命令

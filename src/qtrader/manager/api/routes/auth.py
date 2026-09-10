@@ -17,7 +17,7 @@ from sqlalchemy import select
 
 from qtrader.manager.api.responses import error_response, success_response
 from qtrader.models.po import UserPo
-from qtrader.utils.database import get_database
+from qtrader.utils.async_database import get_async_database
 from qtrader.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -246,12 +246,12 @@ async def login(request: LoginRequest):
     Returns:
         统一响应格式: {code: 0, message: "success", data: {token, user}}
     """
-    db = get_database()
+    db = get_async_database()
 
-    with db.get_session() as session:
+    async with db.get_session() as session:
         # 查询用户
         stmt = select(UserPo).where(UserPo.user_id == request.username)
-        result = session.execute(stmt)
+        result = await session.execute(stmt)
         user = result.scalar_one_or_none()
 
         # 验证用户存在且密码正确
@@ -277,7 +277,7 @@ async def login(request: LoginRequest):
 
         # 更新最后登录时间
         user.last_login = datetime.now()
-        session.commit()
+        await session.commit()
 
         # 生成Token
         token = create_access_token(user.user_id, user.role)
@@ -328,7 +328,7 @@ async def logout(current_user: dict = Depends(get_current_user)):
 # ============ 初始化默认用户 ============
 
 
-def init_default_users():
+async def init_default_users():
     """初始化管理员用户
 
     从 config.yaml 读取 admin 配置。仅在用户不存在时创建；
@@ -337,7 +337,7 @@ def init_default_users():
     """
     from qtrader.utils.config_loader import get_config_loader
 
-    db = get_database()
+    db = get_async_database()
     config_loader = get_config_loader()
     app_config = config_loader.load_config()
 
@@ -345,10 +345,10 @@ def init_default_users():
     admin_user_id = admin_config.user
     admin_password = admin_config.password
 
-    with db.get_session() as session:
+    async with db.get_session() as session:
         # 查询管理员用户是否存在
         stmt = select(UserPo).where(UserPo.user_id == admin_user_id)
-        result = session.execute(stmt)
+        result = await session.execute(stmt)
         user = result.scalar_one_or_none()
 
         if user:
@@ -362,7 +362,7 @@ def init_default_users():
                 changed = True
             if changed:
                 user.updated_at = datetime.now()
-                session.commit()
+                await session.commit()
                 logger.info(f"管理员用户状态已校正: {admin_user_id}")
             return
 
@@ -381,5 +381,5 @@ def init_default_users():
             is_active=True,
         )
         session.add(user)
-        session.commit()
+        await session.commit()
         logger.info(f"创建管理员用户: {admin_user_id}")

@@ -7,7 +7,7 @@ BarDao / collect_bar_subscriptions / ManagerDataFeed 单元测试
 - ManagerDataFeed 的周期解析与合约代码转换
 """
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -15,15 +15,19 @@ import pytest
 from qtrader.models.object import BarData
 from qtrader.models.po import BarTodayPo
 from qtrader.trader.dao.bar_dao import BarDao
-from qtrader.utils.database import close_database, init_database
+from qtrader.utils.async_database import (
+    close_async_database,
+    get_async_session,
+    init_async_database,
+)
 
 
 @pytest.fixture
-def dao(tmp_path):
+async def dao(tmp_path):
     """初始化测试数据库并返回DAO实例"""
-    init_database(f"sqlite:///{tmp_path}/test.db")
+    await init_async_database(f"sqlite+aiosqlite:///{tmp_path}/test.db")
     yield BarDao()
-    close_database()
+    await close_async_database()
 
 
 def _make_bar(symbol: str, dt: datetime, close: float = 100.0) -> BarData:
@@ -43,12 +47,11 @@ def _make_bar(symbol: str, dt: datetime, close: float = 100.0) -> BarData:
 class TestBarDaoQuery:
     """查询与清理逻辑测试（ORM操作，sqlite可跑）"""
 
-    def test_query_history_bars_filters_and_sorts(self, dao):
+    async def test_query_history_bars_filters_and_sorts(self, dao):
         from qtrader.models.po import BarHistoryPo
-        from qtrader.utils.database import session_scope
 
         base = datetime(2026, 8, 26, 9, 30)
-        with session_scope() as session:
+        async with get_async_session() as session:
             for i in range(5):
                 session.add(
                     BarHistoryPo(
@@ -78,16 +81,14 @@ class TestBarDaoQuery:
 
         start = base + timedelta(minutes=1)
         end = base + timedelta(minutes=3)
-        result = dao.query_history_bars("IM2609", "M1", start, end)
+        result = await dao.query_history_bars("IM2609", "M1", start, end)
         assert len(result) == 3
         assert [p.bar_time for p in result] == sorted(p.bar_time for p in result)
         assert all(start <= p.bar_time <= end for p in result)
 
-    def test_query_today_bars_dedupes_by_time(self, dao):
-        from qtrader.utils.database import session_scope
-
+    async def test_query_today_bars_dedupes_by_time(self, dao):
         base = datetime(2026, 8, 27, 9, 30)
-        with session_scope() as session:
+        async with get_async_session() as session:
             # 两个写入者写同一根bar + 一个独有bar
             for account in ["AAA", "MANAGER"]:
                 session.add(
@@ -117,15 +118,13 @@ class TestBarDaoQuery:
                 )
             )
 
-        result = dao.query_today_bars("IM2609", "M1", base, base + timedelta(minutes=1))
+        result = await dao.query_today_bars("IM2609", "M1", base, base + timedelta(minutes=1))
         assert len(result) == 2  # 时间去重后每根bar只留一条
 
-    def test_cleanup_today_bars_keeps_given_date(self, dao):
-        from qtrader.utils.database import session_scope
-
+    async def test_cleanup_today_bars_keeps_given_date(self, dao):
         old_day = datetime(2026, 8, 25, 9, 30)
         today = datetime(2026, 8, 27, 9, 30)
-        with session_scope() as session:
+        async with get_async_session() as session:
             for dt in [old_day, today]:
                 session.add(
                     BarTodayPo(
@@ -141,15 +140,82 @@ class TestBarDaoQuery:
                     )
                 )
 
-        deleted = dao.cleanup_today_bars(keep_date=today.date())
+        deleted = await dao.cleanup_today_bars(keep_date=today.date())
         assert deleted == 1
-        assert len(dao.query_today_bars("IM2609", "M1", today, today)) == 1
+        assert len(await dao.query_today_bars("IM2609", "M1", today, today)) == 1
 
-    def test_upsert_history_bars_empty(self, dao):
-        assert dao.upsert_history_bars([], "tq") == 0
+    async def test_query_accepts_tz_aware_inputs(self, dao):
+        """aware入参自动转naive（asyncpg拒绝aware绑定 timestamp without time zone 列）"""
+        from qtrader.models.po import BarHistoryPo
 
-    def test_upsert_today_bars_empty(self, dao):
-        assert dao.upsert_today_bars("MANAGER", [], date.today()) == 0
+        base = datetime(2026, 9, 9, 14, 10)
+        async with get_async_session() as session:
+            session.add(
+                BarHistoryPo(
+                    symbol="IM2609",
+                    interval="M1",
+                    bar_time=base,
+                    trading_day=base.date(),
+                    open_price=100,
+                    high_price=101,
+                    low_price=99,
+                    close_price=100,
+                )
+            )
+
+        # 本地时区aware窗口覆盖naive落库的base
+        start = (base - timedelta(minutes=1)).astimezone()
+        end = (base + timedelta(minutes=1)).astimezone()
+        assert start.tzinfo is not None
+
+        result = await dao.query_history_bars("IM2609", "M1", start, end)
+        assert len(result) == 1
+        assert result[0].bar_time == base
+
+    async def test_upsert_history_bars_empty(self, dao):
+        assert await dao.upsert_history_bars([], "tq") == 0
+
+    async def test_upsert_today_bars_empty(self, dao):
+        assert await dao.upsert_today_bars("MANAGER", [], date.today()) == 0
+
+    async def test_dao_routes_to_named_instance(self, tmp_path):
+        """BarDao(db_name=...) 读写指定实例，与默认实例隔离（feed线程独立事件循环场景）"""
+        from qtrader.manager.data_feed import FEED_DB_NAME
+
+        await init_async_database(f"sqlite+aiosqlite:///{tmp_path}/default.db")
+        await init_async_database(f"sqlite+aiosqlite:///{tmp_path}/feed.db", name=FEED_DB_NAME)
+        try:
+            base = datetime(2026, 9, 10, 21, 0)
+            feed_dao = BarDao(db_name=FEED_DB_NAME)
+            await feed_dao.upsert_today_bars("MANAGER", [_make_bar("IM2609", base)], base.date())
+
+            # 写入落在 feed 实例
+            assert len(await feed_dao.query_today_bars("IM2609", "M1", base, base)) == 1
+            # 默认实例无该数据（跨循环共享会报 attached to a different loop，必须隔离）
+            assert len(await BarDao().query_today_bars("IM2609", "M1", base, base)) == 0
+        finally:
+            await close_async_database(name=FEED_DB_NAME)
+            await close_async_database()
+
+
+class TestToNaive:
+    """时区归一化辅助函数测试"""
+
+    def test_naive_passthrough(self):
+        from qtrader.trader.dao.bar_dao import _to_naive
+
+        naive = datetime(2026, 9, 9, 14, 10)
+        assert _to_naive(naive) == naive
+        assert _to_naive(naive).tzinfo is None
+
+    def test_aware_converts_to_local_wall_time(self):
+        """aware转本地时间：与 datetime.fromtimestamp 口径一致（时区无关断言）"""
+        from qtrader.trader.dao.bar_dao import _to_naive
+
+        utc_dt = datetime(2026, 9, 9, 6, 0, tzinfo=timezone.utc)
+        naive = _to_naive(utc_dt)
+        assert naive.tzinfo is None
+        assert naive == datetime.fromtimestamp(utc_dt.timestamp())
 
 
 class TestCollectBarSubscriptions:
@@ -229,13 +295,13 @@ class TestManagerDataFeed:
         feed.sync_history()
         assert feed._resync_requested is True
 
-    def test_resolve_tq_symbol_queries_contracts(self, tmp_path):
+    async def test_resolve_tq_symbol_queries_contracts(self, tmp_path):
+        from qtrader.manager.data_feed import FEED_DB_NAME
         from qtrader.models.po import ContractPo
-        from qtrader.utils.database import init_database, session_scope
 
-        init_database(f"sqlite:///{tmp_path}/test.db")
+        await init_async_database(f"sqlite+aiosqlite:///{tmp_path}/test.db", name=FEED_DB_NAME)
         try:
-            with session_scope() as session:
+            async with get_async_session(name=FEED_DB_NAME) as session:
                 # 真实存储格式：裸合约代码（TqContractFetcher 写入）
                 session.add(
                     ContractPo(
@@ -253,8 +319,8 @@ class TestManagerDataFeed:
                     )
                 )
             feed = self._make_feed()
-            assert feed._resolve_tq_symbol("IM2609") == "CFFEX.IM2609"
-            assert feed._resolve_tq_symbol("rb2510") == "SHFE.rb2510"
-            assert feed._resolve_tq_symbol("XX9999") is None
+            assert await feed._resolve_tq_symbol("IM2609") == "CFFEX.IM2609"
+            assert await feed._resolve_tq_symbol("rb2510") == "SHFE.rb2510"
+            assert await feed._resolve_tq_symbol("XX9999") is None
         finally:
-            close_database()
+            await close_async_database(name=FEED_DB_NAME)

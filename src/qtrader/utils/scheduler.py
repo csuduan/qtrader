@@ -1,6 +1,6 @@
 """
 定时任务调度器模块
-使用APScheduler管理定时任务，直接从config.yaml加载配置
+使用APScheduler（AsyncIOScheduler）管理定时任务，直接从config.yaml加载配置
 """
 
 import asyncio
@@ -8,13 +8,14 @@ import inspect
 from datetime import datetime
 from typing import Callable
 
-from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from pydantic import BaseModel
 
 from qtrader.trader.job_mgr import JobManager
 from qtrader.trader.switch_mgr import SwitchPosManager
 from qtrader.utils.config_loader import SchedulerConfig
+from qtrader.utils.executors import submit_task
 from qtrader.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -48,7 +49,7 @@ class TaskScheduler:
             trading_engine: 交易引擎实例
         """
         self.config = config
-        self.scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
+        self.scheduler = AsyncIOScheduler(timezone="Asia/Shanghai")
         self.job_manager = job_manager
         # 内存中的任务配置
         self._jobs: dict[str, Job] = {}
@@ -98,31 +99,19 @@ class TaskScheduler:
 
         # 包装任务函数，在执行后更新触发时间
         def wrap_job_func(func: Callable, job: Job) -> Callable:
-            def wrapped():
+            async def wrapped():
                 try:
                     # 检测是否为协程函数
                     if inspect.iscoroutinefunction(func):
-                        # 异步函数：在事件循环中执行
-                        from qtrader.app_context import get_app_context
-
-                        ctx = get_app_context()
-                        loop = ctx.get_event_loop()
-
-                        if loop and loop.is_running():
-                            # 使用 run_coroutine_threadsafe 在线程中安全地调度协程
-                            future = asyncio.run_coroutine_threadsafe(func(), loop)
-                            # 等待结果，设置5分钟超时
-                            try:
-                                future.result(timeout=300)
-                            except asyncio.TimeoutError:
-                                logger.error(f"异步任务执行超时（300秒）: {job.job_name}")
-                            except Exception as e:
-                                logger.error(f"异步任务执行失败: {job.job_name}, {e}")
-                        else:
-                            logger.error(f"事件循环未运行，无法执行异步任务: {job.job_name}")
+                        # 协程任务：事件循环内直接执行，超时由 wait_for 控制
+                        await asyncio.wait_for(func(), timeout=300)
                     else:
-                        # 同步函数：直接调用
-                        func()
+                        # 同步函数：投递到默认线程池执行
+                        await submit_task(func)
+                except asyncio.TimeoutError:
+                    logger.error(f"异步任务执行超时（300秒）: {job.job_name}")
+                except Exception as e:
+                    logger.error(f"任务执行失败: {job.job_name}, {e}")
                 finally:
                     job.last_trigger_time = datetime.now()
 

@@ -5,7 +5,7 @@ load_hist_bars 三层数据源合并逻辑测试
 """
 
 from datetime import datetime, timedelta
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pandas as pd
 import pytest
@@ -73,7 +73,7 @@ class TestLoadHistBars:
     async def test_history_table_only(self, strategy_manager, mock_trading_engine):
         """CTP冷启动：内存无K线，仅历史表有数据"""
         base = datetime(2026, 8, 26, 9, 30)
-        dao = MagicMock()
+        dao = AsyncMock()
         dao.query_history_bars.return_value = [
             _history_po(base + timedelta(minutes=i), 100.0 + i) for i in range(3)
         ]
@@ -94,7 +94,7 @@ class TestLoadHistBars:
     async def test_gateway_memory_overrides_history(self, strategy_manager, mock_trading_engine):
         """网关内存覆盖历史表同时间点的数据"""
         base = datetime(2026, 8, 26, 9, 30)
-        dao = MagicMock()
+        dao = AsyncMock()
         dao.query_history_bars.return_value = [_history_po(base, 100.0)]
         dao.query_today_bars.return_value = []
         mock_trading_engine.get_kline.return_value = _kline_df([(base, 999.0)])
@@ -113,7 +113,7 @@ class TestLoadHistBars:
         """当日表只补内存和历史表都没有的时间点"""
         base = datetime(2026, 8, 27, 9, 30)
         t1, t2, t3 = base, base + timedelta(minutes=1), base + timedelta(minutes=2)
-        dao = MagicMock()
+        dao = AsyncMock()
         dao.query_history_bars.return_value = []  # 历史表无当日数据
         dao.query_today_bars.return_value = [
             _today_po(t1, 100.0),
@@ -140,7 +140,7 @@ class TestLoadHistBars:
     async def test_db_error_falls_back_to_gateway(self, strategy_manager, mock_trading_engine):
         """数据库异常时仍走网关内存"""
         base = datetime(2026, 8, 26, 9, 30)
-        dao = MagicMock()
+        dao = AsyncMock()
         dao.query_history_bars.side_effect = Exception("db down")
         dao.query_today_bars.side_effect = Exception("db down")
         mock_trading_engine.get_kline.return_value = _kline_df([(base, 100.0)])
@@ -154,7 +154,7 @@ class TestLoadHistBars:
     @pytest.mark.asyncio
     async def test_no_data_returns_empty(self, strategy_manager, mock_trading_engine):
         base = datetime(2026, 8, 26, 9, 30)
-        dao = MagicMock()
+        dao = AsyncMock()
         dao.query_history_bars.return_value = []
         dao.query_today_bars.return_value = []
         mock_trading_engine.get_kline.return_value = None

@@ -128,9 +128,8 @@ class RotationReqHandler(BaseReqHandler):
         if not instruction_id or self.trader.switchPos_manager is None:
             return None
 
-        return self.trader.switchPos_manager.update_instruction(data)
+        return await self.trader.switchPos_manager.update_instruction(data)
 
-    # 低频接口：手动UI操作触发，内部同步写库可接受，未做异步化
     @request("import_rotation_instructions")
     async def _req_import_rotation_instructions(self, data: dict) -> dict:
         """处理批量导入换仓指令请求"""
@@ -139,7 +138,9 @@ class RotationReqHandler(BaseReqHandler):
         mode = data.get("mode", "append")
 
         if self.trader.switchPos_manager and csv_text and filename:
-            return self.trader.switchPos_manager.import_csv(str(csv_text), str(filename), str(mode))
+            return await self.trader.switchPos_manager.import_csv(
+                str(csv_text), str(filename), str(mode)
+            )
         return {"imported": 0, "skipped": 0, "errors": []}
 
     @request("execute_rotation")
@@ -167,14 +168,13 @@ class RotationReqHandler(BaseReqHandler):
         self.trader.switchPos_manager.stop_rotation()
         return True
 
-    # 低频接口：手动UI操作触发，内部同步写库可接受，未做异步化
     @request("batch_delete_instructions")
     async def _req_batch_delete_instructions(self, data: dict) -> dict:
         """处理批量删除换仓指令请求"""
         ids = data.get("ids", [])
         if self.trader.switchPos_manager is None:
             return {"deleted": 0}
-        self.trader.switchPos_manager.delete_instruction(ids)
+        await self.trader.switchPos_manager.delete_instruction(ids)
         return {"deleted": len(ids)}
 
     # ========== 目标仓位比对请求处理 ==========

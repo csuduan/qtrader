@@ -6,13 +6,14 @@
 风控参数落库分支用临时 SQLite 承载 SystemParamPo。
 """
 
-from contextlib import contextmanager
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import yaml
 from sqlalchemy import create_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from qtrader.models.object import AccountData
@@ -55,18 +56,22 @@ def make_account() -> AccountData:
 
 def make_fake_param_db(tmp_path):
     """构造仅包含系统参数表的临时 SQLite 数据库"""
-    engine = create_engine(f"sqlite:///{tmp_path}/system_params.db")
-    Base.metadata.create_all(engine, tables=[SystemParamPo.__table__])
-    session_local = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    # 路由经异步会话写入；同步引擎仅供用例读取校验落库结果
+    sync_engine = create_engine(f"sqlite:///{tmp_path}/system_params.db")
+    Base.metadata.create_all(sync_engine, tables=[SystemParamPo.__table__])
+    session_local = sessionmaker(bind=sync_engine, autoflush=False, expire_on_commit=False)
 
-    @contextmanager
-    def get_session():
-        session = session_local()
-        try:
-            yield session
-            session.commit()
-        finally:
-            session.close()
+    async_engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path}/system_params.db")
+
+    @asynccontextmanager
+    async def get_session():
+        async with async_sessionmaker(async_engine, expire_on_commit=False)() as session:
+            try:
+                yield session
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
 
     return SimpleNamespace(get_session=get_session), session_local
 
@@ -175,7 +180,7 @@ class TestRiskControlUpdate:
         mock_trading_manager.get_trader = MagicMock(return_value=trader)
         mock_trading_manager.get_account = AsyncMock(return_value=make_account())
 
-        with patch("qtrader.manager.api.routes.system.get_database", return_value=db):
+        with patch("qtrader.manager.api.routes.system.get_async_database", return_value=db):
             resp = client.put(
                 f"{BASE}/risk-control",
                 json={
@@ -212,7 +217,7 @@ class TestRiskControlUpdate:
         mock_trading_manager.get_trader = MagicMock(return_value=trader)
         mock_trading_manager.get_account = AsyncMock(return_value=make_account())
 
-        with patch("qtrader.manager.api.routes.system.get_database", return_value=db):
+        with patch("qtrader.manager.api.routes.system.get_async_database", return_value=db):
             client.put(f"{BASE}/risk-control", json={"max_daily_orders": 50, "account_id": ACCOUNT})
             client.put(f"{BASE}/risk-control", json={"max_daily_orders": 60, "account_id": ACCOUNT})
 

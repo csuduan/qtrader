@@ -9,10 +9,11 @@ import struct
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
+from decimal import Decimal
 from enum import Enum
 from typing import Any, Callable
 
-import simplejson as json
+import orjson
 
 from qtrader.utils.logger import get_logger
 
@@ -20,6 +21,13 @@ logger = get_logger(__name__)
 
 # 单条消息最大长度（16MB），防止对端声明超大长度导致内存耗尽
 MAX_MESSAGE_SIZE = 16 * 1024 * 1024
+
+
+def _json_default(obj: Any) -> str:
+    """orjson 兜底序列化：Decimal 保持数字语义（与 simplejson use_decimal 一致），其余转字符串"""
+    if isinstance(obj, Decimal):
+        return float(obj)  # type: ignore[return-value]
+    return str(obj)
 
 
 class RemoteHandlerError(Exception):
@@ -72,29 +80,8 @@ class MessageBody:
         )
 
 
-class MessageEncoder(json.JSONEncoder):
-    """自定义JSON编码器"""
-
-    def default(self, obj):
-        if isinstance(obj, bytes):
-            return {"__bytes__": obj.hex()}
-        if isinstance(obj, datetime):
-            return obj.isoformat()
-        return super().default(obj)
-
-
-def message_decode_hook(dct):
-    """JSON解码钩子"""
-    if "__bytes__" in dct:
-        return bytes.fromhex(dct["__bytes__"])
-    return dct
-
-
 class MessageProtocol:
     """消息协议处理器"""
-
-    def __init__(self):
-        self.encoder = MessageEncoder()
 
     def encode(self, message: MessageBody) -> bytes:
         """
@@ -108,10 +95,8 @@ class MessageProtocol:
         Returns:
             编码后的字节数据
         """
-        # 将消息体转换为JSON
-        # json_data = self.encoder.encode(message.to_dict())
-        json_data: str = json.dumps(message.to_dict(), ignore_nan=True, default=str)
-        message_bytes = json_data.encode("utf-8")
+        # orjson.dumps 直接返回 bytes；NaN/Infinity 序列化为 null，datetime 原生支持
+        message_bytes = orjson.dumps(message.to_dict(), default=_json_default)
 
         # 4字节长度 + 报文体
         length = len(message_bytes)
@@ -137,12 +122,11 @@ class MessageProtocol:
             if len(data) < 4 + length:
                 return None
 
-            # 解析JSON
-            json_data = data[4 : 4 + length].decode("utf-8")
-            message_dict = json.loads(json_data, object_hook=message_decode_hook)
+            # 解析JSON（orjson.loads 直接接受 bytes）
+            message_dict = orjson.loads(data[4 : 4 + length])
 
             return MessageBody.from_dict(message_dict)
-        except (struct.error, json.JSONDecodeError, UnicodeDecodeError) as e:
+        except (struct.error, orjson.JSONDecodeError) as e:
             logger.error(f"Failed to decode message: {e}")
             return None
 

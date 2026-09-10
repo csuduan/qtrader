@@ -12,7 +12,6 @@ from qtrader.manager.api.dependencies import get_trading_manager
 from qtrader.manager.api.responses import error_response, success_response
 from qtrader.manager.manager import TradingManager
 from qtrader.models.po import RotationInstructionPo
-from qtrader.utils.database import get_database
 from qtrader.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -81,7 +80,7 @@ class RotationInstructionUpdate(BaseModel):
     volume: int | None = None
 
 
-def _query_rotation_from_db(
+async def _query_rotation_from_db(
     account_id: str,
     limit: int,
     offset: int,
@@ -90,32 +89,42 @@ def _query_rotation_from_db(
     trading_date: str | None,
 ):
     """从数据库查询换仓指令列表"""
-    db = get_database()
+    from sqlalchemy import func, select
+
+    from qtrader.utils.async_database import get_async_database
+
+    db = get_async_database()
     if not db:
         return error_response(code=500, message="数据库未初始化")
 
-    with db.get_session() as session:
-        query = session.query(RotationInstructionPo).filter(
+    async with db.get_session() as session:
+        stmt = select(RotationInstructionPo).filter(
             RotationInstructionPo.account_id == account_id,
             RotationInstructionPo.is_deleted.is_(False),
         )
 
         if status:
-            query = query.filter(RotationInstructionPo.status == status)
+            stmt = stmt.filter(RotationInstructionPo.status == status)
 
         if enabled is not None:
-            query = query.filter(RotationInstructionPo.enabled.is_(enabled))
+            stmt = stmt.filter(RotationInstructionPo.enabled.is_(enabled))
 
         if trading_date is None:
             trading_date = datetime.now().strftime("%Y%m%d")
-        query = query.filter(RotationInstructionPo.trading_date == trading_date)
+        stmt = stmt.filter(RotationInstructionPo.trading_date == trading_date)
 
-        total = query.count()
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        total = (await session.execute(count_stmt)).scalar_one()
 
         instructions = (
-            query.order_by(RotationInstructionPo.created_at.desc())
-            .offset(offset)
-            .limit(limit)
+            (
+                await session.execute(
+                    stmt.order_by(RotationInstructionPo.created_at.desc())
+                    .offset(offset)
+                    .limit(limit)
+                )
+            )
+            .scalars()
             .all()
         )
 
@@ -228,7 +237,9 @@ async def get_rotation_instructions(
             return success_response(data=result, message="获取成功")
 
         # Trader未连接或查询非今日数据，回退到数据库
-        result = _query_rotation_from_db(account_id, limit, offset, status, enabled, trading_date)
+        result = await _query_rotation_from_db(
+            account_id, limit, offset, status, enabled, trading_date
+        )
         if isinstance(result, dict):
             return success_response(data=result, message="获取成功")
         return result
@@ -250,19 +261,21 @@ async def get_rotation_instruction(
     - **instruction_id**: 指令ID
     """
     try:
-        db = get_database()
+        from sqlalchemy import select
+
+        from qtrader.utils.async_database import get_async_database
+
+        db = get_async_database()
         if not db:
             return error_response(code=500, message="数据库未初始化")
 
-        with db.get_session() as session:
-            inst = (
-                session.query(RotationInstructionPo)
-                .filter(
+        async with db.get_session() as session:
+            inst = await session.scalar(
+                select(RotationInstructionPo).filter(
                     RotationInstructionPo.id == instruction_id,
                     RotationInstructionPo.account_id == account_id,
                     RotationInstructionPo.is_deleted.is_(False),
                 )
-                .first()
             )
 
             if not inst:

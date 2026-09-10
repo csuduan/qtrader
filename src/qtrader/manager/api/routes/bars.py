@@ -3,7 +3,6 @@ K线数据相关API路由
 查询由 Manager 数据服务（ManagerDataFeed）落库的K线数据，支持手动同步
 """
 
-import asyncio
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
@@ -34,7 +33,7 @@ async def get_bars(
         按时间升序的bar列表：[{datetime, open, high, low, close, volume, source}]
     """
     try:
-        bars = await asyncio.to_thread(BarDao().query_bars, symbol, interval, start, end, limit)
+        bars = await BarDao().query_bars(symbol, interval, start, end, limit)
         return success_response(data=bars, message=f"获取成功，共{len(bars)}根")
     except Exception as e:
         logger.exception(f"查询K线失败: {symbol} {interval}: {e}")
@@ -54,7 +53,8 @@ async def sync_bars(
         data_feed = trading_manager.data_feed
         if not data_feed:
             return error_response(code=503, message="数据服务未启动（未配置tq_data账号）")
-        message = await asyncio.to_thread(data_feed.request_resync)
+        # request_resync 仅设置同步标志（线程安全，无IO），直接调用
+        message = data_feed.request_resync()
         return success_response(data={"message": message}, message="同步已触发")
     except Exception as e:
         logger.exception(f"手动同步K线失败: {e}")

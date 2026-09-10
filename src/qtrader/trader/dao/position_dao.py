@@ -8,9 +8,12 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from qtrader.models.object import Exchange, PositionData
 from qtrader.models.po import PositionPo
-from qtrader.utils.database import session_scope
+from qtrader.utils.async_database import fetch_all, fetch_one, get_async_session
 from qtrader.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -19,12 +22,13 @@ logger = get_logger(__name__)
 class PositionDao:
     """账户级持仓数据访问对象"""
 
-    def save_dict(self, session, account_id: str, symbol: str, data: dict[str, Any]) -> None:
+    async def save_dict(
+        self, session: AsyncSession, account_id: str, symbol: str, data: dict[str, Any]
+    ) -> None:
         """在指定会话中通过字典持久化账户级持仓（用于批量写入）"""
-        position_po = (
-            session.query(PositionPo)
-            .filter_by(account_id=account_id, symbol=symbol, strategy_id=None)
-            .first()
+        position_po = await fetch_one(
+            session,
+            select(PositionPo).filter_by(account_id=account_id, symbol=symbol, strategy_id=None),
         )
         if not position_po:
             position_po = PositionPo(
@@ -56,7 +60,7 @@ class StrategyPositionService:
         """初始化服务"""
         pass
 
-    def save_position(self, position: PositionData) -> bool:
+    async def save_position(self, position: PositionData) -> bool:
         """
         保存策略持仓到数据库
 
@@ -67,16 +71,15 @@ class StrategyPositionService:
             bool: 是否成功
         """
         try:
-            with session_scope() as session:
+            async with get_async_session() as session:
                 # 查找是否已存在记录
-                existing = (
-                    session.query(PositionPo)
-                    .filter(
+                existing = await fetch_one(
+                    session,
+                    select(PositionPo).filter(
                         PositionPo.account_id == position.extras.get("account_id", ""),
                         PositionPo.strategy_id == position.strategy_id,
                         PositionPo.symbol == position.symbol,
-                    )
-                    .first()
+                    ),
                 )
 
                 if existing:
@@ -120,7 +123,7 @@ class StrategyPositionService:
             logger.exception(f"保存策略持仓失败: {e}")
             return False
 
-    def load_positions(self, account_id: str, strategy_id: str) -> list[PositionData]:
+    async def load_positions(self, account_id: str, strategy_id: str) -> list[PositionData]:
         """
         从数据库加载策略的所有持仓
 
@@ -133,14 +136,13 @@ class StrategyPositionService:
         """
         positions = []
         try:
-            with session_scope() as session:
-                records = (
-                    session.query(PositionPo)
-                    .filter(
+            async with get_async_session() as session:
+                records = await fetch_all(
+                    session,
+                    select(PositionPo).filter(
                         PositionPo.account_id == account_id,
                         PositionPo.strategy_id == strategy_id,
-                    )
-                    .all()
+                    ),
                 )
 
                 for record in records:
@@ -175,7 +177,9 @@ class StrategyPositionService:
 
         return positions
 
-    def load_position(self, account_id: str, strategy_id: str, symbol: str) -> PositionData | None:
+    async def load_position(
+        self, account_id: str, strategy_id: str, symbol: str
+    ) -> PositionData | None:
         """
         从数据库加载指定合约的持仓
 
@@ -188,15 +192,14 @@ class StrategyPositionService:
             PositionData: 持仓对象，如果不存在则返回None
         """
         try:
-            with session_scope() as session:
-                record = (
-                    session.query(PositionPo)
-                    .filter(
+            async with get_async_session() as session:
+                record = await fetch_one(
+                    session,
+                    select(PositionPo).filter(
                         PositionPo.account_id == account_id,
                         PositionPo.strategy_id == strategy_id,
                         PositionPo.symbol == symbol,
-                    )
-                    .first()
+                    ),
                 )
 
                 if (
@@ -229,7 +232,9 @@ class StrategyPositionService:
 
         return None
 
-    def clear_position(self, account_id: str, strategy_id: str, symbol: str | None = None) -> bool:
+    async def clear_position(
+        self, account_id: str, strategy_id: str, symbol: str | None = None
+    ) -> bool:
         """
         清空策略持仓
 
@@ -242,16 +247,16 @@ class StrategyPositionService:
             bool: 是否成功
         """
         try:
-            with session_scope() as session:
-                query = session.query(PositionPo).filter(
+            async with get_async_session() as session:
+                stmt = delete(PositionPo).where(
                     PositionPo.account_id == account_id,
                     PositionPo.strategy_id == strategy_id,
                 )
 
                 if symbol:
-                    query = query.filter(PositionPo.symbol == symbol)
+                    stmt = stmt.where(PositionPo.symbol == symbol)
 
-                query.delete(synchronize_session=False)
+                await session.execute(stmt)
 
                 if symbol:
                     logger.info(f"清空策略持仓: {account_id}/{strategy_id}/{symbol}")
@@ -264,7 +269,7 @@ class StrategyPositionService:
             logger.exception(f"清空策略持仓失败: {e}")
             return False
 
-    def clear_all_positions(self, account_id: str) -> bool:
+    async def clear_all_positions(self, account_id: str) -> bool:
         """
         清空账户下所有策略持仓
 
@@ -275,11 +280,13 @@ class StrategyPositionService:
             bool: 是否成功
         """
         try:
-            with session_scope() as session:
-                session.query(PositionPo).filter(
-                    PositionPo.account_id == account_id,
-                    PositionPo.strategy_id.is_not(None),  # 只删除策略持仓
-                ).delete(synchronize_session=False)
+            async with get_async_session() as session:
+                await session.execute(
+                    delete(PositionPo).where(
+                        PositionPo.account_id == account_id,
+                        PositionPo.strategy_id.is_not(None),  # 只删除策略持仓
+                    )
+                )
 
                 logger.info(f"清空账户所有策略持仓: {account_id}")
                 return True

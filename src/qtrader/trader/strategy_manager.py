@@ -175,7 +175,7 @@ class StrategyManager:
                 await self.init_strategy(strategy)
 
                 # 从数据库加载策略持仓
-                positions = self._position_service.load_positions(account_id, name)
+                positions = await self._position_service.load_positions(account_id, name)
                 if positions:
                     strategy.init_positions(positions)
                     logger.info(f"策略 {name} 加载了 {len(positions)} 个合约的持仓")
@@ -398,7 +398,7 @@ class StrategyManager:
 
     # ==================== 策略持仓管理 ====================
 
-    def save_strategy_position(self, position: "PositionData") -> bool:
+    async def save_strategy_position(self, position: "PositionData") -> bool:
         """
         保存策略持仓到数据库
 
@@ -412,7 +412,7 @@ class StrategyManager:
             account_id = self.trading_engine.account_id if self.trading_engine else None
             if account_id:
                 position.extras["account_id"] = account_id
-            return self._position_service.save_position(position)
+            return await self._position_service.save_position(position)
         except Exception as e:
             logger.error(f"保存策略持仓失败: {e}")
             return False
@@ -574,9 +574,7 @@ class StrategyManager:
 
         # 1. 历史表
         try:
-            history_pos = await asyncio.to_thread(
-                BarDao().query_history_bars, symbol, interval, start, end
-            )
+            history_pos = await BarDao().query_history_bars(symbol, interval, start, end)
             for po in history_pos:
                 bars[po.bar_time] = BarData(  # type: ignore[index]
                     symbol=symbol,
@@ -617,9 +615,7 @@ class StrategyManager:
 
         # 3. 当日表兜底补缺（仅补内存和历史表都没有的时间点）
         try:
-            today_pos = await asyncio.to_thread(
-                BarDao().query_today_bars, symbol, interval, start, end
-            )
+            today_pos = await BarDao().query_today_bars(symbol, interval, start, end)
             for today_po in today_pos:
                 if today_po.bar_time not in bars:  # type: ignore[index]
                     bars[today_po.bar_time] = BarData(  # type: ignore[index]

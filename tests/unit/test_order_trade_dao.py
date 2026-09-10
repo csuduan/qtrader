@@ -14,6 +14,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+from sqlalchemy import select
 
 from qtrader.models.object import (
     Direction,
@@ -26,21 +27,25 @@ from qtrader.models.object import (
 from qtrader.models.po import AccountPo, OrderPo, TradePo
 from qtrader.trader.dao.order_dao import OrderDao
 from qtrader.trader.dao.trade_dao import TradeDao
-from qtrader.utils.database import close_database, init_database, session_scope
+from qtrader.utils.async_database import (
+    close_async_database,
+    get_async_session,
+    init_async_database,
+)
 
 INSERT_TIME = datetime(2026, 8, 28, 9, 30, 5)
 UPDATE_TIME = datetime(2026, 8, 28, 9, 30, 15)
 
 
 @pytest.fixture
-def db(tmp_path):
+async def db(tmp_path):
     """初始化测试数据库"""
-    init_database(f"sqlite:///{tmp_path}/test.db")
+    await init_async_database(f"sqlite+aiosqlite:///{tmp_path}/test.db")
     # 订单/成交表存在指向账户表的外键，预先写入账户记录
-    with session_scope() as session:
+    async with get_async_session() as session:
         session.add(AccountPo(account_id="TEST"))
     yield
-    close_database()
+    await close_async_database()
 
 
 def _make_order(**overrides) -> OrderData:
@@ -82,41 +87,45 @@ def _make_trade(**overrides) -> TradeData:
     return TradeData(**fields)
 
 
-def _query_order(order_id: str) -> OrderPo | None:
+async def _query_order(order_id: str) -> OrderPo | None:
     """查询订单持久化记录"""
-    with session_scope() as session:
-        po = session.query(OrderPo).filter_by(order_id=order_id).first()
+    async with get_async_session() as session:
+        po = (
+            await session.execute(select(OrderPo).filter_by(order_id=order_id))
+        ).scalar_one_or_none()
         _ = (po.symbol, po.direction, po.volume_left) if po else None
         return po
 
 
-def _count_orders() -> int:
-    with session_scope() as session:
-        return session.query(OrderPo).count()
+async def _count_orders() -> int:
+    async with get_async_session() as session:
+        return len((await session.execute(select(OrderPo))).scalars().all())
 
 
-def _query_trade(trade_id: str) -> TradePo | None:
+async def _query_trade(trade_id: str) -> TradePo | None:
     """查询成交持久化记录"""
-    with session_scope() as session:
-        po = session.query(TradePo).filter_by(trade_id=trade_id).first()
+    async with get_async_session() as session:
+        po = (
+            await session.execute(select(TradePo).filter_by(trade_id=trade_id))
+        ).scalar_one_or_none()
         _ = (po.symbol, po.direction, po.price) if po else None
         return po
 
 
-def _count_trades() -> int:
-    with session_scope() as session:
-        return session.query(TradePo).count()
+async def _count_trades() -> int:
+    async with get_async_session() as session:
+        return len((await session.execute(select(TradePo))).scalars().all())
 
 
 @pytest.mark.unit
 class TestOrderDaoSave:
     """订单写入测试"""
 
-    def test_save_order_full_fields_roundtrip(self, db):
+    async def test_save_order_full_fields_roundtrip(self, db):
         """测试全字段写入与读回"""
-        OrderDao().save("TEST", _make_order())
+        await OrderDao().save("TEST", _make_order())
 
-        po = _query_order("O1")
+        po = await _query_order("O1")
         assert po is not None
         assert po.account_id == "TEST"
         assert po.symbol == "IM2609"
@@ -131,71 +140,71 @@ class TestOrderDaoSave:
         assert po.insert_date_time == INSERT_TIME
         assert po.update_date_time == UPDATE_TIME
 
-    def test_save_order_market_price(self, db):
+    async def test_save_order_market_price(self, db):
         """测试市价单（price=None）limit_price 写空"""
-        OrderDao().save("TEST", _make_order(price=None, price_type=OrderType.MARKET))
+        await OrderDao().save("TEST", _make_order(price=None, price_type=OrderType.MARKET))
 
-        po = _query_order("O1")
+        po = await _query_order("O1")
         assert po.limit_price is None
         assert po.price_type == "MARKET"
 
-    def test_save_order_exchange_id_fallback(self, db):
+    async def test_save_order_exchange_id_fallback(self, db):
         """测试无网关单号时回退使用 order_sys_id"""
         order = _make_order(gateway_order_id=None)
         order.order_sys_id = "SYS456"
 
-        OrderDao().save("TEST", order)
+        await OrderDao().save("TEST", order)
 
-        assert _query_order("O1").exchange_order_id == "SYS456"
+        assert (await _query_order("O1")).exchange_order_id == "SYS456"
 
-    def test_save_order_upsert_updates_status(self, db):
+    async def test_save_order_upsert_updates_status(self, db):
         """测试同订单重复保存为更新而非新增"""
         dao = OrderDao()
-        dao.save("TEST", _make_order(status=OrderStatus.PENDING))
-        dao.save("TEST", _make_order(status=OrderStatus.FINISHED, traded=5))
+        await dao.save("TEST", _make_order(status=OrderStatus.PENDING))
+        await dao.save("TEST", _make_order(status=OrderStatus.FINISHED, traded=5))
 
-        assert _count_orders() == 1
-        po = _query_order("O1")
+        assert await _count_orders() == 1
+        po = await _query_order("O1")
         assert po.status == "FINISHED"
         assert po.volume_left == 0
 
-    def test_save_order_insert_time_fallback(self, db):
+    async def test_save_order_insert_time_fallback(self, db):
         """测试无下单时间时回退使用最后更新时间"""
-        OrderDao().save("TEST", _make_order(insert_time=None))
+        await OrderDao().save("TEST", _make_order(insert_time=None))
 
-        assert _query_order("O1").insert_date_time == UPDATE_TIME
+        assert (await _query_order("O1")).insert_date_time == UPDATE_TIME
 
-    def test_save_order_insert_and_update_time_missing(self, db):
+    async def test_save_order_insert_and_update_time_missing(self, db):
         """测试下单与更新时间均缺失时写当前时间"""
-        OrderDao().save("TEST", _make_order(insert_time=None, update_time=None))
+        await OrderDao().save("TEST", _make_order(insert_time=None, update_time=None))
 
-        assert _query_order("O1").insert_date_time is not None
+        assert (await _query_order("O1")).insert_date_time is not None
 
-    def test_save_order_without_order_id_skipped(self, db):
+    async def test_save_order_without_order_id_skipped(self, db):
         """测试缺失订单号时不写入"""
-        with session_scope() as session:
-            OrderDao()._save_with_session(session, "TEST", SimpleNamespace(symbol="IM2609"))
+        async with get_async_session() as session:
+            await OrderDao()._save_with_session(session, "TEST", SimpleNamespace(symbol="IM2609"))
 
-        assert _count_orders() == 0
+        assert await _count_orders() == 0
 
-    def test_save_order_swallows_exception(self):
+    async def test_save_order_swallows_exception(self):
         """测试数据库异常被捕获记录，不向上抛出"""
         with patch(
-            "qtrader.trader.dao.order_dao.session_scope",
+            "qtrader.trader.dao.order_dao.get_async_session",
             side_effect=RuntimeError("db down"),
         ):
-            OrderDao().save("TEST", _make_order())  # 不应抛出
+            await OrderDao().save("TEST", _make_order())  # 不应抛出
 
 
 @pytest.mark.unit
 class TestTradeDaoSave:
     """成交写入测试"""
 
-    def test_save_trade_full_fields_roundtrip(self, db):
+    async def test_save_trade_full_fields_roundtrip(self, db):
         """测试全字段写入与读回"""
-        TradeDao().save("TEST", _make_trade())
+        await TradeDao().save("TEST", _make_trade())
 
-        po = _query_trade("T1")
+        po = await _query_trade("T1")
         assert po is not None
         assert po.account_id == "TEST"
         assert po.order_id == "O1"
@@ -207,38 +216,38 @@ class TestTradeDaoSave:
         assert po.volume == 3
         assert po.trade_date_time == UPDATE_TIME
 
-    def test_save_trade_dedupes_by_trade_id(self, db):
+    async def test_save_trade_dedupes_by_trade_id(self, db):
         """测试同 trade_id 重复保存被跳过"""
         dao = TradeDao()
-        dao.save("TEST", _make_trade())
-        dao.save("TEST", _make_trade(price=9999.0))
+        await dao.save("TEST", _make_trade())
+        await dao.save("TEST", _make_trade(price=9999.0))
 
-        assert _count_trades() == 1
-        assert float(_query_trade("T1").price) == pytest.approx(3510.0)
+        assert await _count_trades() == 1
+        assert float((await _query_trade("T1")).price) == pytest.approx(3510.0)
 
-    def test_save_trade_without_trade_id_skipped(self, db):
+    async def test_save_trade_without_trade_id_skipped(self, db):
         """测试缺失成交ID时不写入"""
-        with session_scope() as session:
-            TradeDao()._save_with_session(session, "TEST", SimpleNamespace(symbol="IM2609"))
+        async with get_async_session() as session:
+            await TradeDao()._save_with_session(session, "TEST", SimpleNamespace(symbol="IM2609"))
 
-        assert _count_trades() == 0
+        assert await _count_trades() == 0
 
-    def test_save_trade_time_defaults_to_now(self, db):
+    async def test_save_trade_time_defaults_to_now(self, db):
         """测试无成交时间时写当前时间"""
-        TradeDao().save("TEST", _make_trade(trade_time=None))
+        await TradeDao().save("TEST", _make_trade(trade_time=None))
 
-        assert _query_trade("T1").trade_date_time is not None
+        assert (await _query_trade("T1")).trade_date_time is not None
 
-    def test_save_trade_order_price_none(self, db):
+    async def test_save_trade_order_price_none(self, db):
         """测试无报单价格时 order_price 写空"""
-        TradeDao().save("TEST", _make_trade(order_price=None))
+        await TradeDao().save("TEST", _make_trade(order_price=None))
 
-        assert _query_trade("T1").order_price is None
+        assert (await _query_trade("T1")).order_price is None
 
-    def test_save_trade_swallows_exception(self):
+    async def test_save_trade_swallows_exception(self):
         """测试数据库异常被捕获记录，不向上抛出"""
         with patch(
-            "qtrader.trader.dao.trade_dao.session_scope",
+            "qtrader.trader.dao.trade_dao.get_async_session",
             side_effect=RuntimeError("db down"),
         ):
-            TradeDao().save("TEST", _make_trade())  # 不应抛出
+            await TradeDao().save("TEST", _make_trade())  # 不应抛出

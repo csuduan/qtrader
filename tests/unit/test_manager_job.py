@@ -3,12 +3,12 @@ ManagerJobManager 单元测试
 """
 
 from datetime import date, timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from qtrader.manager.job_mgr import ManagerJobManager
 
 
-def test_weekly_report_queries_configured_accounts_excluding_blacklist():
+async def test_weekly_report_queries_configured_accounts_excluding_blacklist():
     """结算权益周报只查询 config.yaml 中配置、且不在黑名单中的账户"""
     mgr = ManagerJobManager(MagicMock())
 
@@ -35,15 +35,15 @@ def test_weekly_report_queries_configured_accounts_excluding_blacklist():
 
         mock_record = MagicMock()
         mock_record.account_id = "DQ"
-        mock_dao.return_value.query_settlements.return_value = [mock_record]
+        mock_dao.return_value.query_settlements = AsyncMock(return_value=[mock_record])
 
-        mgr.send_weekly_settlement_report()
+        await mgr.send_weekly_settlement_report()
 
         mock_dao.return_value.query_settlements.assert_called_once_with(["DQ", "GW"], monday, today)
         mock_send.assert_called_once()
 
 
-def test_weekly_report_skips_when_no_configured_accounts():
+async def test_weekly_report_skips_when_no_configured_accounts():
     """config.yaml 中没有配置账户时跳过周报"""
     mgr = ManagerJobManager(MagicMock())
 
@@ -58,13 +58,13 @@ def test_weekly_report_skips_when_no_configured_accounts():
         app_config.email.exclude_accounts = []
         mock_get_loader.return_value.load_config.return_value = app_config
 
-        mgr.send_weekly_settlement_report()
+        await mgr.send_weekly_settlement_report()
 
         mock_dao.return_value.query_settlements.assert_not_called()
         mock_send.assert_not_called()
 
 
-def test_weekly_report_skips_when_email_disabled():
+async def test_weekly_report_skips_when_email_disabled():
     """邮件未启用时跳过周报"""
     mgr = ManagerJobManager(MagicMock())
 
@@ -77,7 +77,7 @@ def test_weekly_report_skips_when_email_disabled():
         app_config.email.enabled = False
         mock_get_loader.return_value.load_config.return_value = app_config
 
-        mgr.send_weekly_settlement_report()
+        await mgr.send_weekly_settlement_report()
 
         mock_dao.return_value.query_settlements.assert_not_called()
         mock_send.assert_not_called()

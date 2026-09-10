@@ -6,20 +6,45 @@ K线数据DAO
 
 from datetime import date, datetime
 
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from qtrader.models.object import BarData
 from qtrader.models.po import BarHistoryPo, BarTodayPo
-from qtrader.utils.database import session_scope
+from qtrader.utils.async_database import DEFAULT_DB_NAME, fetch_all, get_async_session
 from qtrader.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
+def _to_naive(dt: datetime) -> datetime:
+    """
+    时区感知时间转为本地无时区时间（与落库口径一致：naive本地时间）
+
+    Args:
+        dt: 任意datetime
+
+    Returns:
+        无时区datetime（aware输入转本地时间后剥离tzinfo，naive原样返回）
+    """
+    if dt.tzinfo is None:
+        return dt
+    return dt.astimezone().replace(tzinfo=None)
+
+
 class BarDao:
     """K线数据访问对象"""
 
-    def upsert_history_bars(self, bars: list[dict], source: str) -> int:
+    def __init__(self, db_name: str = DEFAULT_DB_NAME):
+        """
+        初始化
+
+        Args:
+            db_name: 异步数据库实例名（ManagerDataFeed 独立事件循环须传专用实例名）
+        """
+        self._db_name = db_name
+
+    async def upsert_history_bars(self, bars: list[dict], source: str) -> int:
         """
         批量写入历史K线（官方数据覆盖旧值）
 
@@ -33,7 +58,7 @@ class BarDao:
         """
         if not bars:
             return 0
-        with session_scope() as session:
+        async with get_async_session(self._db_name) as session:
             rows = [
                 {
                     "symbol": b["symbol"],
@@ -66,10 +91,10 @@ class BarDao:
                     "source": stmt.excluded.source,
                 },
             )
-            session.execute(stmt)
+            await session.execute(stmt)
         return len(rows)
 
-    def query_history_bars(
+    async def query_history_bars(
         self, symbol: str, interval: str, start: datetime, end: datetime
     ) -> list[BarHistoryPo]:
         """
@@ -84,22 +109,25 @@ class BarDao:
         Returns:
             按时间升序的BarHistoryPo列表
         """
-        with session_scope() as session:
-            pos = (
-                session.query(BarHistoryPo)
+        start, end = _to_naive(start), _to_naive(end)
+        async with get_async_session(self._db_name) as session:
+            pos = await fetch_all(
+                session,
+                select(BarHistoryPo)
                 .filter(
                     BarHistoryPo.symbol == symbol,
                     BarHistoryPo.interval == interval,
                     BarHistoryPo.bar_time >= start,
                     BarHistoryPo.bar_time <= end,
                 )
-                .order_by(BarHistoryPo.bar_time)
-                .all()
+                .order_by(BarHistoryPo.bar_time),
             )
             session.expunge_all()
             return pos
 
-    def upsert_today_bars(self, account_id: str, bars: list[BarData], trading_day: date) -> int:
+    async def upsert_today_bars(
+        self, account_id: str, bars: list[BarData], trading_day: date
+    ) -> int:
         """
         批量写入当日K线（同一账户重复写入不覆盖，先写先得）
 
@@ -113,7 +141,7 @@ class BarDao:
         """
         if not bars:
             return 0
-        with session_scope() as session:
+        async with get_async_session(self._db_name) as session:
             rows = [
                 {
                     "symbol": b.symbol,
@@ -135,10 +163,10 @@ class BarDao:
             stmt = stmt.on_conflict_do_nothing(
                 constraint="uq_bars_today_symbol_interval_time_account"
             )
-            result = session.execute(stmt)
+            result = await session.execute(stmt)
             return int(getattr(result, "rowcount", 0) or 0)
 
-    def query_today_bars(
+    async def query_today_bars(
         self, symbol: str, interval: str, start: datetime, end: datetime
     ) -> list[BarTodayPo]:
         """
@@ -153,17 +181,18 @@ class BarDao:
         Returns:
             按时间升序、时间去重的BarTodayPo列表
         """
-        with session_scope() as session:
-            pos = (
-                session.query(BarTodayPo)
+        start, end = _to_naive(start), _to_naive(end)
+        async with get_async_session(self._db_name) as session:
+            pos = await fetch_all(
+                session,
+                select(BarTodayPo)
                 .filter(
                     BarTodayPo.symbol == symbol,
                     BarTodayPo.interval == interval,
                     BarTodayPo.bar_time >= start,
                     BarTodayPo.bar_time <= end,
                 )
-                .order_by(BarTodayPo.bar_time, BarTodayPo.account_id)
-                .all()
+                .order_by(BarTodayPo.bar_time, BarTodayPo.account_id),
             )
             session.expunge_all()
 
@@ -174,7 +203,7 @@ class BarDao:
                 result.append(po)
         return result
 
-    def query_bars(
+    async def query_bars(
         self, symbol: str, interval: str, start: datetime, end: datetime, limit: int = 500
     ) -> list[dict]:
         """
@@ -191,7 +220,7 @@ class BarDao:
             按时间升序的bar字典列表
         """
         bars: dict[datetime, dict] = {}
-        for hpo in self.query_history_bars(symbol, interval, start, end):
+        for hpo in await self.query_history_bars(symbol, interval, start, end):
             bar_time = hpo.bar_time
             if not isinstance(bar_time, datetime):
                 continue
@@ -205,7 +234,7 @@ class BarDao:
                 "source": hpo.source or "history",
             }
         # 当日表覆盖同时间点的历史数据（实时数据最新）
-        for tpo in self.query_today_bars(symbol, interval, start, end):
+        for tpo in await self.query_today_bars(symbol, interval, start, end):
             bar_time = tpo.bar_time
             if not isinstance(bar_time, datetime):
                 continue
@@ -222,7 +251,7 @@ class BarDao:
         result = [bars[t] for t in sorted(bars.keys())]
         return result[-limit:] if len(result) > limit else result
 
-    def cleanup_today_bars(self, keep_date: date) -> int:
+    async def cleanup_today_bars(self, keep_date: date) -> int:
         """
         清理指定日期之前的当日K线数据
 
@@ -232,8 +261,11 @@ class BarDao:
         Returns:
             删除条数
         """
-        with session_scope() as session:
-            deleted = session.query(BarTodayPo).filter(BarTodayPo.trading_day < keep_date).delete()
+        async with get_async_session(self._db_name) as session:
+            result = await session.execute(
+                delete(BarTodayPo).where(BarTodayPo.trading_day < keep_date)
+            )
+            deleted = int(result.rowcount or 0)
         if deleted > 0:
             logger.info(f"已清理 {deleted} 条过期当日K线数据")
         return deleted

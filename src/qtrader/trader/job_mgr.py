@@ -8,14 +8,18 @@ import csv
 from datetime import datetime
 from pathlib import Path
 
+from sqlalchemy import select
+
 from qtrader.app_context import get_app_context
 from qtrader.models.po import AlarmPo as AlarmModel
+from qtrader.models.po import SwitchPosImportPo
 from qtrader.trader.dao.position_dao import StrategyPositionService
 from qtrader.trader.strategy_manager import StrategyManager
 from qtrader.trader.switch_mgr import SwitchPosManager
 from qtrader.trader.trading_engine import TradingEngine
+from qtrader.utils.async_database import get_async_session
 from qtrader.utils.config_loader import TraderConfig, get_config_loader
-from qtrader.utils.database import get_session
+from qtrader.utils.executors import submit_task
 from qtrader.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -73,8 +77,8 @@ class JobManager:
         """盘后导出持仓"""
         logger.info("开始执行盘后导出持仓任务")
         try:
-            # _run_async()
-            await asyncio.to_thread(self._export_positions_to_csv)
+            # 文件IO轻任务，走默认线程池
+            await submit_task(self._export_positions_to_csv)
             logger.info("盘后导出持仓任务完成")
         except Exception as e:
             logger.exception(f"盘后导出持仓任务执行失败: {e}")
@@ -172,27 +176,26 @@ class JobManager:
         """扫描并处理订单"""
         # logger.info("开始扫描订单任务")
         try:
-            await asyncio.to_thread(self.position_manager.scan_and_process_orders)
+            await self.position_manager.scan_and_process_orders()
             # logger.info("扫描订单任务完成")
         except Exception as e:
             logger.exception(f"扫描订单任务执行失败: {e}")
 
-    def cleanup_old_alarms(self) -> None:
+    async def cleanup_old_alarms(self) -> None:
         """清理3天前的告警"""
         logger.info("开始清理旧告警")
         from datetime import timedelta
 
-        from qtrader.utils.database import session_scope
+        from sqlalchemy import delete
 
         try:
-            with session_scope() as session:
+            async with get_async_session() as session:
                 three_days_ago = datetime.now() - timedelta(days=3)
 
-                deleted_count = (
-                    session.query(AlarmModel)
-                    .filter(AlarmModel.created_at < three_days_ago)
-                    .delete()
+                result = await session.execute(
+                    delete(AlarmModel).where(AlarmModel.created_at < three_days_ago)
                 )
+                deleted_count = int(result.rowcount or 0)
 
                 if deleted_count > 0:
                     logger.info(f"已清理 {deleted_count} 条旧告警记录")
@@ -221,12 +224,10 @@ class JobManager:
         """检查换仓结果，如果当天需要执行的换仓文件还没有全部完成，发出告警通知"""
         from datetime import date
 
-        from qtrader.utils.database import session_scope
-
         logger.info("开始检查换仓结果")
 
         try:
-            with session_scope() as session:
+            async with get_async_session() as session:
                 from qtrader.models.po import RotationInstructionPo
 
                 # 获取今天的日期
@@ -235,12 +236,16 @@ class JobManager:
 
                 # 查询今天启用且未删除的换仓指令
                 instructions = (
-                    session.query(RotationInstructionPo)
-                    .filter(
-                        RotationInstructionPo.trading_date == today_str,
-                        RotationInstructionPo.enabled == True,
-                        RotationInstructionPo.is_deleted == False,
+                    (
+                        await session.execute(
+                            select(RotationInstructionPo).filter(
+                                RotationInstructionPo.trading_date == today_str,
+                                RotationInstructionPo.enabled == True,  # noqa: E712
+                                RotationInstructionPo.is_deleted == False,  # noqa: E712
+                            )
+                        )
                     )
+                    .scalars()
                     .all()
                 )
 
@@ -252,7 +257,7 @@ class JobManager:
                 unfinished = []
                 for inst in instructions:
                     # 判断是否未完成：状态不是 FINISHED 或者还有剩余手数
-                    if inst.status == "FAILED" and inst.is_deleted == False:
+                    if inst.status == "FAILED" and inst.is_deleted == False:  # noqa: E712
                         unfinished.append(
                             {
                                 "id": inst.id,
@@ -359,22 +364,23 @@ class JobManager:
         查询数据库中今日是否有换仓文件导入记录
         如果没有则告警
         """
-        from qtrader.utils.database import session_scope
-
         try:
-            with session_scope() as session:
-                from datetime import date
-
-                from qtrader.models.po import SwitchPosImportPo
-
-                today = date.today()
+            async with get_async_session() as session:
                 today_str = now.strftime("%Y-%m-%d")
 
                 # 查询今天是否有导入记录
-                count = (
-                    session.query(SwitchPosImportPo)
-                    .filter(SwitchPosImportPo.created_at >= today_str)
-                    .count()
+                count = len(
+                    (
+                        (
+                            await session.execute(
+                                select(SwitchPosImportPo).filter(
+                                    SwitchPosImportPo.created_at >= today_str
+                                )
+                            )
+                        )
+                        .scalars()
+                        .all()
+                    )
                 )
 
                 if count == 0:
@@ -483,9 +489,7 @@ class JobManager:
             account_id = account.account_id
 
             dao = SettlementDao()
-            await asyncio.to_thread(
-                dao.save_settlement_snapshot, account_id, settle_date, account, positions
-            )
+            await dao.save_settlement_snapshot(account_id, settle_date, account, positions)
 
             logger.info(f"每日结算快照任务完成: {account_id} {settle_date}")
         except Exception as e:

@@ -6,9 +6,11 @@
 from datetime import date
 from decimal import Decimal
 
+from sqlalchemy import delete, select
+
 from qtrader.models.object import AccountData, PositionData
 from qtrader.models.po import AccountHistoryPo, PositionHistoryPo
-from qtrader.utils.database import session_scope
+from qtrader.utils.async_database import fetch_all, fetch_one, get_async_session
 from qtrader.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -22,7 +24,7 @@ def _to_decimal(value: float | None) -> Decimal | None:
 class SettlementDao:
     """每日结算快照数据访问对象"""
 
-    def save_settlement_snapshot(
+    async def save_settlement_snapshot(
         self,
         account_id: str,
         settle_date: date,
@@ -41,11 +43,10 @@ class SettlementDao:
             account: 账户数据
             positions: 账户级持仓字典（symbol -> PositionData）
         """
-        with session_scope() as session:
-            po = (
-                session.query(AccountHistoryPo)
-                .filter_by(account_id=account_id, settle_date=settle_date)
-                .first()
+        async with get_async_session() as session:
+            po = await fetch_one(
+                session,
+                select(AccountHistoryPo).filter_by(account_id=account_id, settle_date=settle_date),
             )
             if not po:
                 po = AccountHistoryPo(account_id=account_id, settle_date=settle_date)
@@ -63,9 +64,12 @@ class SettlementDao:
 
             session.add(po)
 
-            session.query(PositionHistoryPo).filter_by(
-                account_id=account_id, settle_date=settle_date
-            ).delete()
+            await session.execute(
+                delete(PositionHistoryPo).where(
+                    PositionHistoryPo.account_id == account_id,
+                    PositionHistoryPo.settle_date == settle_date,
+                )
+            )
 
             count = 0
             for position in positions.values():
@@ -96,7 +100,7 @@ class SettlementDao:
             f"结算快照已保存: {account_id} {settle_date} " f"权益={account.balance} 持仓{count}条"
         )
 
-    def query_settlements(
+    async def query_settlements(
         self, account_ids: list[str] | None, start_date: date, end_date: date
     ) -> list[AccountHistoryPo]:
         """
@@ -110,15 +114,14 @@ class SettlementDao:
         Returns:
             按 account_id、settle_date 排序的快照列表
         """
-        with session_scope() as session:
-            query = session.query(AccountHistoryPo).filter(
+        async with get_async_session() as session:
+            stmt = select(AccountHistoryPo).filter(
                 AccountHistoryPo.settle_date >= start_date,
                 AccountHistoryPo.settle_date <= end_date,
             )
             if account_ids:
-                query = query.filter(AccountHistoryPo.account_id.in_(account_ids))
-            records = query.order_by(
-                AccountHistoryPo.account_id, AccountHistoryPo.settle_date
-            ).all()
+                stmt = stmt.filter(AccountHistoryPo.account_id.in_(account_ids))
+            stmt = stmt.order_by(AccountHistoryPo.account_id, AccountHistoryPo.settle_date)
+            records = await fetch_all(session, stmt)
             session.expunge_all()
             return records

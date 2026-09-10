@@ -3,7 +3,7 @@
 实现交易风险控制功能
 """
 
-import threading
+import asyncio
 from datetime import datetime, time
 
 from qtrader.utils.config_loader import RiskControlConfig
@@ -28,12 +28,8 @@ class RiskControl:
         self.daily_order_count = 0
         self.daily_cancel_count = 0
         self._last_reset_date: datetime | None = None
-        # 计数器延迟保存定时器（合并高频写入，避免每次下单/撤单都同步写库）
-        self._save_timer: threading.Timer | None = None
-
-        # 从数据库加载当日计数（如果配置了账户ID）
-        if account_id:
-            self._load_counters()
+        # 计数器延迟保存定时器句柄（合并高频写入，避免每次下单/撤单都写库）
+        self._save_handle: asyncio.TimerHandle | None = None
 
         logger.info(
             f"风控模块初始化完成 - 最大报单次数: {config.max_daily_orders}, "
@@ -41,31 +37,31 @@ class RiskControl:
             f"最大报单手数: {config.max_order_volume}"
         )
 
-    def _load_counters(self) -> None:
-        """从数据库加载当日计数器"""
+    async def load(self) -> None:
+        """从数据库加载当日计数器（事件循环启动后由调用方显式调用）"""
+        if not self.account_id:
+            return
         try:
-            from qtrader.models.po import SystemParamPo
-            from qtrader.utils.database import session_scope
+            from sqlalchemy import select
 
-            with session_scope() as session:
-                today = datetime.now().strftime("%Y-%m-%d")
-                order_record = (
-                    session.query(SystemParamPo)
-                    .filter(
+            from qtrader.models.po import SystemParamPo
+            from qtrader.utils.async_database import get_async_session
+
+            today = datetime.now().strftime("%Y-%m-%d")
+            async with get_async_session() as session:
+                order_record = await session.scalar(
+                    select(SystemParamPo).filter(
                         SystemParamPo.account_id == self.account_id,
                         SystemParamPo.param_key == "risk_control.daily_order_count",
                         SystemParamPo.group == f"risk_control_{today}",
                     )
-                    .first()
                 )
-                cancel_record = (
-                    session.query(SystemParamPo)
-                    .filter(
+                cancel_record = await session.scalar(
+                    select(SystemParamPo).filter(
                         SystemParamPo.account_id == self.account_id,
                         SystemParamPo.param_key == "risk_control.daily_cancel_count",
                         SystemParamPo.group == f"risk_control_{today}",
                     )
-                    .first()
                 )
 
                 if order_record:
@@ -88,46 +84,54 @@ class RiskControl:
     _SAVE_DELAY = 5.0
 
     def _schedule_save_counters(self) -> None:
-        """延迟保存计数器：5秒内的连续变更合并为一次写库，避免下单热路径同步IO"""
+        """延迟保存计数器：5秒内的连续变更合并为一次写库，避免下单热路径频繁IO"""
         if not self.account_id:
             return
-        if self._save_timer and self._save_timer.is_alive():
+        if self._save_handle is not None:
             return
-        self._save_timer = threading.Timer(self._SAVE_DELAY, self._save_counters)
-        self._save_timer.daemon = True
-        self._save_timer.start()
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            logger.warning("无运行中的事件循环，跳过风控计数器延迟保存")
+            return
+        self._save_handle = loop.call_later(self._SAVE_DELAY, self._fire_save_task, loop)
 
-    def flush_counters(self) -> None:
+    def _fire_save_task(self, loop: asyncio.AbstractEventLoop) -> None:
+        """延迟到期后在事件循环内触发异步保存任务"""
+        self._save_handle = None
+        loop.create_task(self._save_counters())
+
+    async def flush_counters(self) -> None:
         """停止前落库：取消延迟保存定时器并立即写入计数器"""
-        if self._save_timer:
-            self._save_timer.cancel()
-            self._save_timer = None
-        self._save_counters()
+        if self._save_handle:
+            self._save_handle.cancel()
+            self._save_handle = None
+        await self._save_counters()
 
-    def _save_counters(self) -> None:
+    async def _save_counters(self) -> None:
         """保存计数器到数据库"""
         if not self.account_id:
             return
 
         try:
+            from sqlalchemy import select
+
             from qtrader.models.po import SystemParamPo
-            from qtrader.utils.database import session_scope
+            from qtrader.utils.async_database import get_async_session
 
             today = datetime.now().strftime("%Y-%m-%d")
             group = f"risk_control_{today}"
 
-            with session_scope() as session:
+            async with get_async_session() as session:
                 for key, value in [
                     ("risk_control.daily_order_count", self.daily_order_count),
                     ("risk_control.daily_cancel_count", self.daily_cancel_count),
                 ]:
-                    record = (
-                        session.query(SystemParamPo)
-                        .filter(
+                    record = await session.scalar(
+                        select(SystemParamPo).filter(
                             SystemParamPo.account_id == self.account_id,
                             SystemParamPo.param_key == key,
                         )
-                        .first()
                     )
                     if record:
                         record.param_value = str(value)  # type: ignore[assignment]

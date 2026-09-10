@@ -48,7 +48,7 @@ lint:  ## 运行代码检查
 	uv run mypy src/qtrader/
 
 format:  ## 格式化代码
-	uv run black src/qtrader/ --line-length 100 --target py312
+	uv run black src/qtrader/ --line-length 100 --target-version py312
 	uv run isort src/qtrader/ --profile black
 
 

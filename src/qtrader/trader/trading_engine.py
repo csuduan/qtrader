@@ -11,7 +11,6 @@ from datetime import datetime
 from typing import Any
 
 import pandas as pd
-from sqlalchemy import or_
 
 from qtrader.app_context import get_app_context
 from qtrader.models.object import (
@@ -33,7 +32,6 @@ from qtrader.trader.order_executor import OrderCmdExecutor
 from qtrader.trader.risk_control import RiskControl
 from qtrader.utils.async_event_engine import AsyncEventEngine, EventTypes
 from qtrader.utils.config_loader import AccountConfig, AppConfig, RiskControlConfig
-from qtrader.utils.database import get_session
 from qtrader.utils.helpers import _get_int_param
 from qtrader.utils.logger import get_logger
 from qtrader.utils.trading_session import is_symbol_trading_time
@@ -89,8 +87,6 @@ class TradingEngine:
 
         # Gateway初始化
         self._init_gateway()
-        # 加载风控数据
-        self.reload_risk_control_config()  # type: ignore[attr-defined]
 
     async def start(self):
         """
@@ -99,6 +95,13 @@ class TradingEngine:
         if self.gateway is None:
             logger.error("Gateway未初始化，无法启动交易引擎")
             return
+
+        # 加载风控数据（从数据库加载计数器与配置）
+        try:
+            await self.risk_control.load()
+            await self.reload_risk_control_config()
+        except Exception as e:
+            logger.error(f"启动时加载风控数据失败: {e}", exc_info=True)
 
         # 启动执行器
         from qtrader.trader.order_executor import OrderCmdExecutor
@@ -181,12 +184,12 @@ class TradingEngine:
             return None
         return self.gateway.get_contracts().get(symbol, None)
 
-    def reload_risk_control_config(self):
+    async def reload_risk_control_config(self):
         """
         从数据库重新加载风控配置
         """
         try:
-            new_config = self._load_risk_control_config()
+            new_config = await self._load_risk_control_config()
             self.risk_control.config = new_config
             logger.info("风控配置已从数据库重新加载")
         except Exception as e:
@@ -224,7 +227,7 @@ class TradingEngine:
             self.event_engine.start()
             ctx.set(ctx.KEY_EVENT_ENGINE, self.event_engine)
 
-    def _load_risk_control_config(self):
+    async def _load_risk_control_config(self):
         """
         加载风控配置
 
@@ -233,19 +236,25 @@ class TradingEngine:
         Returns:
             RiskControlConfig: 风控配置对象
         """
-        from qtrader.utils.database import session_scope
+        from sqlalchemy import select
+
+        from qtrader.utils.async_database import get_async_session
 
         try:
-            with session_scope() as session:
-                params = {
-                    param.param_key: param.param_value
-                    for param in session.query(SystemParamPo)
-                    .filter(
-                        (SystemParamPo.account_id == self.account_id)
-                        | (SystemParamPo.account_id.is_(None))
+            async with get_async_session() as session:
+                params_rows = (
+                    (
+                        await session.execute(
+                            select(SystemParamPo).filter(
+                                (SystemParamPo.account_id == self.account_id)
+                                | (SystemParamPo.account_id.is_(None))
+                            )
+                        )
                     )
+                    .scalars()
                     .all()
-                }
+                )
+                params = {param.param_key: param.param_value for param in params_rows}
 
                 risk_control_params = {
                     "max_daily_orders": _get_int_param(

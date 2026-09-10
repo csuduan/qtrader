@@ -12,7 +12,6 @@
 from datetime import datetime
 
 from qtrader.utils.logger import get_logger
-from qtrader.utils.shared_database import SharedDatabase
 
 logger = get_logger(__name__)
 
@@ -98,14 +97,10 @@ class PublicDataService:
     Trader进程通过IPC消息接收数据。
     """
 
-    def __init__(self, shared_db: SharedDatabase):
+    def __init__(self):
         """
-        初始化公共数据服务
-
-        Args:
-            shared_db: 共享数据库实例
+        初始化公共数据服务（使用全局异步数据库实例）
         """
-        self.shared_db = shared_db
         # 内存缓存：{symbol: ContractInfo}
         self._contracts: dict[str, ContractInfo] = {}
         # 按数据源分组：{data_source: {symbol: ContractInfo}}
@@ -116,7 +111,7 @@ class PublicDataService:
 
     # ==================== 合约数据写入 ====================
 
-    def upsert_contracts(self, contracts: list[dict], data_source: str) -> int:
+    async def upsert_contracts(self, contracts: list[dict], data_source: str) -> int:
         """
         批量写入/更新合约信息（来自某个数据源）
 
@@ -173,6 +168,8 @@ class PublicDataService:
         # 分批批量 upsert
         chunk_size = 1000
         if rows:
+            from qtrader.utils.async_database import get_async_session
+
             update_cols = {
                 col.name: getattr(pg_insert(ContractPo).excluded, col.name)
                 for col in ContractPo.__table__.columns
@@ -180,7 +177,7 @@ class PublicDataService:
             }
             update_cols["updated_at"] = now
 
-            with self.shared_db.get_session() as session:
+            async with get_async_session() as session:
                 for i in range(0, len(rows), chunk_size):
                     chunk = rows[i : i + chunk_size]
                     stmt = (
@@ -188,7 +185,7 @@ class PublicDataService:
                         .values(chunk)
                         .on_conflict_do_update(index_elements=[ContractPo.symbol], set_=update_cols)
                     )
-                    session.execute(stmt)
+                    await session.execute(stmt)
 
         # 同步到内存缓存
         for contract_dict in unique_contracts:
@@ -265,7 +262,7 @@ class PublicDataService:
         contracts = self.get_contracts(data_source=data_source)
         return [c.to_dict() for c in contracts]
 
-    def load_from_database(self, date_filter: str | None = None) -> int:
+    async def load_from_database(self, date_filter: str | None = None) -> int:
         """
         从共享数据库加载合约信息到内存缓存
 
@@ -275,15 +272,25 @@ class PublicDataService:
         Returns:
             加载的合约数量
         """
+        from sqlalchemy import select
+
         from qtrader.models.po import ContractPo
+        from qtrader.utils.async_database import get_async_session
 
         filter_date = date_filter or datetime.now().strftime("%Y-%m-%d")
         count = 0
 
         try:
-            with self.shared_db.get_session() as session:
-                query = session.query(ContractPo).filter(ContractPo.update_date == filter_date)
-                contract_pos = query.all()
+            async with get_async_session() as session:
+                contract_pos = (
+                    (
+                        await session.execute(
+                            select(ContractPo).filter(ContractPo.update_date == filter_date)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
 
                 for po in contract_pos:
                     info = ContractInfo(
