@@ -62,6 +62,7 @@ export UV_DEFAULT_INDEX="https://pypi.tuna.tsinghua.edu.cn/simple"
 
 
 * 安装数据库(可选)
+以ubuntu为例
 ```bash
 # 安装官方仓库最新版
 sudo apt update
@@ -71,7 +72,7 @@ sudo systemctl start postgresql
 sudo systemctl enable postgresql
 # 创建DB
 sudo -u postgres psql
-CREATE USER qtrader WITH PASSWORD 'xxxxxx';
+CREATE USER trader WITH PASSWORD 'xxxxxx';
 CREATE DATABASE qtrader OWNER trader;
 GRANT ALL PRIVILEGES ON DATABASE qtrader TO trader;
 # 访问DB

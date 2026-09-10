@@ -123,6 +123,37 @@ class SocketClient:
 
         return decorator
 
+    async def _cleanup_stale_resources(self) -> None:
+        """清理上一条连接遗留的任务、writer与pending请求（重连前必须调用，否则泄漏fd/任务）"""
+        self.connected = False
+
+        for task in (self._receiving_task, self._heartbeat_task):
+            if task is not None and not task.done():
+                task.cancel()
+        for task in (self._receiving_task, self._heartbeat_task):
+            if task is not None:
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        self._receiving_task = None
+        self._heartbeat_task = None
+
+        # 让所有在途请求立即失败，而不是各自挂满超时
+        for future in self._pending_requests.values():
+            if not future.done():
+                future.set_exception(ConnectionError("连接已断开"))
+        self._pending_requests.clear()
+
+        if self.writer:
+            self.writer.close()
+            try:
+                await self.writer.wait_closed()
+            except Exception:
+                pass
+            self.writer = None
+        self.reader = None
+
     async def connect(self, retry_interval: float = 3.0, max_retries: int = 10) -> bool:
         """
         连接到服务器
@@ -134,6 +165,7 @@ class SocketClient:
         Returns:
             是否连接成功
         """
+        await self._cleanup_stale_resources()
         for i in range(max_retries):
             try:
                 self.reader, self.writer = await asyncio.open_unix_connection(self.socket_path)
@@ -181,39 +213,7 @@ class SocketClient:
 
     async def disconnect(self) -> None:
         """断开连接"""
-        self.connected = False
-
-        # 停止心跳任务
-        if self._heartbeat_task:
-            self._heartbeat_task.cancel()
-            try:
-                await self._heartbeat_task
-            except asyncio.CancelledError:
-                pass
-            self._heartbeat_task = None
-
-        # 停止接收任务
-        if self._receiving_task:
-            self._receiving_task.cancel()
-            try:
-                await self._receiving_task
-            except asyncio.CancelledError:
-                pass
-            self._receiving_task = None
-
-        # 取消所有等待的请求
-        for future in self._pending_requests.values():
-            if not future.done():
-                future.set_exception(ConnectionError("连接已断开"))
-        self._pending_requests.clear()
-
-        if self.writer:
-            self.writer.close()
-            try:
-                await self.writer.wait_closed()
-            except Exception:
-                pass
-
+        await self._cleanup_stale_resources()
         logger.info(f"SocketClient V2 已断开")
 
     async def request(

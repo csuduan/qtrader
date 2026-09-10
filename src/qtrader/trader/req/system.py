@@ -183,7 +183,8 @@ class SystemReqHandler(BaseReqHandler):
         if self.trader.trading_engine is None:
             logger.error(f"Trader [{self.account_id}] 交易引擎未初始化")
             return {"success": False}
-        self.trader.trading_engine.reload_risk_control_config()
+        # 热加载含同步DB查询，放入线程避免阻塞事件循环
+        await asyncio.to_thread(self.trader.trading_engine.reload_risk_control_config)
         return {"success": True}
 
     @request("update_alert_wechat")

@@ -386,7 +386,7 @@ class TestTraderProxyStopProcess:
     async def test_stop_sends_sigterm(self, proxy):
         """进程存在时应发送 SIGTERM，退出后置为 STOPPED"""
         with (
-            patch.object(proxy, "_get_process", AsyncMock(side_effect=[111, None, None])),
+            patch.object(proxy, "_get_process", AsyncMock(side_effect=[111, None, None, None])),
             patch("qtrader.manager.trader_proxy.os.kill") as mock_kill,
             patch("qtrader.manager.trader_proxy.asyncio.sleep", new_callable=AsyncMock),
         ):
@@ -397,23 +397,41 @@ class TestTraderProxyStopProcess:
         assert proxy.get_state() == TraderState.STOPPED
 
     @pytest.mark.asyncio
-    async def test_stop_reports_failure_when_process_survives(self, proxy):
-        """进程无法停止时仍返回 True 但状态保持不变"""
-        await proxy._set_state(TraderState.CONNECTED)
+    async def test_stop_escalates_to_sigkill(self, proxy):
+        """SIGTERM 后进程仍在时应升级为 SIGKILL，退出后返回成功"""
         with (
-            patch.object(proxy, "_get_process", AsyncMock(return_value=111)),
-            patch("qtrader.manager.trader_proxy.os.kill"),
+            patch.object(
+                proxy, "_get_process", AsyncMock(side_effect=[111] * 7 + [None, None])
+            ),
+            patch("qtrader.manager.trader_proxy.os.kill") as mock_kill,
             patch("qtrader.manager.trader_proxy.asyncio.sleep", new_callable=AsyncMock),
         ):
             result = await proxy.stop_process()
         assert result is True
+        mock_kill.assert_any_call(111, signal.SIGTERM)
+        mock_kill.assert_any_call(111, signal.SIGKILL)
+        assert proxy.get_state() == TraderState.STOPPED
+
+    @pytest.mark.asyncio
+    async def test_stop_reports_failure_when_process_survives(self, proxy):
+        """SIGTERM+SIGKILL 均无法停止时返回 False，状态保持不变"""
+        await proxy._set_state(TraderState.CONNECTED)
+        with (
+            patch.object(proxy, "_get_process", AsyncMock(return_value=111)),
+            patch("qtrader.manager.trader_proxy.os.kill") as mock_kill,
+            patch("qtrader.manager.trader_proxy.asyncio.sleep", new_callable=AsyncMock),
+        ):
+            result = await proxy.stop_process()
+        assert result is False
+        mock_kill.assert_any_call(111, signal.SIGTERM)
+        mock_kill.assert_any_call(111, signal.SIGKILL)
         assert proxy.get_state() == TraderState.CONNECTED
 
     @pytest.mark.asyncio
     async def test_stop_sigterm_failure_still_proceeds(self, proxy):
         """发送 SIGTERM 失败时记录告警并继续检测"""
         with (
-            patch.object(proxy, "_get_process", AsyncMock(side_effect=[111, None, None])),
+            patch.object(proxy, "_get_process", AsyncMock(side_effect=[111, None, None, None])),
             patch("qtrader.manager.trader_proxy.os.kill", side_effect=OSError("no such process")),
             patch("qtrader.manager.trader_proxy.asyncio.sleep", new_callable=AsyncMock),
         ):

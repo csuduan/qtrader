@@ -223,12 +223,13 @@ class TestTraderLifecycle:
         proxy.start_process.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_restart_start_even_if_stop_fails(self, manager):
+    async def test_restart_aborts_if_stop_fails(self, manager):
+        """停止失败时中止重启，避免半启动状态"""
         proxy = make_proxy()
         proxy.stop_process.return_value = False
         manager.traders["DQ"] = proxy
-        assert await manager.restart_trader("DQ") is True
-        proxy.start_process.assert_awaited_once()
+        assert await manager.restart_trader("DQ") is False
+        proxy.start_process.assert_not_awaited()
 
 
 @pytest.mark.unit

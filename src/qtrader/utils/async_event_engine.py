@@ -66,23 +66,45 @@ class AsyncEventEngine:
     3. 并发处理：同一事件类型的处理器并发执行
     4. 通用处理器：支持注册处理所有事件的通用处理器
     5. 线程安全：支持其他线程通过put/put_async安全投递事件
+    6. 双队列：关键事件（订单/成交/持仓/指令）不丢不延迟，普通事件（行情等）满时丢旧保新鲜
     """
 
-    def __init__(self, name: str = "AsyncEventEngine", queue_size: int = 10000) -> None:
+    # 关键事件：丢失会导致持仓/订单状态错误，入关键队列，满了排队等待绝不丢弃
+    CRITICAL_EVENT_TYPES = frozenset(
+        {
+            EventTypes.ORDER_UPDATE,
+            EventTypes.TRADE_UPDATE,
+            EventTypes.ORDER_CMD_UPDATE,
+            EventTypes.POSITION_UPDATE,
+            EventTypes.ACCOUNT_READY,
+            EventTypes.SYSTEM_ERROR,
+        }
+    )
+
+    def __init__(
+        self,
+        name: str = "AsyncEventEngine",
+        queue_size: int = 10000,
+        critical_queue_size: int = 50000,
+    ) -> None:
         """
         初始化异步事件引擎
 
         Args:
             name: 事件引擎名称，用于日志区分
-            queue_size: 事件队列上限（防止tick风暴下内存无界增长，满后丢弃新事件）
+            queue_size: 普通队列上限（行情等，满后丢弃最旧事件保新鲜）
+            critical_queue_size: 关键队列上限（订单/成交等，满后投递方协作等待，不丢弃）
         """
         self._name = name
         self._running = False
         self._queue: asyncio.Queue = asyncio.Queue(maxsize=queue_size)
+        self._critical_queue: asyncio.Queue = asyncio.Queue(maxsize=critical_queue_size)
         self._drop_count = 0
         self._handlers: defaultdict = defaultdict(list)
         self._general_handlers: list = []
-        self._process_task: asyncio.Task | None = None
+        self._process_tasks: list[asyncio.Task] = []
+        self._process_lock = asyncio.Lock()
+        self._pending_puts: set[asyncio.Task] = set()
         self._loop: asyncio.AbstractEventLoop | None = None
 
     async def _dispatch(self, handlers: list, data: Any) -> None:
@@ -142,16 +164,26 @@ class AsyncEventEngine:
         except Exception as e:
             logger.exception(f"[{self._name}] 事件处理异常: {e}")
 
-    async def _run(self) -> None:
+    async def _run(self, queue: asyncio.Queue) -> None:
         """
-        事件处理主循环
+        事件消费循环
 
-        从队列中获取事件并处理。
+        从指定队列获取事件并处理。处理全程持有 _process_lock，
+        保证事件串行处理（与单队列时代语义一致）；
+        关键队列的消费者不被普通队列的积压拖住，实现关键事件优先消化。
+
+        Args:
+            queue: 要消费的事件队列
         """
         while self._running:
             try:
-                event = await self._queue.get()
-                await self._process(event)
+                event = await queue.get()
+                async with self._process_lock:
+                    await self._process(event)
+                if queue is self._queue:
+                    # 普通队列消费者处理完让出控制权：
+                    # 同步处理器不 yield，连续消化积压时会独占处理锁饿死关键消费者
+                    await asyncio.sleep(0)
             except asyncio.CancelledError:
                 logger.info(f"[{self._name}] 事件循环被取消")
                 break
@@ -177,7 +209,11 @@ class AsyncEventEngine:
                 return
 
             self._loop = loop
-            self._process_task = asyncio.create_task(self._run())
+            # 两个消费任务：分别消费普通队列与关键队列
+            self._process_tasks = [
+                asyncio.create_task(self._run(self._queue)),
+                asyncio.create_task(self._run(self._critical_queue)),
+            ]
             logger.info(f"[{self._name}] 异步事件引擎已启动")
 
     async def stop(self, drain_timeout: float = 5.0) -> None:
@@ -201,23 +237,34 @@ class AsyncEventEngine:
             logger.warning(f"[{self._name}] 排空事件队列超时，放弃剩余事件")
 
         # 取消处理任务
-        if self._process_task:
-            self._process_task.cancel()
+        for task in self._process_tasks:
+            task.cancel()
             try:
-                await self._process_task
+                await task
             except asyncio.CancelledError:
                 pass
+        self._process_tasks = []
+
+        # 取消仍在等待队列空位的投递任务
+        if self._pending_puts:
+            for task in self._pending_puts:
+                task.cancel()
+            await asyncio.gather(*self._pending_puts, return_exceptions=True)
+            self._pending_puts.clear()
 
         self._loop = None
         logger.info(f"[{self._name}] 异步事件引擎已停止")
 
     async def _drain(self) -> None:
-        """处理队列中所有残留事件（由 stop 在 _running=False 后调用）"""
+        """处理队列中所有残留事件（由 stop 在 _running=False 后调用），关键队列优先"""
         while True:
             try:
-                event = self._queue.get_nowait()
+                event = self._critical_queue.get_nowait()
             except asyncio.QueueEmpty:
-                break
+                try:
+                    event = self._queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
             await self._process(event)
 
     def put(self, event_type: str, data: Any) -> None:
@@ -246,31 +293,38 @@ class AsyncEventEngine:
             # 其他线程：通过 call_soon_threadsafe 安全投递
             self._loop.call_soon_threadsafe(self._safe_put, event)
 
-    # 行情类事件：队列满时允许丢弃最旧以保新鲜；其余事件（订单/成交/账户等）不可丢
-    DROPPABLE_EVENT_TYPES = frozenset(
-        {
-            EventTypes.TICK_UPDATE,
-            EventTypes.TICK_BATCH_UPDATE,
-            EventTypes.KLINE_UPDATE,
-            EventTypes.CONTRACT_UPDATE,
-        }
-    )
-
     def _safe_put(self, event: Event) -> None:
         """非阻塞投递事件
 
-        队列满时：
-        - 行情类事件丢弃队首最旧事件以容纳新事件（保新鲜）
-        - 其他事件不可丢，记录错误并计数
+        按事件类型分流到两个队列，满队时行为不同：
+        - 普通事件（行情等）：丢弃队首最旧事件以容纳新事件（保新鲜）
+        - 关键事件（订单/成交等）：调度协作式等待任务排队入队，绝不丢弃
+          （网关回调线程经 call_soon_threadsafe 进来后立即返回，线程不阻塞）
         日志按频率采样避免刷屏。
         """
+        if event.type in self.CRITICAL_EVENT_TYPES:
+            queue = self._critical_queue
+        else:
+            queue = self._queue
+
         try:
-            self._queue.put_nowait(event)
+            queue.put_nowait(event)
         except asyncio.QueueFull:
-            if event.type in self.DROPPABLE_EVENT_TYPES:
+            if queue is self._critical_queue:
+                # 关键队列满：创建任务协作等待空位，事件不丢
+                task = asyncio.create_task(queue.put(event))
+                self._pending_puts.add(task)
+                task.add_done_callback(self._pending_puts.discard)
+                self._drop_count += 1
+                if self._drop_count == 1 or self._drop_count % 100 == 0:
+                    logger.warning(
+                        f"[{self._name}] 关键事件队列已满，事件排队等待 "
+                        f"（累计 {self._drop_count} 次，最近: {event.type}）"
+                    )
+            else:
                 try:
-                    self._queue.get_nowait()  # 丢弃最旧
-                    self._queue.put_nowait(event)
+                    queue.get_nowait()  # 丢弃最旧
+                    queue.put_nowait(event)
                     self._drop_count += 1
                     if self._drop_count == 1 or self._drop_count % 100 == 0:
                         logger.warning(
@@ -279,13 +333,6 @@ class AsyncEventEngine:
                         )
                 except asyncio.QueueEmpty:
                     pass
-            else:
-                self._drop_count += 1
-                if self._drop_count == 1 or self._drop_count % 100 == 0:
-                    logger.error(
-                        f"[{self._name}] 事件队列已满，关键事件被拒绝 "
-                        f"（累计丢弃 {self._drop_count} 个事件，最近: {event.type}）"
-                    )
 
     async def put_async(self, event_type: str, data: Any) -> None:
         """
@@ -307,7 +354,11 @@ class AsyncEventEngine:
             current_loop = None
 
         if current_loop is self._loop:
-            await self._queue.put(event)
+            # 关键事件走关键队列（满时等待空位，不丢弃）
+            if event.type in self.CRITICAL_EVENT_TYPES:
+                await self._critical_queue.put(event)
+            else:
+                await self._queue.put(event)
         else:
             # 跨线程：通过 call_soon_threadsafe 投递
             self._loop.call_soon_threadsafe(self._safe_put, event)

@@ -225,46 +225,69 @@ class TraderProxy:
         """
         停止 Trader
 
-        优雅停止流程：
-        1. 发送stop命令给Trader进程
-        2. 等待5秒让Trader自己停止
-        3. 如果进程还在，发送SIGTERM
-        4. 再等待5秒
-        5. 如果进程还在，发送SIGKILL强制停止
+        停止流程：
+        1. 发送SIGTERM，等待最多5x3s让进程优雅退出
+        2. 若仍在运行，发送SIGKILL强制停止，并确认退出
+        3. 清理残留的PID文件（SIGKILL路径下Trader无法自行清理）
 
         Returns:
-            是否停止成功
+            是否停止成功（进程确实已退出）
         """
         self._manual_stop = True  # 标记为手动停止，健康检查不告警
         current_state = self._state
         logger.info(f"TraderProxy [{self.account_id}] 开始停止，当前状态: {current_state}")
 
-        # 如果进程还在，发送SIGTERM
         pid = await self._get_process()
         if pid:
             try:
                 os.kill(pid, 0)
                 os.kill(pid, signal.SIGTERM)
                 logger.warning(f"TraderProxy [{self.account_id}] 进程 {pid} 已发送SIGTERM")
+            except ProcessLookupError:
+                logger.info(f"TraderProxy [{self.account_id}] 进程 {pid} 已退出")
             except Exception as e:
                 logger.warning(f"TraderProxy [{self.account_id}] 发送SIGTERM失败: {e}")
             # 循环检测5x3s
             for i in range(5):
-                await asyncio.sleep(3)
                 pid = await self._get_process()
                 if not pid:
                     break
+                await asyncio.sleep(3)
+
+        # SIGTERM未能停止，升级为SIGKILL
+        pid = await self._get_process()
+        if pid:
+            logger.warning(
+                f"TraderProxy [{self.account_id}] SIGTERM后进程 {pid} 仍在运行，发送SIGKILL强制停止"
+            )
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            except Exception as e:
+                logger.error(f"TraderProxy [{self.account_id}] 发送SIGKILL失败: {e}")
+            # 确认进程退出
+            for i in range(5):
+                pid = await self._get_process()
+                if not pid:
+                    break
+                await asyncio.sleep(1)
 
         # 检查最终状态
         pid = await self._get_process()
         if not pid:
+            # 清理SIGKILL路径下残留的PID文件，避免PID复用误判
+            try:
+                Path(self.pid_file).unlink(missing_ok=True)
+            except Exception as e:
+                logger.warning(f"TraderProxy [{self.account_id}] 清理PID文件失败: {e}")
             # 设置状态为已停止
             await self._set_state(TraderState.STOPPED)
             logger.info(f"TraderProxy [{self.account_id}] 停止完成")
+            return True
         else:
-            logger.error(f"TraderProxy [{self.account_id}] 停止失败，进程仍在运行")
-
-        return True
+            logger.error(f"TraderProxy [{self.account_id}] 停止失败，进程 {pid} 仍在运行")
+            return False
 
     # ==================== 异步连接 ====================
     async def _connect_async(self) -> None:

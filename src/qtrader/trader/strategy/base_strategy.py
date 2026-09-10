@@ -6,6 +6,8 @@
 from datetime import datetime, time
 from typing import TYPE_CHECKING, Any, Optional
 
+import asyncio
+
 import pandas as pd
 from pydantic import BaseModel, Field
 
@@ -304,12 +306,23 @@ class BaseStrategy:
         return self._positions.copy()
 
     def save_positions(self) -> None:
-        """保存持仓到数据库"""
+        """保存持仓到数据库（事件循环内调用时放入线程，避免DB IO阻塞交易主循环）"""
         if not self.strategy_manager:
             return
-        for position in self._positions.values():
-            if position.total_pos > 0:  # 只保存有持仓的记录
-                self.strategy_manager.save_strategy_position(position)
+        # 快照拷贝：落库线程读取期间持仓对象可能被后续回调修改
+        positions = [p.model_copy() for p in self._positions.values() if p.total_pos > 0]
+        if not positions:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(asyncio.to_thread(self._save_positions_sync, positions))
+        except RuntimeError:
+            # 无事件循环（如脚本/测试直接调用），退化为同步保存
+            self._save_positions_sync(positions)
+
+    def _save_positions_sync(self, positions: list) -> None:
+        for position in positions:
+            self.strategy_manager.save_strategy_position(position)
 
     async def execute_signal(self) -> None:
         """执行信号（支持锁仓模式）"""

@@ -16,8 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
-from qtrader.utils.async_event_engine import AsyncEventEngine, Event, HandlerType
-
+from qtrader.utils.async_event_engine import AsyncEventEngine, Event, EventTypes, HandlerType
 
 # ==================== Fixtures ====================
 
@@ -53,15 +52,19 @@ class TestAsyncEventEngineInitialization:
         """测试基本属性初始化"""
         assert event_engine._name == "TestEventEngine"
         assert event_engine._running is False
-        assert event_engine._process_task is None
+        assert event_engine._process_tasks == []
+        assert event_engine._pending_puts == set()
 
     def test_initialization_queue(self, event_engine: AsyncEventEngine):
         """测试队列初始化"""
         assert isinstance(event_engine._queue, asyncio.Queue)
+        assert isinstance(event_engine._critical_queue, asyncio.Queue)
+        assert event_engine._critical_queue.maxsize > event_engine._queue.maxsize
 
     def test_initialization_handlers(self, event_engine: AsyncEventEngine):
         """测试处理器字典初始化"""
         from collections import defaultdict
+
         assert isinstance(event_engine._handlers, defaultdict)
         assert len(event_engine._handlers) == 0
         assert isinstance(event_engine._general_handlers, list)
@@ -88,12 +91,11 @@ class TestAsyncEventEngineStartStop:
     def test_start_already_running(self, event_engine: AsyncEventEngine):
         """测试重复启动处理"""
         event_engine._running = True
-        event_engine._process_task = MagicMock()
 
         event_engine.start()
 
         # 应该不创建新任务
-        assert event_engine._process_task is not None
+        assert event_engine._process_tasks == []
 
     @pytest.mark.asyncio
     async def test_stop_sets_running_false(self, event_engine: AsyncEventEngine):
@@ -105,13 +107,23 @@ class TestAsyncEventEngineStartStop:
         assert event_engine._running is False
 
     @pytest.mark.asyncio
-    async def test_stop_cancels_process_task(self, event_engine: AsyncEventEngine):
-        """测试 stop() 取消处理任务"""
+    async def test_start_creates_two_consumer_tasks(self, event_engine: AsyncEventEngine):
+        """测试 start() 创建两个消费任务（普通 + 关键队列各一个）"""
+        event_engine.start()
+
+        assert len(event_engine._process_tasks) == 2
+        assert all(not t.done() for t in event_engine._process_tasks)
+
+        await event_engine.stop()
+
+    @pytest.mark.asyncio
+    async def test_stop_cancels_process_tasks(self, event_engine: AsyncEventEngine):
+        """测试 stop() 取消全部消费任务"""
         event_engine.start()
 
         await event_engine.stop()
 
-        assert event_engine._process_task is None or event_engine._process_task.cancelled()
+        assert event_engine._process_tasks == []
 
     @pytest.mark.asyncio
     async def test_stop_when_not_running(self, event_engine: AsyncEventEngine):
@@ -154,7 +166,9 @@ class TestAsyncEventEngineRegister:
         assert handler1 in event_engine._handlers["TEST_EVENT"]
         assert handler2 in event_engine._handlers["TEST_EVENT"]
 
-    def test_register_general_adds_to_general_list(self, event_engine: AsyncEventEngine, sync_handler):
+    def test_register_general_adds_to_general_list(
+        self, event_engine: AsyncEventEngine, sync_handler
+    ):
         """测试 register_general() 注册通用处理器"""
         event_engine.register_general(sync_handler)
 
@@ -235,12 +249,24 @@ class TestAsyncEventEnginePut:
         # 验证事件在队列中
         assert not event_engine._queue.empty()
 
-    def test_safe_put_droppable_event_evicts_oldest(self):
-        """行情类事件队列满时丢弃最旧以容纳新事件"""
-        from qtrader.utils.async_event_engine import Event, EventTypes
+    @pytest.mark.asyncio
+    async def test_put_async_critical_event_goes_to_critical_queue(
+        self, event_engine: AsyncEventEngine
+    ):
+        """测试 put_async() 关键事件进入关键队列"""
+        event_engine.start()
 
+        await event_engine.put_async(EventTypes.ORDER_UPDATE, {"data": "test"})
+
+        assert event_engine._critical_queue.qsize() == 1
+        assert event_engine._queue.empty()
+
+        await event_engine.stop()
+
+    def test_safe_put_droppable_event_evicts_oldest(self):
+        """普通队列（行情）满时丢弃最旧以容纳新事件"""
         engine = AsyncEventEngine(queue_size=2)
-        # 手动填满队列（不启动，直接操作 _safe_put）
+        # 手动填满普通队列（不启动，直接操作 _safe_put）
         engine._queue.put_nowait(Event(EventTypes.TICK_UPDATE, {"n": 1}))
         engine._queue.put_nowait(Event(EventTypes.TICK_UPDATE, {"n": 2}))
 
@@ -251,19 +277,137 @@ class TestAsyncEventEnginePut:
         assert items == [2, 3]
         assert engine._drop_count == 1
 
-    def test_safe_put_critical_event_rejected_on_full(self):
-        """关键事件（订单/成交）队列满时被拒绝，不驱逐"""
-        from qtrader.utils.async_event_engine import Event, EventTypes
+    def test_safe_put_routes_by_event_type(self):
+        """按事件类型分流：关键事件入关键队列，普通事件入普通队列"""
+        engine = AsyncEventEngine()
 
-        engine = AsyncEventEngine(queue_size=1)
-        engine._queue.put_nowait(Event(EventTypes.ORDER_UPDATE, {"n": 1}))
+        engine._safe_put(Event(EventTypes.ORDER_UPDATE, {"n": 1}))
+        engine._safe_put(Event(EventTypes.TRADE_UPDATE, {"n": 2}))
+        engine._safe_put(Event(EventTypes.TICK_UPDATE, {"n": 3}))
+        engine._safe_put(Event("UNKNOWN_TYPE", {"n": 4}))  # 未注册类型归普通
+
+        assert engine._critical_queue.qsize() == 2
+        assert engine._queue.qsize() == 2
+        assert engine._critical_queue.get_nowait().type == EventTypes.ORDER_UPDATE
+        assert engine._critical_queue.get_nowait().type == EventTypes.TRADE_UPDATE
+        assert engine._queue.get_nowait().type == EventTypes.TICK_UPDATE
+        assert engine._queue.get_nowait().type == "UNKNOWN_TYPE"
+
+    @pytest.mark.asyncio
+    async def test_safe_put_critical_event_not_dropped_on_full(self):
+        """关键队列满时事件不丢弃：调度等待任务，取出一个后补位入队"""
+        engine = AsyncEventEngine(critical_queue_size=1)
+        engine._critical_queue.put_nowait(Event(EventTypes.ORDER_UPDATE, {"n": 1}))
 
         engine._safe_put(Event(EventTypes.ORDER_UPDATE, {"n": 2}))
 
-        # 原事件保留，新事件被拒绝
-        assert engine._queue.get_nowait().data["n"] == 1
-        assert engine._queue.empty()
+        # 队列仍满（等待任务尚未执行），但已调度等待任务
+        assert engine._critical_queue.qsize() == 1
+        assert len(engine._pending_puts) == 1
         assert engine._drop_count == 1
+
+        # 取走一个事件腾出空位，等待任务完成后 n=2 补位入队
+        assert engine._critical_queue.get_nowait().data["n"] == 1
+        await asyncio.sleep(0.05)
+        assert engine._pending_puts == set()
+        assert engine._critical_queue.qsize() == 1
+        assert engine._critical_queue.get_nowait().data["n"] == 2
+
+    @pytest.mark.asyncio
+    async def test_critical_events_processed_before_backlogged_normal_events(self):
+        """优先级：普通队列积压时，后到的关键事件仍先被处理"""
+        engine = AsyncEventEngine(queue_size=10)
+        processed: list[str] = []
+
+        async def slow_handler(data: Any) -> None:
+            await asyncio.sleep(0.01)
+            processed.append(data["tag"])
+
+        engine.register_general(slow_handler)
+        # 预填普通队列积压（引擎未启动，直接入队）
+        for i in range(5):
+            engine._queue.put_nowait(Event(EventTypes.TICK_UPDATE, {"tag": f"tick{i}"}))
+
+        engine.start()
+        await asyncio.sleep(0.001)  # 让消费者取走第一个 tick 并开始慢处理
+        engine.put(EventTypes.ORDER_UPDATE, {"tag": "order0"})
+
+        await asyncio.sleep(0.2)
+
+        # 关键事件 order0 不必等 5 个 tick 全部消化完，应在前几位
+        assert processed.index("order0") <= 2
+        assert processed[-1] is not None
+
+        await engine.stop()
+
+    @pytest.mark.asyncio
+    async def test_sync_normal_events_do_not_starve_critical_consumer(self):
+        """同步处理器饿死防护：普通队列连续消化同步事件时让出控制权，关键事件不被拖尾"""
+        engine = AsyncEventEngine()
+        processed: list[str] = []
+
+        # 同步处理器：全程不 yield，若无让出逻辑普通消费者会独占事件循环
+        engine.register_general(lambda data: processed.append(data["tag"]))
+        # 启动前预填两个队列：普通队列积压 + 关键事件
+        for i in range(20):
+            engine._queue.put_nowait(Event(EventTypes.TICK_UPDATE, {"tag": f"tick{i}"}))
+        engine._critical_queue.put_nowait(Event(EventTypes.ORDER_UPDATE, {"tag": "order0"}))
+
+        engine.start()
+        await asyncio.sleep(0.2)
+
+        # order0 不应排在 20 个 tick 积压之后
+        assert processed.index("order0") <= 2
+
+        await engine.stop()
+
+    @pytest.mark.asyncio
+    async def test_events_processed_serially_across_queues(self):
+        """处理串行性：两个队列的事件经处理锁串行执行，不交错"""
+        engine = AsyncEventEngine()
+        enter: set[str] = set()
+        overlap_detected = []
+
+        async def checking_handler(data: Any) -> None:
+            tag = data["tag"]
+            if tag in enter:
+                overlap_detected.append(tag)
+            enter.add(tag)
+            await asyncio.sleep(0.005)
+            enter.discard(tag)
+
+        engine.register_general(checking_handler)
+        engine.start()
+
+        for i in range(5):
+            engine.put(EventTypes.TICK_UPDATE, {"tag": f"tick{i}"})
+            engine.put(EventTypes.ORDER_UPDATE, {"tag": f"order{i}"})
+
+        await asyncio.sleep(0.3)
+
+        assert overlap_detected == []
+
+        await engine.stop()
+
+    @pytest.mark.asyncio
+    async def test_stop_drains_both_queues_critical_first(self):
+        """stop() 排空两个队列，关键队列优先处理"""
+        engine = AsyncEventEngine(queue_size=10)
+        processed: list[str] = []
+
+        engine.register_general(lambda data: processed.append(data["tag"]))
+        # 预填两个队列
+        engine._queue.put_nowait(Event(EventTypes.TICK_UPDATE, {"tag": "tick0"}))
+        engine._critical_queue.put_nowait(Event(EventTypes.ORDER_UPDATE, {"tag": "order0"}))
+
+        engine.start()
+        await engine.stop(drain_timeout=2.0)
+
+        assert "order0" in processed
+        assert "tick0" in processed
+        assert processed.index("order0") < processed.index("tick0")
+        assert engine._queue.empty()
+        assert engine._critical_queue.empty()
 
 
 # ==================== TestAsyncEventEngineProcess ====================

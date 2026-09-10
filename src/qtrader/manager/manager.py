@@ -268,7 +268,8 @@ class TradingManager:
         try:
             # 停止Trader
             success = await trader.stop_process()
-            logger.info(f"Trader [{account_id}] 已停止")
+            if success:
+                logger.info(f"Trader [{account_id}] 已停止")
             return success
 
         except Exception as e:
@@ -322,7 +323,10 @@ class TradingManager:
         logger.info(f"开始重启 Trader [{account_id}]")
         stopped = await self.stop_trader(account_id)
         if not stopped:
-            logger.warning(f"Trader [{account_id}] 停止未确认，仍尝试重新启动")
+            # 停止失败说明旧进程僵死且SIGKILL无效，此时启动会被旧PID文件拒绝，
+            # 继续只会留下半启动状态，直接失败并保留现场等待人工介入
+            logger.error(f"Trader [{account_id}] 停止失败，中止重启，请人工检查进程")
+            return False
         return await self.start_trader(account_id)
 
     def get_all_trader_status(self) -> list[dict]:
