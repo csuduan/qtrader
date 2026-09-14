@@ -3,8 +3,9 @@
 """
 
 from datetime import date, datetime, timedelta
+from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 
 from qtrader.manager.api.dependencies import get_trading_manager
 from qtrader.manager.api.responses import error_response, success_response
@@ -22,7 +23,7 @@ async def _query_orders_from_db(
     account_id: str | None,
     limit: int,
     offset: int,
-):
+) -> Response:
     """从PG查询历史委托单（已成交/废单），默认过滤当前交易日数据"""
     from sqlalchemy import func, select
 
@@ -88,7 +89,7 @@ async def get_orders(
     limit: int = Query(100, ge=1, le=1000, description="返回记录数量"),
     offset: int = Query(0, ge=0, description="偏移量"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     获取委托单列表
 
@@ -109,7 +110,6 @@ async def get_orders(
             # status 为空：优先走 RPC 查询 Trader 所有订单
             orders_list = await trading_manager.get_orders(account_id)
 
-        total_count = len(orders_list)
         end_index = offset + limit
         paginated_orders = orders_list[offset:end_index]
 
@@ -149,16 +149,16 @@ async def get_orders(
             message="获取成功",
         )
     except Exception as e:
-        logger.error(f"获取委托单列表失败: {e}", exc_info=True)
-        return error_response(code=500, message=f"获取委托单列表失败: {str(e)}")
+        logger.exception("获取委托单列表失败")
+        return error_response(code=500, message=f"获取委托单列表失败: {e}")
 
 
 @router.get("/{order_id}")
 async def get_order_by_id(
     order_id: str,
     account_id: str | None = Query(None, description="账户ID（多账号模式）"),
-    trading_manager=Depends(get_trading_manager),
-):
+    trading_manager: TradingManager = Depends(get_trading_manager),
+) -> Response:
     """
     获取指定委托单详情
 
@@ -176,13 +176,11 @@ async def get_order_by_id(
     else:
         # 从所有账户中查找订单
         order = None
-        found_account_id = None
         for acc_id in trading_manager.get_all_account_ids():
             trader = trading_manager.get_trader(acc_id)
             if trader:
                 order = await trader.get_order(order_id)
                 if order:
-                    found_account_id = acc_id
                     break
 
     if order:
@@ -191,7 +189,8 @@ async def get_order_by_id(
                 id=0,
                 account_id=order.account_id,
                 order_id=order.order_id,
-                exchange_order_id=order.exchange_order_id or order.gateway_name or "",
+                # OrderData 的 order_sys_id 即交易所订单ID，对应 OrderRes.exchange_order_id
+                exchange_order_id=order.order_sys_id or "",
                 symbol=order.symbol,
                 direction=(
                     order.direction.value
@@ -224,8 +223,8 @@ async def get_order_by_id(
 @router.post("")
 async def create_manual_order(
     request: ManualOrderReq,
-    trading_manager=Depends(get_trading_manager),
-):
+    trading_manager: TradingManager = Depends(get_trading_manager),
+) -> Response:
     """
     手动报单
 
@@ -258,8 +257,8 @@ async def create_manual_order(
             price=request.price or 0,
         )
     except Exception as e:
-        logger.error(f"下单失败 [{account_id}]: {e}", exc_info=True)
-        return error_response(code=500, message=f"下单失败: {str(e)}")
+        logger.exception("下单失败 [{}]", account_id)
+        return error_response(code=500, message=f"下单失败: {e}")
 
     if not order_id:
         return error_response(code=500, message="下单失败: 未获取到订单号")
@@ -270,9 +269,9 @@ async def create_manual_order(
 @router.delete("/{order_id}")
 async def cancel_order(
     order_id: str,
-    account_id: str = None,
-    trading_manager=Depends(get_trading_manager),
-):
+    account_id: str | None = None,
+    trading_manager: TradingManager = Depends(get_trading_manager),
+) -> Response:
     """
     撤销委托单
 
@@ -289,8 +288,8 @@ async def cancel_order(
             success = await trader.send_cancel_request(order_id)
         except Exception as e:
             # 异常含 Trader 回传的真实失败原因，透传给前端
-            logger.error(f"撤单失败 [{account_id}] {order_id}: {e}", exc_info=True)
-            return error_response(code=500, message=f"撤单失败: {str(e)}")
+            logger.exception("撤单失败 [{}] {}", account_id, order_id)
+            return error_response(code=500, message=f"撤单失败: {e}")
     else:
         # 从所有账户中查找并撤销订单（单账户失败不中断查找）
         success = False
@@ -300,7 +299,7 @@ async def cancel_order(
                 try:
                     result = await trader.send_cancel_request(order_id)
                 except Exception as e:
-                    logger.warning(f"撤单失败 [{acc_id}] {order_id}: {e}")
+                    logger.warning("撤单失败 [{}] {}: {!r}", acc_id, order_id, e)
                     continue
                 if result:
                     success = True
@@ -314,9 +313,9 @@ async def cancel_order(
 
 @router.post("/cancel-batch")
 async def cancel_batch_orders(
-    request: dict,
-    trading_manager=Depends(get_trading_manager),
-):
+    request: dict[str, Any],
+    trading_manager: TradingManager = Depends(get_trading_manager),
+) -> Response:
     """
     批量撤销委托单
 
@@ -340,7 +339,7 @@ async def cancel_batch_orders(
                 try:
                     success = await trader.send_cancel_request(order_id)
                 except Exception as e:
-                    logger.warning(f"批量撤单失败 [{account_id}] {order_id}: {e}")
+                    logger.warning("批量撤单失败 [{}] {}: {!r}", account_id, order_id, e)
         else:
             # 从所有账户中查找并撤销订单（单账户失败不中断查找）
             for acc_id in trading_manager.get_all_account_ids():
@@ -349,7 +348,7 @@ async def cancel_batch_orders(
                     try:
                         result = await trader.send_cancel_request(order_id)
                     except Exception as e:
-                        logger.warning(f"批量撤单失败 [{acc_id}] {order_id}: {e}")
+                        logger.warning("批量撤单失败 [{}] {}: {!r}", acc_id, order_id, e)
                         continue
                     if result:
                         success = True

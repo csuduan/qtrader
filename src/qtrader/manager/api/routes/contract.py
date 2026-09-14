@@ -2,7 +2,7 @@
 合约信息相关API路由
 """
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Query, Request, Response
 from sqlalchemy import select
 
 from qtrader.app_context import get_app_context
@@ -24,7 +24,7 @@ async def get_contracts(
     symbol_keyword: str | None = Query(None, description="合约代码关键词"),
     is_main: bool | None = Query(None, description="是否主力合约筛选"),
     account_id: str | None = Query(None, description="账户ID，不传则查询所有账户"),
-):
+) -> Response:
     """
     获取合约列表
 
@@ -61,35 +61,34 @@ async def get_contracts(
             contracts = (await session.execute(stmt)).scalars().all()
 
             # 转换字段名称以兼容前端
-            result = []
-            for c in contracts:
-                result.append(
-                    {
-                        "symbol": c.symbol,
-                        "exchange_id": c.exchange_id,
-                        "name": c.instrument_name or "",
-                        "product_type": c.product_type,
-                        "volume_multiple": c.volume_multiple,
-                        "price_tick": float(c.price_tick) if c.price_tick else 0.01,
-                        "min_volume": c.min_volume,
-                        "min_open_volume": c.min_volume,  # 暂时用min_volume
-                        "option_strike": float(c.option_strike) if c.option_strike else None,
-                        "option_underlying": c.option_underlying,
-                        "option_type": c.option_type,
-                        "is_main": c.is_main,
-                        "update_date": c.update_date,
-                        "updated_at": c.updated_at.isoformat() if c.updated_at else None,
-                    }
-                )
+            result = [
+                {
+                    "symbol": c.symbol,
+                    "exchange_id": c.exchange_id,
+                    "name": c.instrument_name or "",
+                    "product_type": c.product_type,
+                    "volume_multiple": c.volume_multiple,
+                    "price_tick": float(c.price_tick) if c.price_tick else 0.01,
+                    "min_volume": c.min_volume,
+                    "min_open_volume": c.min_volume,  # 暂时用min_volume
+                    "option_strike": float(c.option_strike) if c.option_strike else None,
+                    "option_underlying": c.option_underlying,
+                    "option_type": c.option_type,
+                    "is_main": c.is_main,
+                    "update_date": c.update_date,
+                    "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+                }
+                for c in contracts
+            ]
 
         return success_response(data=result, message="获取成功")
     except Exception as e:
-        logger.error(f"获取合约列表失败: {e}", exc_info=True)
-        return error_response(code=500, message=f"获取合约列表失败: {str(e)}")
+        logger.exception("获取合约列表失败")
+        return error_response(code=500, message=f"获取合约列表失败: {e}")
 
 
 @router.get("/exchanges")
-async def get_exchanges(request: Request):
+async def get_exchanges(request: Request) -> Response:
     """
     获取可用的交易所列表
 
@@ -108,13 +107,13 @@ async def get_exchanges(request: Request):
                 )
             ).all()
 
-            exchange_counts = {}
+            exchange_counts: dict[str, int] = {}
             for (ex_id,) in contracts:
                 if ex_id:
                     exchange_counts[ex_id] = exchange_counts.get(ex_id, 0) + 1
 
         # 转换为列表格式
-        data = [
+        data: list[dict[str, str | int]] = [
             {"exchange_id": ex_id, "contract_count": count}
             for ex_id, count in exchange_counts.items()
         ]
@@ -122,15 +121,15 @@ async def get_exchanges(request: Request):
 
         return success_response(data=data, message="获取成功")
     except Exception as e:
-        logger.error(f"获取交易所列表失败: {e}", exc_info=True)
-        return error_response(code=500, message=f"获取交易所列表失败: {str(e)}")
+        logger.exception("获取交易所列表失败")
+        return error_response(code=500, message=f"获取交易所列表失败: {e}")
 
 
 @router.post("/refresh")
 async def refresh_contracts(
     request: Request,
     account_id: str | None = Query(None, description="账户ID，不传则刷新所有账户"),
-):
+) -> Response:
     """
     强制刷新合约信息
 
@@ -153,5 +152,5 @@ async def refresh_contracts(
         else:
             return error_response(code=500, message="合约信息刷新失败")
     except Exception as e:
-        logger.error(f"刷新合约信息失败: {e}", exc_info=True)
-        return error_response(code=500, message=f"刷新合约信息失败: {str(e)}")
+        logger.exception("刷新合约信息失败")
+        return error_response(code=500, message=f"刷新合约信息失败: {e}")

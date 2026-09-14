@@ -34,7 +34,7 @@ def is_dnd_now(dnd_start: int = 23, dnd_end: int = 8) -> bool:
         return dnd_start <= now_hour < dnd_end
 
 
-def send_wechat(msg: str):
+def send_wechat(msg: str) -> None:
     data = {"msg_type": "text", "msg": msg}
     header = {"Content-Type": "application/json"}
     rsp = requests.post(base_url, data=orjson.dumps(data), headers=header)

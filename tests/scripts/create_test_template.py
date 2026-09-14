@@ -1,7 +1,8 @@
 import pandas as pd
 from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils.dataframe import dataframe_to_rows
+
 
 def create_test_template():
     output_path = "/opt/dev/qtrader/tests/用户测试案例模板.xlsx"
@@ -10,13 +11,13 @@ def create_test_template():
     header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
     header_font = Font(bold=True, color="FFFFFF", size=12)
     border = Border(
-        left=Side(style='thin'),
-        right=Side(style='thin'),
-        top=Side(style='thin'),
-        bottom=Side(style='thin')
+        left=Side(style="thin"),
+        right=Side(style="thin"),
+        top=Side(style="thin"),
+        bottom=Side(style="thin"),
     )
-    center_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
-    left_align = Alignment(horizontal='left', vertical='center', wrap_text=True)
+    center_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    left_align = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
     wb = Workbook()
 
@@ -25,14 +26,25 @@ def create_test_template():
     ws1.title = "单元测试用例"
 
     # 标题
-    ws1.merge_cells('A1:J1')
-    ws1['A1'] = "单元测试用例模板"
-    ws1['A1'].font = Font(bold=True, size=16)
-    ws1['A1'].alignment = center_align
+    ws1.merge_cells("A1:J1")
+    ws1["A1"] = "单元测试用例模板"
+    ws1["A1"].font = Font(bold=True, size=16)
+    ws1["A1"].alignment = center_align
     ws1.row_dimensions[1].height = 30
 
     # 表头
-    headers1 = ["模块", "测试类", "测试函数", "测试目的", "前置条件", "输入数据", "预期结果", "实际结果", "状态", "备注"]
+    headers1 = [
+        "模块",
+        "测试类",
+        "测试函数",
+        "测试目的",
+        "前置条件",
+        "输入数据",
+        "预期结果",
+        "实际结果",
+        "状态",
+        "备注",
+    ]
     for col, header in enumerate(headers1, 1):
         cell = ws1.cell(row=2, column=col, value=header)
         cell.fill = header_fill
@@ -42,11 +54,66 @@ def create_test_template():
 
     # 示例数据
     example_data1 = [
-        ["test_models", "TestAccountModel", "test_account_creation", "验证账户创建功能", "无", "account_id='test', total_assets=1000.0", "对象创建成功", "", "", ""],
-        ["test_models", "TestPositionData", "test_position_creation", "验证持仓数据创建", "无", "symbol='rb2505', volume=10", "对象创建成功", "", "", ""],
-        ["test_risk_control", "TestRiskControl", "test_check_order_success", "验证订单风控检查通过", "风控模块初始化", "volume=5, limit=100", "返回True", "", "", ""],
-        ["test_risk_control", "TestRiskControl", "test_check_order_exceed_limit", "验证订单数量超限拒绝", "风控模块初始化", "volume=150, limit=100", "返回False", "", "", ""],
-        ["test_event_engine", "TestEventEngine", "test_event_registration", "验证事件注册功能", "引擎已启动", "event_type='test', handler=func", "处理器注册成功", "", "", ""],
+        [
+            "test_models",
+            "TestAccountModel",
+            "test_account_creation",
+            "验证账户创建功能",
+            "无",
+            "account_id='test', total_assets=1000.0",
+            "对象创建成功",
+            "",
+            "",
+            "",
+        ],
+        [
+            "test_models",
+            "TestPositionData",
+            "test_position_creation",
+            "验证持仓数据创建",
+            "无",
+            "symbol='rb2505', volume=10",
+            "对象创建成功",
+            "",
+            "",
+            "",
+        ],
+        [
+            "test_risk_control",
+            "TestRiskControl",
+            "test_check_order_success",
+            "验证订单风控检查通过",
+            "风控模块初始化",
+            "volume=5, limit=100",
+            "返回True",
+            "",
+            "",
+            "",
+        ],
+        [
+            "test_risk_control",
+            "TestRiskControl",
+            "test_check_order_exceed_limit",
+            "验证订单数量超限拒绝",
+            "风控模块初始化",
+            "volume=150, limit=100",
+            "返回False",
+            "",
+            "",
+            "",
+        ],
+        [
+            "test_event_engine",
+            "TestEventEngine",
+            "test_event_registration",
+            "验证事件注册功能",
+            "引擎已启动",
+            "event_type='test', handler=func",
+            "处理器注册成功",
+            "",
+            "",
+            "",
+        ],
         ["", "", "", "", "", "", "", "", "", ""],
         ["", "", "", "", "", "", "", "", "", ""],
         ["", "", "", "", "", "", "", "", "", ""],
@@ -62,20 +129,32 @@ def create_test_template():
     # 设置列宽
     col_widths1 = [15, 20, 25, 25, 20, 25, 20, 20, 10, 20]
     for i, width in enumerate(col_widths1, 1):
-        ws1.column_dimensions[chr(64+i)].width = width
+        ws1.column_dimensions[chr(64 + i)].width = width
 
     # ========== Sheet 2: API测试用例 ==========
     ws2 = wb.create_sheet("API测试用例")
 
     # 标题
-    ws2.merge_cells('A1:K1')
-    ws2['A1'] = "API测试用例模板"
-    ws2['A1'].font = Font(bold=True, size=16)
-    ws2['A1'].alignment = center_align
+    ws2.merge_cells("A1:K1")
+    ws2["A1"] = "API测试用例模板"
+    ws2["A1"].font = Font(bold=True, size=16)
+    ws2["A1"].alignment = center_align
     ws2.row_dimensions[1].height = 30
 
     # 表头
-    headers2 = ["接口模块", "接口名称", "请求方法", "接口路径", "请求头", "请求参数", "预期响应码", "预期响应体", "实际响应", "状态", "备注"]
+    headers2 = [
+        "接口模块",
+        "接口名称",
+        "请求方法",
+        "接口路径",
+        "请求头",
+        "请求参数",
+        "预期响应码",
+        "预期响应体",
+        "实际响应",
+        "状态",
+        "备注",
+    ]
     for col, header in enumerate(headers2, 1):
         cell = ws2.cell(row=2, column=col, value=header)
         cell.fill = header_fill
@@ -85,13 +164,97 @@ def create_test_template():
 
     # 示例数据
     example_data2 = [
-        ["account", "查询账户信息", "GET", "/api/account", "Content-Type: application/json", "无", "200", "{code:0, data:{account_id:'', balance:0}}", "", "", ""],
-        ["position", "查询持仓列表", "GET", "/api/positions", "Content-Type: application/json", "无", "200", "{code:0, data:[]}", "", "", ""],
-        ["order", "创建订单", "POST", "/api/orders", "Content-Type: application/json", "{symbol:'rb2505', direction:'BUY', volume:1}", "200", "{code:0, data:{order_id:''}}", "", "", ""],
-        ["order", "撤单", "DELETE", "/api/orders/{order_id}", "Content-Type: application/json", "无", "200", "{code:0}", "", "", ""],
-        ["trade", "查询今日成交", "GET", "/api/trades", "Content-Type: application/json", "无", "200", "{code:0, data:[]}", "", "", ""],
-        ["scheduler", "查询任务列表", "GET", "/api/jobs", "Content-Type: application/json", "无", "200", "{code:0, data:[]}", "", "", ""],
-        ["scheduler", "暂停任务", "POST", "/api/jobs/{job_id}/pause", "Content-Type: application/json", "无", "200", "{code:0}", "", "", ""],
+        [
+            "account",
+            "查询账户信息",
+            "GET",
+            "/api/account",
+            "Content-Type: application/json",
+            "无",
+            "200",
+            "{code:0, data:{account_id:'', balance:0}}",
+            "",
+            "",
+            "",
+        ],
+        [
+            "position",
+            "查询持仓列表",
+            "GET",
+            "/api/positions",
+            "Content-Type: application/json",
+            "无",
+            "200",
+            "{code:0, data:[]}",
+            "",
+            "",
+            "",
+        ],
+        [
+            "order",
+            "创建订单",
+            "POST",
+            "/api/orders",
+            "Content-Type: application/json",
+            "{symbol:'rb2505', direction:'BUY', volume:1}",
+            "200",
+            "{code:0, data:{order_id:''}}",
+            "",
+            "",
+            "",
+        ],
+        [
+            "order",
+            "撤单",
+            "DELETE",
+            "/api/orders/{order_id}",
+            "Content-Type: application/json",
+            "无",
+            "200",
+            "{code:0}",
+            "",
+            "",
+            "",
+        ],
+        [
+            "trade",
+            "查询今日成交",
+            "GET",
+            "/api/trades",
+            "Content-Type: application/json",
+            "无",
+            "200",
+            "{code:0, data:[]}",
+            "",
+            "",
+            "",
+        ],
+        [
+            "scheduler",
+            "查询任务列表",
+            "GET",
+            "/api/jobs",
+            "Content-Type: application/json",
+            "无",
+            "200",
+            "{code:0, data:[]}",
+            "",
+            "",
+            "",
+        ],
+        [
+            "scheduler",
+            "暂停任务",
+            "POST",
+            "/api/jobs/{job_id}/pause",
+            "Content-Type: application/json",
+            "无",
+            "200",
+            "{code:0}",
+            "",
+            "",
+            "",
+        ],
         ["", "", "", "", "", "", "", "", "", "", ""],
         ["", "", "", "", "", "", "", "", "", "", ""],
     ]
@@ -105,20 +268,31 @@ def create_test_template():
     # 设置列宽
     col_widths2 = [12, 15, 10, 20, 25, 30, 12, 30, 20, 8, 15]
     for i, width in enumerate(col_widths2, 1):
-        ws2.column_dimensions[chr(64+i)].width = width
+        ws2.column_dimensions[chr(64 + i)].width = width
 
     # ========== Sheet 3: E2E测试用例 ==========
     ws3 = wb.create_sheet("E2E测试用例")
 
     # 标题
-    ws3.merge_cells('A1:J1')
-    ws3['A1'] = "E2E测试用例模板"
-    ws3['A1'].font = Font(bold=True, size=16)
-    ws3['A1'].alignment = center_align
+    ws3.merge_cells("A1:J1")
+    ws3["A1"] = "E2E测试用例模板"
+    ws3["A1"].font = Font(bold=True, size=16)
+    ws3["A1"].alignment = center_align
     ws3.row_dimensions[1].height = 30
 
     # 表头
-    headers3 = ["测试场景", "测试步骤", "操作元素", "输入数据", "预期结果", "实际结果", "状态", "优先级", "截图", "备注"]
+    headers3 = [
+        "测试场景",
+        "测试步骤",
+        "操作元素",
+        "输入数据",
+        "预期结果",
+        "实际结果",
+        "状态",
+        "优先级",
+        "截图",
+        "备注",
+    ]
     for col, header in enumerate(headers3, 1):
         cell = ws3.cell(row=2, column=col, value=header)
         cell.fill = header_fill
@@ -128,13 +302,90 @@ def create_test_template():
 
     # 示例数据
     example_data3 = [
-        ["用户登录", "1. 打开登录页\n2. 输入用户名\n3. 输入密码\n4. 点击登录", "username输入框\npassword输入框\n登录按钮", "username: admin\npassword: 123456", "登录成功，跳转到首页", "", "", "高", "", ""],
-        ["查看账户信息", "1. 登录系统\n2. 点击账户菜单\n3. 查看账户信息", "账户菜单\n账户信息卡片", "无", "显示账户ID、余额、可用资金", "", "", "高", "", ""],
-        ["创建订单", "1. 进入下单页面\n2. 选择合约\n3. 输入数量\n4. 点击提交", "合约选择框\n数量输入框\n提交按钮", "symbol: rb2505\nvolume: 1\ndirection: BUY", "订单创建成功，显示订单ID", "", "", "高", "", ""],
-        ["撤单操作", "1. 进入订单列表\n2. 选择待撤订单\n3. 点击撤单按钮", "订单列表\n撤单按钮", "order_id: xxx", "撤单成功，订单状态更新", "", "", "中", "", ""],
-        ["查看持仓", "1. 点击持仓菜单\n2. 查看持仓列表", "持仓菜单\n持仓列表", "无", "显示当前持仓合约、数量、盈亏", "", "", "高", "", ""],
-        ["查看成交记录", "1. 点击成交菜单\n2. 查看今日成交", "成交菜单\n成交列表", "无", "显示今日成交记录", "", "", "中", "", ""],
-        ["管理定时任务", "1. 进入任务管理\n2. 暂停/恢复任务", "任务列表\n暂停按钮\n恢复按钮", "job_id: xxx", "任务状态更新", "", "", "低", "", ""],
+        [
+            "用户登录",
+            "1. 打开登录页\n2. 输入用户名\n3. 输入密码\n4. 点击登录",
+            "username输入框\npassword输入框\n登录按钮",
+            "username: admin\npassword: 123456",
+            "登录成功，跳转到首页",
+            "",
+            "",
+            "高",
+            "",
+            "",
+        ],
+        [
+            "查看账户信息",
+            "1. 登录系统\n2. 点击账户菜单\n3. 查看账户信息",
+            "账户菜单\n账户信息卡片",
+            "无",
+            "显示账户ID、余额、可用资金",
+            "",
+            "",
+            "高",
+            "",
+            "",
+        ],
+        [
+            "创建订单",
+            "1. 进入下单页面\n2. 选择合约\n3. 输入数量\n4. 点击提交",
+            "合约选择框\n数量输入框\n提交按钮",
+            "symbol: rb2505\nvolume: 1\ndirection: BUY",
+            "订单创建成功，显示订单ID",
+            "",
+            "",
+            "高",
+            "",
+            "",
+        ],
+        [
+            "撤单操作",
+            "1. 进入订单列表\n2. 选择待撤订单\n3. 点击撤单按钮",
+            "订单列表\n撤单按钮",
+            "order_id: xxx",
+            "撤单成功，订单状态更新",
+            "",
+            "",
+            "中",
+            "",
+            "",
+        ],
+        [
+            "查看持仓",
+            "1. 点击持仓菜单\n2. 查看持仓列表",
+            "持仓菜单\n持仓列表",
+            "无",
+            "显示当前持仓合约、数量、盈亏",
+            "",
+            "",
+            "高",
+            "",
+            "",
+        ],
+        [
+            "查看成交记录",
+            "1. 点击成交菜单\n2. 查看今日成交",
+            "成交菜单\n成交列表",
+            "无",
+            "显示今日成交记录",
+            "",
+            "",
+            "中",
+            "",
+            "",
+        ],
+        [
+            "管理定时任务",
+            "1. 进入任务管理\n2. 暂停/恢复任务",
+            "任务列表\n暂停按钮\n恢复按钮",
+            "job_id: xxx",
+            "任务状态更新",
+            "",
+            "",
+            "低",
+            "",
+            "",
+        ],
         ["", "", "", "", "", "", "", "", "", ""],
         ["", "", "", "", "", "", "", "", "", ""],
     ]
@@ -148,16 +399,16 @@ def create_test_template():
     # 设置列宽
     col_widths3 = [15, 25, 20, 20, 25, 20, 8, 8, 8, 15]
     for i, width in enumerate(col_widths3, 1):
-        ws3.column_dimensions[chr(64+i)].width = width
+        ws3.column_dimensions[chr(64 + i)].width = width
 
     # ========== Sheet 4: 使用说明 ==========
     ws4 = wb.create_sheet("使用说明")
 
     # 标题
-    ws4.merge_cells('A1:D1')
-    ws4['A1'] = "测试用例模板使用说明"
-    ws4['A1'].font = Font(bold=True, size=16)
-    ws4['A1'].alignment = center_align
+    ws4.merge_cells("A1:D1")
+    ws4["A1"] = "测试用例模板使用说明"
+    ws4["A1"].font = Font(bold=True, size=16)
+    ws4["A1"].alignment = center_align
     ws4.row_dimensions[1].height = 30
 
     instructions = [
@@ -237,19 +488,22 @@ def create_test_template():
             ws4.cell(row=row, column=1).font = Font(bold=True)
 
         ws4.cell(row=row, column=1).alignment = left_align
-        ws4.cell(row=row, column=2).alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
+        ws4.cell(row=row, column=2).alignment = Alignment(
+            horizontal="left", vertical="top", wrap_text=True
+        )
 
         row += 1
 
     # 设置列宽
-    ws4.column_dimensions['A'].width = 25
-    ws4.column_dimensions['B'].width = 80
-    ws4.column_dimensions['C'].width = 15
-    ws4.column_dimensions['D'].width = 15
+    ws4.column_dimensions["A"].width = 25
+    ws4.column_dimensions["B"].width = 80
+    ws4.column_dimensions["C"].width = 15
+    ws4.column_dimensions["D"].width = 15
 
     # 保存文件
     wb.save(output_path)
     print(f"文件已保存到: {output_path}")
+
 
 if __name__ == "__main__":
     create_test_template()

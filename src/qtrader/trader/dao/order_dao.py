@@ -19,13 +19,11 @@ logger = get_logger(__name__)
 class OrderDao:
     """订单数据访问对象"""
 
+    @logger.catch(message="持久化订单数据失败")
     async def save(self, account_id: str, data: OrderData) -> None:
         """持久化订单数据"""
-        try:
-            async with get_async_session() as session:
-                await self._save_with_session(session, account_id, data)
-        except Exception as e:
-            logger.exception(f"持久化订单数据失败: {e}")
+        async with get_async_session() as session:
+            await self._save_with_session(session, account_id, data)
 
     async def _save_with_session(
         self, session: AsyncSession, account_id: str, data: OrderData
@@ -51,7 +49,9 @@ class OrderDao:
         order_po.volume_left = (
             data.volume_left
             if hasattr(data, "volume_left")
-            else data.volume if hasattr(data, "volume") else 0
+            else data.volume
+            if hasattr(data, "volume")
+            else 0
         )
         order_po.status = data.status if hasattr(data, "status") else ""
         order_po.price_type = data.price_type if hasattr(data, "price_type") else "LIMIT"

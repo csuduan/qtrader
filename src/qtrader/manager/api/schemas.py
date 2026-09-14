@@ -28,7 +28,7 @@ class AccountRes(BaseModel):
     risk_ratio: float
     updated_at: datetime
     user_id: str | None = None
-    risk_status: dict = {}
+    risk_status: dict[str, Any] = {}
     status: str | None = None  # Trader状态: stopped, connecting, connected
     trade_paused: bool = False  # 是否暂停交易
     md_connected: bool = False  # 行情连接状态
@@ -151,7 +151,7 @@ class Message(BaseModel):
     """WebSocket消息"""
 
     type: str
-    data: dict
+    data: dict[str, Any]
     timestamp: str
 
 
@@ -237,11 +237,11 @@ class StrategyRes(BaseModel):
     inited: bool = False
     # 运行时实际生效的合约代码（优先从params取，否则从config取）
     symbol: str = ""
-    config: dict | None = None
-    base_params: list = []  # 基础参数定义
-    ext_params: list = []  # 扩展参数定义
+    config: dict[str, Any] | None = None
+    base_params: list[Any] = []  # 基础参数定义
+    ext_params: list[Any] = []  # 扩展参数定义
     # 信号信息（从策略的get_signal()获取）
-    signal: dict | None = None
+    signal: dict[str, Any] | None = None
     pos_long: int = 0  # 总多头持仓量
     pos_short: int = 0  # 总空头持仓量
     # 多合约持仓详情（新增）
@@ -288,7 +288,7 @@ class StrategyConfig(BaseModel):
 class StrategyUpdateReq(BaseModel):
     """策略参数更新请求"""
 
-    params: dict = {}  # 要更新的参数字段
+    params: dict[str, Any] = {}  # 要更新的参数字段
     restart: bool = False  # 是否重启策略以应用变更
 
 
@@ -306,7 +306,7 @@ class StrategyParamsRes(BaseModel):
     # 参数文件（默认显示）
     params_file: str | None = None
     # 详细参数（悬浮显示）
-    params: dict = {}
+    params: dict[str, Any] = {}
     # 关键参数摘要（用于快速展示）
     summary: dict[str, Any] = {}
 

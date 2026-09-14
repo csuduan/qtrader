@@ -11,18 +11,15 @@
 """
 
 import asyncio
-import threading
+import contextlib
 import time
 from datetime import datetime
 from typing import TYPE_CHECKING
 
 from qtrader.models.object import (
-    Direction,
-    Exchange,
     Offset,
     OrderData,
     OrderRequest,
-    PositionData,
     TradeData,
 )
 from qtrader.trader.order_cmd import OrderCmd, OrderCmdStatus
@@ -56,14 +53,14 @@ class OrderCmdExecutor:
         self._trading_engine = trading_engine
 
         # OrderCmd 注册表
-        self._pending_cmds: dict[str, "OrderCmd"] = {}
+        self._pending_cmds: dict[str, OrderCmd] = {}
         # 历史指令（含已完成），供 UI 查询；限制容量，只保留最近 N 条
-        self._history_cmds: dict[str, "OrderCmd"] = {}
+        self._history_cmds: dict[str, OrderCmd] = {}
         self._history_capacity = 1000
 
         # 控制参数
         self._running = False
-        self._task: asyncio.Task | None = None
+        self._task: asyncio.Task[None] | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
 
         # 统计
@@ -96,10 +93,8 @@ class OrderCmdExecutor:
 
         if self._task:
             self._task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._task
-            except asyncio.CancelledError:
-                pass
 
         # 清理 engine 侧已完成指令（进程停止/每日结算时调用 stop）
         self._trading_engine.cleanup_finished_order_cmds()
@@ -141,7 +136,7 @@ class OrderCmdExecutor:
         try:
             cmd.split(pos)
         except Exception as e:
-            self.logger.error(f"拆单失败: {e}")
+            self.logger.exception("拆单失败")
             cmd.close(f"拆单失败:{e}")
         # 触发状态变更事件 (PENDING -> RUNNING)
         self._emit_cmd_update(cmd)
@@ -229,8 +224,8 @@ class OrderCmdExecutor:
                     else:
                         try:
                             self._process_cmd(cmd)
-                        except Exception as e:
-                            self.logger.exception(f"cmd 处理失败 {cmd_id}: {e}")
+                        except Exception:
+                            self.logger.exception("cmd 处理失败 {}", cmd_id)
 
                 # 移除已完成的指令（保留 engine._order_cmds 引用，供 switch_mgr 等读取终态成交进度；
                 # engine 侧由 cleanup_finished_order_cmds 定期清理）
@@ -239,8 +234,8 @@ class OrderCmdExecutor:
 
                 # 定期输出统计
                 await self._maybe_log_stats()
-            except Exception as e:
-                self.logger.exception(f"执行循环异常: {e}")
+            except Exception:
+                self.logger.exception("执行循环异常")
             await asyncio.sleep(0.1)
         self.logger.info("执行器主循环退出")
 
@@ -269,7 +264,7 @@ class OrderCmdExecutor:
                 if order:
                     cmd.add_order(order)
             except Exception as e:
-                self.logger.exception(f"下单失败 {cmd.cmd_id}: {e}")
+                self.logger.exception("下单失败 {}", cmd.cmd_id)
                 cmd.close(f"报单被拒: {e}")
 
         elif isinstance(req, OrderData):
@@ -280,7 +275,7 @@ class OrderCmdExecutor:
                 else:
                     self.logger.warning(f"撤单请求未受理: {req.order_id}")
             except Exception as e:
-                self.logger.error(f"撤单失败 {req.order_id}: {e}")
+                self.logger.error("撤单失败 {}: {!r}", req.order_id, e)
 
     def _trim_history(self) -> None:
         """裁剪历史指令到容量上限，优先淘汰已完成且最旧的，保留活跃指令"""
@@ -311,7 +306,7 @@ class OrderCmdExecutor:
             )
             self._last_stats_time = now
 
-    def get_hist_cmds(self) -> dict:
+    def get_hist_cmds(self) -> dict[str, OrderCmd]:
         """
         获取历史指令
 
@@ -322,7 +317,7 @@ class OrderCmdExecutor:
         """
         return self._history_cmds
 
-    def get_active_cmds(self) -> dict:
+    def get_active_cmds(self) -> dict[str, OrderCmd]:
         """
         获取活跃指令
 

@@ -494,14 +494,16 @@ class TestSystemParamsAPI:
     """系统参数端点（/api/system-params）"""
 
     def test_list_params(self, client, mock_trading_manager):
-        """list 端点原样返回 Manager 结果（裸列表，无统一包装）"""
+        """list 端点返回统一信封包装的 Manager 结果"""
         params = [make_param_dict("risk_ratio", "0.8"), make_param_dict("max_volume", "10")]
         mock_trading_manager.list_system_params = AsyncMock(return_value=params)
 
         resp = client.get("/api/system-params", params={"account_id": "DQ"})
 
         assert resp.status_code == 200
-        assert resp.json() == params
+        body = resp.json()
+        assert body["code"] == 0
+        assert body["data"] == params
         mock_trading_manager.list_system_params.assert_awaited_once_with("DQ", None)
 
     def test_list_params_with_group(self, client, mock_trading_manager):
@@ -511,7 +513,9 @@ class TestSystemParamsAPI:
         resp = client.get("/api/system-params", params={"account_id": "DQ", "group": "risk"})
 
         assert resp.status_code == 200
-        assert resp.json() == params
+        body = resp.json()
+        assert body["code"] == 0
+        assert body["data"] == params
         mock_trading_manager.list_system_params.assert_awaited_once_with("DQ", "risk")
 
     def test_list_params_error(self, client, mock_trading_manager):
@@ -531,7 +535,9 @@ class TestSystemParamsAPI:
         resp = client.get("/api/system-params/risk_ratio", params={"account_id": "DQ"})
 
         assert resp.status_code == 200
-        assert resp.json() == param
+        body = resp.json()
+        assert body["code"] == 0
+        assert body["data"] == param
         mock_trading_manager.get_system_param.assert_awaited_once_with("DQ", "risk_ratio")
 
     def test_get_param_not_found(self, client, mock_trading_manager):

@@ -58,18 +58,18 @@ def test_order_cmd_full_flow(require_dq_connected):
         time.sleep(2)
 
     assert finished_cmd is not None, "指令未进入已完成列表"
-    assert finished_cmd["finish_reason"] == "ALL_COMPLETED", (
-        f"指令未全部成交: {finished_cmd['finish_reason']}"
-    )
+    assert (
+        finished_cmd["finish_reason"] == "ALL_COMPLETED"
+    ), f"指令未全部成交: {finished_cmd['finish_reason']}"
     assert finished_cmd["filled_volume"] == 1
 
     # 成交记录可见（symbol 不带交易所前缀，如 rb2701）
     bare_symbol = E2E_SYMBOL.split(".")[-1]
     resp = client.get("/api/trade", params={"account_id": E2E_ACCOUNT_ID})
     trades = resp.json()["data"]
-    assert any(t["symbol"] == bare_symbol for t in trades), (
-        f"成交记录中未找到 {bare_symbol}: {sorted({t['symbol'] for t in trades})}"
-    )
+    assert any(
+        t["symbol"] == bare_symbol for t in trades
+    ), f"成交记录中未找到 {bare_symbol}: {sorted({t['symbol'] for t in trades})}"
 
 
 def test_place_and_cancel_order(require_dq_connected):
@@ -114,9 +114,7 @@ def test_place_and_cancel_order(require_dq_connected):
     assert any(o["order_id"] == order_id for o in resp.json()["data"]), "挂单未出现在委托列表"
 
     # 撤单
-    resp = client.delete(
-        f"/api/order/{order_id}", params={"account_id": E2E_ACCOUNT_ID}
-    )
+    resp = client.delete(f"/api/order/{order_id}", params={"account_id": E2E_ACCOUNT_ID})
     assert resp.status_code == 200
 
     # 轮询确认挂单消失（撤单回报异步到达）

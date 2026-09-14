@@ -2,7 +2,9 @@
 行情相关API路由
 """
 
-from fastapi import APIRouter, Depends
+from typing import Any
+
+from fastapi import APIRouter, Depends, Response
 
 from qtrader.manager.api.dependencies import get_trading_manager
 from qtrader.manager.api.responses import error_response, success_response
@@ -16,9 +18,9 @@ router = APIRouter(prefix="/api/quote", tags=["行情"])
 
 @router.get("")
 async def get_subscribed_quotes(
-    account_id: str = None,
+    account_id: str | None = None,
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     获取所有已订阅的行情列表
 
@@ -46,15 +48,15 @@ async def get_subscribed_quotes(
                 ]
         return success_response(data=all_quotes, message="获取成功")
     except Exception as e:
-        logger.exception(f"获取行情列表失败: {e}")
-        return error_response(code=500, message=f"获取行情列表失败: {str(e)}")
+        logger.exception("获取行情列表失败")
+        return error_response(code=500, message=f"获取行情列表失败: {e}")
 
 
 @router.post("/subscribe")
 async def subscribe_symbol(
-    request: dict,
+    request: dict[str, Any],
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     订阅合约行情
 
@@ -77,8 +79,8 @@ async def subscribe_symbol(
     try:
         success = await trader.subscribe(request)
     except Exception as e:
-        logger.error(f"订阅 {symbol} 失败 [{account_id}]: {e}", exc_info=True)
-        return error_response(code=500, message=f"订阅 {symbol} 失败: {str(e)}")
+        logger.exception("订阅 {} 失败 [{}]", symbol, account_id)
+        return error_response(code=500, message=f"订阅 {symbol} 失败: {e}")
 
     if not success:
         return error_response(code=500, message=f"订阅 {symbol} 失败")

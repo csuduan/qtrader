@@ -1,16 +1,17 @@
 """
 Socket通讯快速测试
 """
+
 import asyncio
-import sys
 import os
+import sys
 import tempfile
 from pathlib import Path
 
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from qtrader.utils.ipc import SocketServer, SocketClient, request
+from qtrader.utils.ipc import SocketClient, SocketServer, request
 from qtrader.utils.logger import get_logger
 
 logger = get_logger("quick_test")

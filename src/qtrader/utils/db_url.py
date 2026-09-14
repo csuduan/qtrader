@@ -23,8 +23,7 @@ def build_db_url(config: DataBaseConfig) -> str:
     encoded_password = quote(pg.password, safe="")
     encoded_user = quote(pg.user, safe="")
     return (
-        f"postgresql+psycopg://{encoded_user}:{encoded_password}"
-        f"@{pg.host}:{pg.port}/{pg.database}"
+        f"postgresql+psycopg://{encoded_user}:{encoded_password}@{pg.host}:{pg.port}/{pg.database}"
     )
 
 
@@ -43,6 +42,5 @@ def build_async_db_url(config: DataBaseConfig) -> str:
     encoded_password = quote(pg.password, safe="")
     encoded_user = quote(pg.user, safe="")
     return (
-        f"postgresql+asyncpg://{encoded_user}:{encoded_password}"
-        f"@{pg.host}:{pg.port}/{pg.database}"
+        f"postgresql+asyncpg://{encoded_user}:{encoded_password}@{pg.host}:{pg.port}/{pg.database}"
     )

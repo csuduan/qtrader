@@ -19,6 +19,6 @@ logger = get_logger(__name__)
 class BaseReqHandler:
     """请求处理器基类"""
 
-    def __init__(self, trader: "Trader"):
+    def __init__(self, trader: Trader):
         self.trader = trader
         self.account_id = trader.account_id

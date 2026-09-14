@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from qtrader.trader.req.base import BaseReqHandler
@@ -17,13 +16,16 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+# 后台任务引用（防止fire-and-forget任务被GC回收）
+_bg_tasks: set[asyncio.Task[None]] = set()
+
 
 class RotationReqHandler(BaseReqHandler):
     @request("get_rotation_instructions")
-    async def _req_get_rotation_instructions(self, data: dict) -> dict:
+    async def _req_get_rotation_instructions(self, data: dict[str, Any]) -> dict[str, Any]:
         """处理获取换仓指令列表请求"""
         rotation_status = {"working": False, "is_manual": False}
-        instructions: list = []
+        instructions: list[RotationInstructionPo] = []
         if self.trader.switchPos_manager:
             rotation_status = {
                 "working": self.trader.switchPos_manager.working,
@@ -79,7 +81,7 @@ class RotationReqHandler(BaseReqHandler):
         }
 
     @request("get_rotation_instruction")
-    async def _req_get_rotation_instruction(self, data: dict) -> dict | None:
+    async def _req_get_rotation_instruction(self, data: dict[str, Any]) -> dict[str, Any] | None:
         """处理获取指定换仓指令请求"""
 
         if self.trader.switchPos_manager is None:
@@ -122,7 +124,9 @@ class RotationReqHandler(BaseReqHandler):
 
     # 低频接口：手动UI操作触发，内部同步写库可接受，未做异步化
     @request("update_rotation_instruction")
-    async def _req_update_rotation_instruction(self, data: dict) -> "RotationInstructionPo | None":
+    async def _req_update_rotation_instruction(
+        self, data: dict[str, Any]
+    ) -> RotationInstructionPo | None:
         """处理更新换仓指令请求"""
         instruction_id = data.get("instruction_id")
         if not instruction_id or self.trader.switchPos_manager is None:
@@ -131,7 +135,7 @@ class RotationReqHandler(BaseReqHandler):
         return await self.trader.switchPos_manager.update_instruction(data)
 
     @request("import_rotation_instructions")
-    async def _req_import_rotation_instructions(self, data: dict) -> dict:
+    async def _req_import_rotation_instructions(self, data: dict[str, Any]) -> dict[str, Any]:
         """处理批量导入换仓指令请求"""
         csv_text = data.get("csv_text")
         filename = data.get("filename")
@@ -144,24 +148,27 @@ class RotationReqHandler(BaseReqHandler):
         return {"imported": 0, "skipped": 0, "errors": []}
 
     @request("execute_rotation")
-    async def _req_execute_rotation(self, data: dict) -> bool:
+    async def _req_execute_rotation(self, data: dict[str, Any]) -> bool:
         """处理执行换仓请求"""
-        if self.trader.switchPos_manager is None:
+        switch_mgr = self.trader.switchPos_manager
+        if switch_mgr is None:
             return False
 
-        async def execute():
+        async def execute() -> None:
             try:
                 logger.info(f"Trader [{self.account_id}] 换仓任务执行开始")
-                await self.trader.switchPos_manager.execute_position_rotation(is_manual=True)
+                await switch_mgr.execute_position_rotation(is_manual=True)
                 logger.info(f"Trader [{self.account_id}] 换仓任务执行完成")
             except Exception as e:
-                logger.error(f"Trader [{self.account_id}] 后台换仓任务执行失败: {e}")
+                logger.error("Trader [{}] 后台换仓任务执行失败: {!r}", self.account_id, e)
 
-        asyncio.create_task(execute())
+        task = asyncio.create_task(execute())
+        _bg_tasks.add(task)
+        task.add_done_callback(_bg_tasks.discard)
         return True
 
     @request("stop_rotation")
-    async def _req_stop_rotation(self, data: dict) -> bool:
+    async def _req_stop_rotation(self, data: dict[str, Any]) -> bool:
         """处理停止换仓请求"""
         if self.trader.switchPos_manager is None:
             return False
@@ -169,7 +176,7 @@ class RotationReqHandler(BaseReqHandler):
         return True
 
     @request("batch_delete_instructions")
-    async def _req_batch_delete_instructions(self, data: dict) -> dict:
+    async def _req_batch_delete_instructions(self, data: dict[str, Any]) -> dict[str, Any]:
         """处理批量删除换仓指令请求"""
         ids = data.get("ids", [])
         if self.trader.switchPos_manager is None:

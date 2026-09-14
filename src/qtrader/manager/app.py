@@ -7,13 +7,14 @@ import asyncio
 import importlib
 import os
 import time
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
 import orjson
 import uvicorn
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi_offline import FastAPIOffline
@@ -29,13 +30,9 @@ from qtrader.manager.api.responses import (
 from qtrader.manager.api.websocket_manager import websocket_manager
 from qtrader.manager.manager import TradingManager
 from qtrader.utils.async_database import AsyncDatabase, close_async_database, init_async_database
-from qtrader.utils.async_event_engine import AsyncEventEngine, Event
+from qtrader.utils.async_event_engine import AsyncEventEngine
 from qtrader.utils.config_loader import (
-    AccountConfig,
-    DatabaseConfig,
     get_config_loader,
-    get_database_path,
-    get_log_dir,
 )
 from qtrader.utils.db_url import build_async_db_url
 from qtrader.utils.executors import init_executors, shutdown_executors
@@ -49,7 +46,7 @@ ctx.set(AppContext.KEY_CONFIG, _app_config)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """应用生命周期管理"""
     # ==================== 启动事件 ====================
     logger.info("=" * 60)
@@ -61,7 +58,7 @@ async def lifespan(app: FastAPI):
         ctx.set(AppContext.KEY_EVENT_LOOP, loop)
         logger.info("主事件循环已存储到 AppContext")
     except RuntimeError as e:
-        logger.warning(f"无法获取运行中的事件循环: {e}")
+        logger.warning("无法获取运行中的事件循环: {!r}", e)
 
     # 加载所有账户配置
     logger.info(f"已加载 {len(_app_config.accounts)} 个账户配置")
@@ -83,11 +80,12 @@ async def lifespan(app: FastAPI):
         manager_pid_file.write_text(str(os.getpid()))
         logger.info(f"Manager PID 文件已写入: {manager_pid_file}")
     except Exception as e:
-        logger.warning(f"写入 Manager PID 文件失败: {e}")
+        logger.warning("写入 Manager PID 文件失败: {!r}", e)
 
     # 初始化统一共享数据库（PostgreSQL，异步）
     db_config = _app_config.data_base
-    assert db_config is not None, "数据库配置缺失"
+    if db_config is None:
+        raise RuntimeError("数据库配置缺失")
     db_url = build_async_db_url(db_config)
     _manager_db: AsyncDatabase = await init_async_database(
         db_url,
@@ -106,16 +104,16 @@ async def lifespan(app: FastAPI):
         from qtrader.manager.api.routes.auth import init_default_users
 
         await init_default_users()
-    except Exception as e:
-        logger.error(f"初始化默认用户失败: {e}")
+    except Exception:
+        logger.exception("初始化默认用户失败")
 
     # 启用告警日志处理器
     try:
         from qtrader.utils.logger import enable_alarm_handler
 
         enable_alarm_handler()
-    except Exception as e:
-        logger.error(f"启用告警日志处理器失败: {e}")
+    except Exception:
+        logger.exception("启用告警日志处理器失败")
 
     active_accounts = [acc for acc in _app_config.accounts if acc.enabled]
     logger.info(f"启用账号: {[a.account_id for a in active_accounts]}")
@@ -124,11 +122,9 @@ async def lifespan(app: FastAPI):
     # 提取所有账户
     all_accounts = _app_config.accounts
     active_accounts = [acc for acc in all_accounts if acc.enabled]
-    disabled_accounts = [acc for acc in all_accounts if not acc.enabled]
     # 提取所有账户
     all_accounts = _app_config.accounts
     active_accounts = [acc for acc in all_accounts if acc.enabled]
-    disabled_accounts = [acc for acc in all_accounts if not acc.enabled]
     _event_engine = AsyncEventEngine()
     _event_engine.start()
     # 创建交易管理器（传入账户配置和全局配置）
@@ -164,7 +160,7 @@ async def lifespan(app: FastAPI):
         if manager_pid_file.exists():
             manager_pid_file.unlink()
     except Exception as e:
-        logger.warning(f"清理 Manager PID 文件失败: {e}")
+        logger.warning("清理 Manager PID 文件失败: {!r}", e)
 
     # 停止交易管理器
     if _trading_manager:
@@ -213,7 +209,9 @@ def create_app() -> FastAPI:
     app.add_middleware(AuthMiddleware)
 
     @app.middleware("http")
-    async def add_response_time(request: Request, call_next):
+    async def add_response_time(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
         """添加响应时间中间件"""
         start_time = time.time()
         response = await call_next(request)
@@ -235,7 +233,7 @@ def create_app() -> FastAPI:
     _register_routes(app)
 
     @app.get("/")
-    async def root():
+    async def root() -> dict[str, str]:
         """根路径"""
         return {
             "name": "Q-Trader系统",
@@ -244,12 +242,12 @@ def create_app() -> FastAPI:
         }
 
     @app.get("/health")
-    async def health_check():
+    async def health_check() -> dict[str, str]:
         """健康检查"""
         return {"status": "ok"}
 
     @app.websocket("/ws")
-    async def websocket_endpoint(websocket: WebSocket):
+    async def websocket_endpoint(websocket: WebSocket) -> None:
         """WebSocket端点（握手时校验 token，未认证拒绝连接）"""
         from qtrader.manager.api.routes.auth import verify_token
 
@@ -291,8 +289,8 @@ def create_app() -> FastAPI:
 
         except WebSocketDisconnect:
             await websocket_manager.disconnect(websocket)
-        except Exception as e:
-            logger.error(f"WebSocket连接出错: {e}")
+        except Exception:
+            logger.exception("WebSocket连接出错")
             await websocket_manager.disconnect(websocket)
 
     return app
@@ -328,20 +326,20 @@ def _register_routes(app: FastAPI) -> None:
 
             # 查找 router 对象
             if hasattr(module, "router"):
-                router = getattr(module, "router")
+                router = module.router
                 app.include_router(router)
                 registered_count += 1
                 logger.info(f"已注册路由: {module_name}")
             else:
                 logger.warning(f"路由模块 {module_name} 未找到 router 对象")
 
-        except Exception as e:
-            logger.exception(f"加载路由模块 {module_name} 失败: {e}")
+        except Exception:
+            logger.exception("加载路由模块 {} 失败", module_name)
 
     logger.info(f"动态注册完成，共注册 {registered_count} 个路由模块")
 
 
-def main():
+def main() -> None:
     """主函数"""
     # 创建并运行应用
     app = create_app()

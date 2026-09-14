@@ -2,14 +2,13 @@
 账户相关API路由
 """
 
-from fastapi import APIRouter, Body, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 
-from qtrader.app_context import get_app_context
 from qtrader.manager.api.dependencies import get_trading_manager
 from qtrader.manager.api.responses import error_response, success_response
 from qtrader.manager.api.schemas import AccountRes, TraderStatusRes
 from qtrader.manager.manager import TradingManager
-from qtrader.models.object import AccountData, TraderState
+from qtrader.models.object import TraderState
 from qtrader.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -21,7 +20,7 @@ router = APIRouter(prefix="/api/account", tags=["账户"])
 async def get_account_info(
     account_id: str | None = Query(None, description="账户ID，不传则返回第一个账户"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     获取指定账户信息
 
@@ -31,9 +30,6 @@ async def get_account_info(
 
     try:
         # 从 TradingManager 获取账户数据
-        ctx = get_app_context()
-        trading_manager: TradingManager = ctx.get_trading_manager()
-
         # 如果没有指定 account_id，使用配置中的第一个账户
         if account_id is None:
             from qtrader.utils.config_loader import get_config_loader
@@ -76,14 +72,14 @@ async def get_account_info(
             message="获取成功",
         )
     except Exception as e:
-        logger.exception(f"获取账户信息失败: {e}", exc_info=True)
-        return error_response(code=500, message=f"获取账户信息失败: {str(e)}")
+        logger.exception("获取账户信息失败")
+        return error_response(code=500, message=f"获取账户信息失败: {e}")
 
 
 @router.get("/all")
 async def get_all_accounts(
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     获取所有账户信息（多账号模式）
     返回所有账户的资金情况，按照配置文件中account_ids的顺序排列
@@ -94,8 +90,6 @@ async def get_all_accounts(
 
     try:
         # 从 TradingManager 获取所有缓存的账户数据（不走RPC，提升性能）
-        ctx = get_app_context()
-        trading_manager: TradingManager = ctx.get_trading_manager()
         accounts = trading_manager.get_all_accounts_cached()
         accounts_list = []
         for account_info in accounts:
@@ -142,14 +136,14 @@ async def get_all_accounts(
         )
         return success_response(data=sorted_list, message="获取成功")
     except Exception as e:
-        logger.exception(f"获取所有账户信息失败: {e}")
-        return error_response(code=500, message=f"获取所有账户信息失败: {str(e)}")
+        logger.exception("获取所有账户信息失败")
+        return error_response(code=500, message=f"获取所有账户信息失败: {e}")
 
 
 @router.get("/list")
 async def get_account_list(
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     获取账户ID列表
 
@@ -162,14 +156,14 @@ async def get_account_list(
         account_ids = config.account_ids
         return success_response(data=account_ids, message="获取成功")
     except Exception as e:
-        logger.exception(f"获取账户列表失败: {e}")
-        return error_response(code=500, message=f"获取账户列表失败: {str(e)}")
+        logger.exception("获取账户列表失败")
+        return error_response(code=500, message=f"获取账户列表失败: {e}")
 
 
 @router.get("/traders/status")
 async def get_traders_status(
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     批量获取所有Trader状态
 
@@ -181,35 +175,34 @@ async def get_traders_status(
     """
     try:
         traders_status = trading_manager.get_all_trader_status()
-        result = []
-        for status in traders_status:
-            result.append(
-                TraderStatusRes(
-                    account_id=status["account_id"],
-                    state=status["state"],
-                    running=status["running"],
-                    alive=status["alive"],
-                    connected=status["connected"],
-                    connecting=status["connecting"],
-                    created_process=status["created_process"],
-                    pid=status["pid"],
-                    start_time=status.get("start_time"),
-                    last_heartbeat=status.get("last_heartbeat"),
-                    restart_count=status["restart_count"],
-                    socket_path=status.get("socket_path"),
-                )
+        result = [
+            TraderStatusRes(
+                account_id=status["account_id"],
+                state=status["state"],
+                running=status["running"],
+                alive=status["alive"],
+                connected=status["connected"],
+                connecting=status["connecting"],
+                created_process=status["created_process"],
+                pid=status["pid"],
+                start_time=status.get("start_time"),
+                last_heartbeat=status.get("last_heartbeat"),
+                restart_count=status["restart_count"],
+                socket_path=status.get("socket_path"),
             )
+            for status in traders_status
+        ]
         return success_response(data=result, message="获取成功")
     except Exception as e:
-        logger.exception(f"获取Trader状态失败: {e}")
-        return error_response(code=500, message=f"获取Trader状态失败: {str(e)}")
+        logger.exception("获取Trader状态失败")
+        return error_response(code=500, message=f"获取Trader状态失败: {e}")
 
 
 @router.post("/{account_id}/start")
 async def start_account_trader(
     account_id: str,
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     启动账户Trader
 
@@ -228,7 +221,7 @@ async def start_account_trader(
 async def stop_account_trader(
     account_id: str,
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     停止账户Trader
 
@@ -246,7 +239,7 @@ async def stop_account_trader(
 @router.get("/available/list")
 async def get_available_accounts(
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     获取可添加的账户列表
 
@@ -256,15 +249,15 @@ async def get_available_accounts(
         accounts = trading_manager.get_available_accounts()
         return success_response(data={"accounts": accounts}, message="获取成功")
     except Exception as e:
-        logger.exception(f"获取可添加账户列表失败: {e}")
-        return error_response(code=500, message=f"获取可添加账户列表失败: {str(e)}")
+        logger.exception("获取可添加账户列表失败")
+        return error_response(code=500, message=f"获取可添加账户列表失败: {e}")
 
 
 @router.post("/{account_id}/add")
 async def add_account(
     account_id: str,
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     添加账户
 
@@ -279,15 +272,15 @@ async def add_account(
             code=400, message=f"账户 [{account_id}] 添加失败（可能已添加或配置文件无效）"
         )
     except Exception as e:
-        logger.exception(f"添加账户 [{account_id}] 失败: {e}")
-        return error_response(code=500, message=f"添加账户失败: {str(e)}")
+        logger.exception("添加账户 [{}] 失败", account_id)
+        return error_response(code=500, message=f"添加账户失败: {e}")
 
 
 @router.post("/{account_id}/remove")
 async def remove_account(
     account_id: str,
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     删除账户（仅限已停止的账户）
 
@@ -302,15 +295,15 @@ async def remove_account(
     except ValueError as e:
         return error_response(code=400, message=str(e))
     except Exception as e:
-        logger.exception(f"删除账户 [{account_id}] 失败: {e}")
-        return error_response(code=500, message=f"删除账户失败: {str(e)}")
+        logger.exception("删除账户 [{}] 失败", account_id)
+        return error_response(code=500, message=f"删除账户失败: {e}")
 
 
 @router.post("/{account_id}/connect")
 async def connect_account_gateway(
     account_id: str,
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     连接账户网关
 
@@ -326,8 +319,8 @@ async def connect_account_gateway(
         success = await trader.connect()
     except Exception as e:
         # 异常含 Trader 回传的真实失败原因，透传给前端
-        logger.error(f"连接失败 [{account_id}]: {e}", exc_info=True)
-        return error_response(code=500, message=f"连接失败: {str(e)}")
+        logger.exception("连接失败 [{}]", account_id)
+        return error_response(code=500, message=f"连接失败: {e}")
 
     if success:
         return success_response(data={"connected": True}, message="连接成功")
@@ -339,7 +332,7 @@ async def connect_account_gateway(
 async def disconnect_account_gateway(
     account_id: str,
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     断开账户网关连接
 
@@ -354,8 +347,8 @@ async def disconnect_account_gateway(
         success = await trader.disconnect()
     except Exception as e:
         # 异常含 Trader 回传的真实失败原因，透传给前端
-        logger.error(f"断开连接失败 [{account_id}]: {e}", exc_info=True)
-        return error_response(code=500, message=f"断开连接失败: {str(e)}")
+        logger.exception("断开连接失败 [{}]", account_id)
+        return error_response(code=500, message=f"断开连接失败: {e}")
 
     if success:
         return success_response(data={"connected": False}, message="已断开连接")
@@ -367,7 +360,7 @@ async def disconnect_account_gateway(
 async def pause_account_trading(
     account_id: str,
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     暂停账户交易
 
@@ -389,7 +382,7 @@ async def pause_account_trading(
 async def resume_account_trading(
     account_id: str,
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     恢复账户交易
 
@@ -411,7 +404,7 @@ async def resume_account_trading(
 async def sync_all_accounts(
     account_id: str | None = Query(None, description="账户ID，不传则同步所有账户"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     手动触发账户数据全量同步
 
@@ -428,7 +421,7 @@ async def sync_all_accounts(
         else:
             # 同步所有账户
             results = {}
-            for acc_id in trading_manager.traders.keys():
+            for acc_id in trading_manager.traders:
                 results[acc_id] = await trading_manager.sync_account_data(acc_id)
             all_success = all(r.get("success", False) for r in results.values())
             return success_response(
@@ -436,15 +429,15 @@ async def sync_all_accounts(
                 message="全量同步完成" if all_success else "部分账户同步失败",
             )
     except Exception as e:
-        logger.exception(f"同步账户数据失败: {e}")
-        return error_response(code=500, message=f"同步失败: {str(e)}")
+        logger.exception("同步账户数据失败")
+        return error_response(code=500, message=f"同步失败: {e}")
 
 
 @router.post("/{account_id}/sync")
 async def sync_single_account(
     account_id: str,
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     手动触发指定账户数据全量同步
 

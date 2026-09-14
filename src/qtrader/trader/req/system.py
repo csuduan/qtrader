@@ -12,14 +12,14 @@ from qtrader.utils.ipc import request
 from qtrader.utils.logger import get_logger
 
 if TYPE_CHECKING:
-    from qtrader.models.po import RotationInstructionPo
+    from qtrader.utils.config_loader import AlertConfig
 
 logger = get_logger(__name__)
 
 
 class SystemReqHandler(BaseReqHandler):
     @request("list_system_params")
-    async def _req_list_system_params(self, data: dict) -> list:
+    async def _req_list_system_params(self, data: dict[str, Any]) -> list[dict[str, Any]]:
         """处理获取系统参数列表请求"""
         from sqlalchemy import select
 
@@ -60,7 +60,7 @@ class SystemReqHandler(BaseReqHandler):
             ]
 
     @request("get_system_param")
-    async def _req_get_system_param(self, data: dict) -> dict | None:
+    async def _req_get_system_param(self, data: dict[str, Any]) -> dict[str, Any] | None:
         """处理获取单个系统参数请求"""
         from sqlalchemy import select
 
@@ -94,9 +94,8 @@ class SystemReqHandler(BaseReqHandler):
         return None
 
     @request("update_system_param")
-    async def _req_update_system_param(self, data: dict) -> dict | None:
+    async def _req_update_system_param(self, data: dict[str, Any]) -> dict[str, Any] | None:
         """处理更新系统参数请求"""
-        from datetime import datetime
 
         from sqlalchemy import select
 
@@ -121,8 +120,8 @@ class SystemReqHandler(BaseReqHandler):
             if not param:
                 return None
 
-            param.param_value = param_value  # type: ignore[assignment]
-            param.updated_at = datetime.now()  # type: ignore[assignment]
+            param.param_value = param_value
+            param.updated_at = datetime.now()
 
             await session.commit()
             await session.refresh(param)
@@ -140,7 +139,7 @@ class SystemReqHandler(BaseReqHandler):
             }
 
     @request("get_system_params_by_group")
-    async def _req_get_system_params_by_group(self, data: dict) -> dict | None:
+    async def _req_get_system_params_by_group(self, data: dict[str, Any]) -> dict[str, Any] | None:
         """处理根据分组获取系统参数请求"""
         from sqlalchemy import select
 
@@ -171,7 +170,7 @@ class SystemReqHandler(BaseReqHandler):
             return result
 
     @request("pause_trading")
-    async def _req_pause_trading(self, data: dict) -> bool:
+    async def _req_pause_trading(self, data: dict[str, Any]) -> bool:
         """处理暂停交易请求"""
         if self.trader.trading_engine is None:
             logger.error(f"Trader [{self.account_id}] 交易引擎未初始化")
@@ -180,7 +179,7 @@ class SystemReqHandler(BaseReqHandler):
         return True
 
     @request("resume_trading")
-    async def _req_resume_trading(self, data: dict) -> bool:
+    async def _req_resume_trading(self, data: dict[str, Any]) -> bool:
         """处理恢复交易请求"""
         if self.trader.trading_engine is None:
             logger.error(f"Trader [{self.account_id}] 交易引擎未初始化")
@@ -189,7 +188,7 @@ class SystemReqHandler(BaseReqHandler):
         return True
 
     @request("reload_risk_config")
-    async def _req_reload_risk_config(self, data: dict) -> dict:
+    async def _req_reload_risk_config(self, data: dict[str, Any]) -> dict[str, Any]:
         """处理重载风控配置请求（从共享数据库重新读取）"""
         if self.trader.trading_engine is None:
             logger.error(f"Trader [{self.account_id}] 交易引擎未初始化")
@@ -198,7 +197,7 @@ class SystemReqHandler(BaseReqHandler):
         return {"success": True}
 
     @request("update_alert_wechat")
-    async def _req_update_alert_wechat(self, data: dict) -> dict:
+    async def _req_update_alert_wechat(self, data: dict[str, Any]) -> dict[str, Any]:
         """处理更新微信告警配置请求（已废弃，映射到通知告警开关）"""
         alert_wechat = data.get("alert_wechat", False)
         self.trader.account_config.alert.notification.enabled = alert_wechat
@@ -209,7 +208,7 @@ class SystemReqHandler(BaseReqHandler):
         return {"alert_wechat": alert_wechat}
 
     @request("get_alert_wechat")
-    async def _req_get_alert_wechat(self, data: dict) -> dict:
+    async def _req_get_alert_wechat(self, data: dict[str, Any]) -> dict[str, Any]:
         """处理获取微信告警配置请求（已废弃，映射到通知告警开关）"""
         logger.warning(
             f"Trader [{self.account_id}] get_alert_wechat 已废弃，请使用 get_alert_config"
@@ -217,7 +216,7 @@ class SystemReqHandler(BaseReqHandler):
         return {"alert_wechat": self.trader.account_config.alert.notification.enabled}
 
     @request("update_alert_config")
-    async def _req_update_alert_config(self, data: dict) -> dict:
+    async def _req_update_alert_config(self, data: dict[str, Any]) -> dict[str, Any]:
         """
         处理更新告警配置请求
 
@@ -252,12 +251,12 @@ class SystemReqHandler(BaseReqHandler):
         return self._dump_alert_config(alert)
 
     @request("get_alert_config")
-    async def _req_get_alert_config(self, data: dict) -> dict:
+    async def _req_get_alert_config(self, data: dict[str, Any]) -> dict[str, Any]:
         """处理获取告警配置请求"""
         return self._dump_alert_config(self.trader.account_config.alert)
 
     @staticmethod
-    def _dump_alert_config(alert) -> dict:
+    def _dump_alert_config(alert: AlertConfig) -> dict[str, Any]:
         """将 AlertConfig 序列化为可过 IPC 的字典"""
         return {
             "notification": {

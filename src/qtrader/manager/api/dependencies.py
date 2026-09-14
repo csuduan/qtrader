@@ -3,12 +3,11 @@
 支持多账号架构
 """
 
-from fastapi import Depends, HTTPException, status
+from fastapi import HTTPException, status
 
 from qtrader.app_context import get_app_context
 
 # 从auth模块导入认证依赖，统一暴露
-from qtrader.manager.api.routes.auth import get_current_user, require_admin
 from qtrader.manager.manager import TradingManager
 
 

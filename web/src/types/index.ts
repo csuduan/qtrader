@@ -234,18 +234,6 @@ export interface AlarmStats {
 /** 告警状态 */
 export type AlarmStatus = 'UNCONFIRMED' | 'CONFIRMED'
 
-/** 资源监控单个采样点 */
-export interface ResourcePoint {
-  timestamp: string
-  cpu_percent: number
-  memory_percent: number
-  memory_used_gb: number
-  memory_total_gb: number
-  disk_percent: number
-  disk_used_gb: number
-  disk_total_gb: number
-}
-
 /** 服务器资源实时快照 */
 export interface ResourceSnapshot {
   timestamp: string
@@ -258,12 +246,6 @@ export interface ResourceSnapshot {
   disk_total_gb: number
   process_count: number
   boot_time: string
-}
-
-/** 资源监控历史数据 */
-export interface ResourceHistory {
-  points: ResourcePoint[]
-  interval_seconds: number
 }
 
 /** ==================== 新增：适配器与策略系统类型 ==================== */

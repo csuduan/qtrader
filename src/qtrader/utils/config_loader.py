@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator
 
 from qtrader.utils.logger import get_logger
 
@@ -394,8 +394,8 @@ class ConfigLoader:
                 account = self._load_account_config(account_id)
                 self.app_config.accounts.append(account)
                 logger.info(f"已加载账户配置: {account_id} (enabled: {account.enabled})")
-            except Exception as e:
-                logger.exception(f"加载账户配置文件 account-{account_id}.yaml 失败: {e}")
+            except Exception:
+                logger.exception("加载账户配置文件 account-{}.yaml 失败", account_id)
 
         # 根据account_ids字段排序（如果有配置顺序）
         if self.app_config.account_ids:
@@ -441,7 +441,7 @@ class ConfigLoader:
         if not config_path.exists():
             raise FileNotFoundError(f"配置文件不存在: {config_path}")
 
-        with open(config_path, "r", encoding="utf-8") as f:
+        with open(config_path, encoding="utf-8") as f:
             config_data = yaml.safe_load(f)
 
         # 兼容裸 "account_ids:"（空键被 YAML 解析为 None）
@@ -470,7 +470,7 @@ class ConfigLoader:
         if not config_path.exists():
             raise FileNotFoundError(f"账户配置文件不存在: {config_path}")
 
-        with open(config_path, "r", encoding="utf-8") as f:
+        with open(config_path, encoding="utf-8") as f:
             config_data = yaml.safe_load(f)
 
         account = AccountConfig(**config_data)

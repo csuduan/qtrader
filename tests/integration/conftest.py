@@ -51,9 +51,10 @@ def _build_client(mock_trading_manager: MagicMock, token: str | None) -> TestCli
     app.router.lifespan_context = _null_lifespan
 
     headers = {"Authorization": f"Bearer {token}"} if token else {}
-    with patch.object(
-        AppContext, "get_trading_manager", return_value=mock_trading_manager
-    ), TestClient(app, headers=headers) as client:
+    with (
+        patch.object(AppContext, "get_trading_manager", return_value=mock_trading_manager),
+        TestClient(app, headers=headers) as client,
+    ):
         yield client
 
 

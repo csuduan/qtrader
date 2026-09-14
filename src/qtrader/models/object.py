@@ -375,7 +375,9 @@ class PositionData(BaseModel):
         return (self.hold_profit_long or 0) + (self.hold_profit_short or 0)
 
     @classmethod
-    def default(cls, symbol: str = "", exchange: Exchange = Exchange.NONE, multiple: int = 0):
+    def default(
+        cls, symbol: str = "", exchange: Exchange = Exchange.NONE, multiple: int = 0
+    ) -> "PositionData":
         """创建空持仓实例"""
         return cls(
             symbol=symbol,
@@ -409,7 +411,6 @@ class PositionData(BaseModel):
 
         if isinstance(data, TradeData):
             trade = data
-            symbol = trade.symbol
             volume = trade.volume
             price = trade.price
             self.updated_at = DateTime.now()
@@ -435,7 +436,6 @@ class PositionData(BaseModel):
                 if trade.direction == Direction.BUY:
                     # 平空（买入平空）
                     if self.pos_short > 0:
-
                         # 处理今仓/昨仓
                         pos_short_td = self.pos_short_td or 0
                         pos_short_yd = self.pos_short_yd or 0
@@ -515,7 +515,7 @@ class AccountData(BaseModel):
     trade_paused: bool = False  # 是否暂停交易
     md_connected: bool = False  # 行情连接状态
     td_connected: bool = False  # 交易连接状态
-    risk_status: dict = Field(default_factory=dict, description="风控状态")
+    risk_status: dict[str, Any] = Field(default_factory=dict, description="风控状态")
 
     # 账户状态
     status: TraderState | None = Field(TraderState.STOPPED, description="交易状态")

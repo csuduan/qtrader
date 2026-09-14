@@ -5,15 +5,12 @@
 OrderCmd 是纯状态机，无外部依赖。
 """
 
-import time
 import uuid
 from abc import ABC, abstractmethod
-from collections import deque
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Callable, Deque
-
-from pydantic import BaseModel
+from typing import Any
 
 from qtrader.utils.logger import get_logger
 
@@ -362,7 +359,7 @@ class OrderCmd:
         elif event_type == "TRADE_UPDATE":
             self._handle_trade_update(data)
 
-    def close(self, reason="指令已取消") -> None:
+    def close(self, reason: str = "指令已取消") -> None:
         """关闭指令（取消）"""
         if self.status in [OrderCmdStatus.FINISHED, OrderCmdStatus.CANCELING]:
             return
@@ -424,8 +421,7 @@ class OrderCmd:
             if self.filled_volume > 0:
                 self.filled_price = total_cost / self.filled_volume
             logger.info(
-                f"报单指令-更新成交: "
-                f"均价={self.filled_price:.2f}, 累计成交: {self.filled_volume}"
+                f"报单指令-更新成交: 均价={self.filled_price:.2f}, 累计成交: {self.filled_volume}"
             )
             # 更新拆单手数
             if self._cur_split_order is not None:
@@ -504,7 +500,7 @@ class OrderCmd:
         """是否完成(状态完成且没有挂单)"""
         return self.status == OrderCmdStatus.FINISHED
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
         # 计算进行中手数（当前挂单中尚未成交的手数）
         pending_volume = 0

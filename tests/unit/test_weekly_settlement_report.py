@@ -157,7 +157,9 @@ class TestWeeklySettlementReport:
 
     async def test_email_disabled_skips_send(self, job_manager):
         """邮件功能未启用时不发送"""
-        mock_send = await _run_report(job_manager, _make_email_config(enabled=False), _make_records())
+        mock_send = await _run_report(
+            job_manager, _make_email_config(enabled=False), _make_records()
+        )
 
         mock_send.assert_not_called()
 

@@ -2,18 +2,13 @@
 定时任务配置相关API路由
 """
 
-from datetime import datetime
-
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel
 
-from qtrader.app_context import get_app_context
 from qtrader.manager.api.dependencies import get_trading_manager
 from qtrader.manager.api.responses import error_response, success_response
 from qtrader.manager.manager import TradingManager
-from qtrader.models.po import JobPo
 from qtrader.utils.logger import get_logger
-from qtrader.utils.scheduler import TaskScheduler
 
 logger = get_logger(__name__)
 
@@ -37,7 +32,7 @@ router = APIRouter(prefix="/api/jobs", tags=["定时任务"])
 async def get_jobs(
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     获取定时任务列表
 
@@ -59,7 +54,7 @@ async def toggle_job(
     request: JobToggleRequest,
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     切换任务启用/禁用状态
 
@@ -83,7 +78,7 @@ async def trigger_job(
     job_id: str,
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     立即触发定时任务
 
@@ -105,7 +100,7 @@ async def operate_job(
     request: JobOperateRequest,
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     操作定时任务（暂停/恢复/触发）
 

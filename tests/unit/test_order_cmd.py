@@ -269,9 +269,7 @@ def test_order_cmd_cancel_rejected_recovers_and_retries():
     assert cmd.trig() is None
 
     # 节流窗口过后可重试撤单
-    cmd._last_cancel_time = datetime.now() - timedelta(
-        seconds=cmd.CANCEL_RETRY_INTERVAL + 1
-    )
+    cmd._last_cancel_time = datetime.now() - timedelta(seconds=cmd.CANCEL_RETRY_INTERVAL + 1)
     assert cmd.trig() is local
 
     # 再次被拒 → 再恢复 → 最终撤单成功，指令正常推进
@@ -314,9 +312,7 @@ def test_order_cmd_canceling_not_stuck_after_cancel_rejected():
     cmd.update("ORDER_UPDATE", local.model_copy(update={"canceled": False}))
 
     # 节流后仍可发撤单（卡死修复前本地挂单 canceled 无人恢复，此处永远返回 None）
-    cmd._last_cancel_time = datetime.now() - timedelta(
-        seconds=cmd.CANCEL_RETRY_INTERVAL + 1
-    )
+    cmd._last_cancel_time = datetime.now() - timedelta(seconds=cmd.CANCEL_RETRY_INTERVAL + 1)
     assert cmd.trig() is local
 
     # 撤单最终成功 → 指令终结
@@ -346,9 +342,7 @@ def test_order_cmd_session_pause_idle_run(monkeypatch):
     retry_before = cmd._left_retry_times
 
     # 非交易时段：空跑
-    monkeypatch.setattr(
-        order_cmd_mod, "is_symbol_trading_time", lambda symbol, now=None: False
-    )
+    monkeypatch.setattr(order_cmd_mod, "is_symbol_trading_time", lambda symbol, now=None: False)
     assert cmd.trig() is None
     assert cmd._left_retry_times == retry_before  # 未消耗报单次数
 
@@ -359,9 +353,7 @@ def test_order_cmd_session_pause_idle_run(monkeypatch):
     assert cmd.status == OrderCmdStatus.RUNNING  # 超时冻结，不因休息触发 TIMEOUT
 
     # 恢复交易时段：休息时长被剔除出计时窗口，正常报出下一单
-    monkeypatch.setattr(
-        order_cmd_mod, "is_symbol_trading_time", lambda symbol, now=None: True
-    )
+    monkeypatch.setattr(order_cmd_mod, "is_symbol_trading_time", lambda symbol, now=None: True)
     req = cmd.trig()
     assert isinstance(req, OrderRequest)
     assert cmd._left_retry_times == retry_before - 1
@@ -407,9 +399,7 @@ def test_order_cmd_canceling_finishes_offsession_when_order_gone(monkeypatch):
     assert cmd._pending_order is None
 
     # 非交易时段：本地推进不受空跑拦截，指令立即终结
-    monkeypatch.setattr(
-        order_cmd_mod, "is_symbol_trading_time", lambda symbol, now=None: False
-    )
+    monkeypatch.setattr(order_cmd_mod, "is_symbol_trading_time", lambda symbol, now=None: False)
     assert cmd.trig() is None
     assert cmd.status == OrderCmdStatus.FINISHED
     assert cmd.is_finished
@@ -446,20 +436,13 @@ def test_order_cmd_session_pause_cancels_throttled(monkeypatch):
     assert cmd.status == OrderCmdStatus.CANCELING
 
     # 非交易时段：不撤单（空跑），即使撤单节流已过
-    monkeypatch.setattr(
-        order_cmd_mod, "is_symbol_trading_time", lambda symbol, now=None: False
-    )
-    cmd._last_cancel_time = datetime.now() - timedelta(
-        seconds=cmd.CANCEL_RETRY_INTERVAL + 1
-    )
+    monkeypatch.setattr(order_cmd_mod, "is_symbol_trading_time", lambda symbol, now=None: False)
+    cmd._last_cancel_time = datetime.now() - timedelta(seconds=cmd.CANCEL_RETRY_INTERVAL + 1)
     assert cmd.trig() is None
 
     # 恢复：可发撤单
-    monkeypatch.setattr(
-        order_cmd_mod, "is_symbol_trading_time", lambda symbol, now=None: True
-    )
+    monkeypatch.setattr(order_cmd_mod, "is_symbol_trading_time", lambda symbol, now=None: True)
     assert cmd.trig() is order
-
 
 
 def test_order_cmd_trade_update():

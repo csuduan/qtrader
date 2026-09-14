@@ -369,7 +369,6 @@ def test_executor_process_cmd_cancel_not_accepted_keeps_retryable():
     assert order.canceled is False  # 未受理不得标记已撤
 
 
-
 def test_executor_pass_position_to_cmd():
     """测试执行器向平仓指令传递持仓"""
     from qtrader.models.object import Exchange, PositionData

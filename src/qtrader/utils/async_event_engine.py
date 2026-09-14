@@ -3,9 +3,10 @@
 """
 
 import asyncio
-import logging
+import contextlib
 from collections import defaultdict
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from qtrader.utils.logger import get_logger
 
@@ -97,17 +98,17 @@ class AsyncEventEngine:
         """
         self._name = name
         self._running = False
-        self._queue: asyncio.Queue = asyncio.Queue(maxsize=queue_size)
-        self._critical_queue: asyncio.Queue = asyncio.Queue(maxsize=critical_queue_size)
+        self._queue: asyncio.Queue[Event] = asyncio.Queue(maxsize=queue_size)
+        self._critical_queue: asyncio.Queue[Event] = asyncio.Queue(maxsize=critical_queue_size)
         self._drop_count = 0
-        self._handlers: defaultdict = defaultdict(list)
-        self._general_handlers: list = []
-        self._process_tasks: list[asyncio.Task] = []
+        self._handlers: defaultdict[str, list[HandlerType]] = defaultdict(list)
+        self._general_handlers: list[HandlerType] = []
+        self._process_tasks: list[asyncio.Task[None]] = []
         self._process_lock = asyncio.Lock()
-        self._pending_puts: set[asyncio.Task] = set()
+        self._pending_puts: set[asyncio.Task[None]] = set()
         self._loop: asyncio.AbstractEventLoop | None = None
 
-    async def _dispatch(self, handlers: list, data: Any) -> None:
+    async def _dispatch(self, handlers: list[HandlerType], data: Any) -> None:
         """
         并发执行处理器
 
@@ -127,19 +128,18 @@ class AsyncEventEngine:
             else:
                 try:
                     handler(data)
-                except Exception as e:
-                    logger.exception(f"[{self._name}] 同步处理器执行失败: {e}")
+                except Exception:
+                    logger.exception("[{}] 同步处理器执行失败", self._name)
 
         if tasks:
             results = await asyncio.gather(*tasks, return_exceptions=True)
-            for handler, result in zip(async_handlers, results):
+            for handler, result in zip(async_handlers, results, strict=True):
                 if isinstance(result, BaseException) and not isinstance(
                     result, asyncio.CancelledError
                 ):
-                    logger.error(
+                    logger.opt(exception=result).error(
                         f"[{self._name}] 异步处理器执行失败 "
-                        f"[{getattr(handler, '__qualname__', handler)}]: {result}",
-                        exc_info=result,
+                        f"[{getattr(handler, '__qualname__', handler)}]"
                     )
 
     async def _process(self, event: Event) -> None:
@@ -161,10 +161,10 @@ class AsyncEventEngine:
             if self._general_handlers:
                 await self._dispatch(self._general_handlers, event.data)
 
-        except Exception as e:
-            logger.exception(f"[{self._name}] 事件处理异常: {e}")
+        except Exception:
+            logger.exception("[{}] 事件处理异常", self._name)
 
-    async def _run(self, queue: asyncio.Queue) -> None:
+    async def _run(self, queue: asyncio.Queue[Event]) -> None:
         """
         事件消费循环
 
@@ -187,8 +187,8 @@ class AsyncEventEngine:
             except asyncio.CancelledError:
                 logger.info(f"[{self._name}] 事件循环被取消")
                 break
-            except Exception as e:
-                logger.exception(f"[{self._name}] 事件循环错误: {e}")
+            except Exception:
+                logger.exception("[{}] 事件循环错误", self._name)
                 # 短暂休眠后继续
                 await asyncio.sleep(0.1)
 
@@ -233,16 +233,14 @@ class AsyncEventEngine:
         # 排空队列中残留事件
         try:
             await asyncio.wait_for(self._drain(), timeout=drain_timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(f"[{self._name}] 排空事件队列超时，放弃剩余事件")
 
         # 取消处理任务
         for task in self._process_tasks:
             task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await task
-            except asyncio.CancelledError:
-                pass
         self._process_tasks = []
 
         # 取消仍在等待队列空位的投递任务

@@ -11,14 +11,13 @@
 
 import asyncio
 import inspect
+from collections.abc import Callable, Coroutine
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
-from typing import Any, Callable, Coroutine, TypeVar, cast
+from typing import Any, cast
 
 from qtrader.utils.logger import get_logger
 
 logger = get_logger(__name__)
-
-T = TypeVar("T")
 
 # 独立 IO 线程池（默认 8 线程，重 IO 任务专用，与默认池隔离）
 _io_executor: ThreadPoolExecutor | None = None
@@ -56,7 +55,7 @@ def shutdown_executors() -> None:
     _main_loop = None
 
 
-async def submit_task(func: Callable[..., T], *args: Any, **kwargs: Any) -> T:
+async def submit_task[T](func: Callable[..., T], *args: Any, **kwargs: Any) -> T:
     """
     轻量同步任务（<3s），走默认线程池
 
@@ -70,7 +69,7 @@ async def submit_task(func: Callable[..., T], *args: Any, **kwargs: Any) -> T:
     return await asyncio.to_thread(func, *args, **kwargs)
 
 
-async def submit_long_task(func: Callable[..., T], *args: Any, **kwargs: Any) -> T:
+async def submit_long_task[T](func: Callable[..., T], *args: Any, **kwargs: Any) -> T:
     """
     重 IO 任务，走独立命名线程池（与默认池隔离，防止阻塞轻任务）
 
@@ -87,7 +86,7 @@ async def submit_long_task(func: Callable[..., T], *args: Any, **kwargs: Any) ->
     return await loop.run_in_executor(_io_executor, lambda: func(*args, **kwargs))
 
 
-async def submit_cpu_task(func: Callable[..., T], *args: Any, **kwargs: Any) -> T:
+async def submit_cpu_task[T](func: Callable[..., T], *args: Any, **kwargs: Any) -> T:
     """
     CPU 密集任务，走进程池（绕开 GIL）
 
@@ -109,7 +108,7 @@ async def submit_cpu_task(func: Callable[..., T], *args: Any, **kwargs: Any) -> 
     return await loop.run_in_executor(_cpu_executor, lambda: func(*args, **kwargs))
 
 
-def submit_loop(coro_or_func: Coroutine | Callable[[], Any]) -> Future | None:
+def submit_loop(coro_or_func: Coroutine[Any, Any, Any] | Callable[[], Any]) -> Future[Any] | None:
     """
     从任意线程把协程/同步回调投递到主事件循环
 

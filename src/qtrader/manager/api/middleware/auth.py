@@ -4,8 +4,8 @@
 """
 
 from fastapi import Request, Response
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from starlette.middleware.base import BaseHTTPMiddleware
+from fastapi.security import HTTPBearer
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.types import ASGIApp
 
 from qtrader.manager.api.routes.auth import verify_token
@@ -63,13 +63,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return True
 
         # 前缀匹配
-        for prefix in self.PUBLIC_PREFIXES:
-            if path.startswith(prefix):
-                return True
+        return any(path.startswith(prefix) for prefix in self.PUBLIC_PREFIXES)
 
-        return False
-
-    async def dispatch(self, request: Request, call_next) -> Response:
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         """
         处理每个请求
 
@@ -84,15 +80,15 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         # 1. 公开接口直接放行
         if self._is_public_path(path):
-            return await call_next(request)  # type: ignore[no-any-return]
+            return await call_next(request)
 
         # 2. 只处理API请求（以/api开头的路径）
         if not path.startswith("/api"):
-            return await call_next(request)  # type: ignore[no-any-return]
+            return await call_next(request)
 
         # 3. WebSocket请求不在这里处理（由WebSocket自己处理）
         if path == "/ws":
-            return await call_next(request)  # type: ignore[no-any-return]
+            return await call_next(request)
 
         # 4. 获取并验证Token
         auth_header = request.headers.get("Authorization")
@@ -151,8 +147,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
             logger.debug(f"鉴权成功: {payload.get('sub')} - {path}")
 
-        except Exception as e:
-            logger.error(f"鉴权处理异常: {e} - {path}")
+        except Exception:
+            logger.exception("鉴权处理异常 - {}", path)
             return Response(
                 content='{"code": 401, "message": "认证处理失败", "data": null}',
                 status_code=401,

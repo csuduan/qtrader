@@ -6,7 +6,7 @@
 from datetime import datetime
 
 import psutil
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 
 from qtrader.manager.api.responses import success_response
 from qtrader.manager.api.schemas import ResourceHistory, ResourceSnapshot
@@ -57,18 +57,18 @@ async def get_resource_snapshot() -> ResourceSnapshot:
 
 
 @router.get("/current")
-async def resource_current():
+async def resource_current() -> Response:
     """获取当前服务器资源快照"""
     try:
         snapshot = await get_resource_snapshot()
         return success_response(snapshot.model_dump())
-    except Exception as e:
-        logger.exception(f"获取资源快照失败: {e}")
+    except Exception:
+        logger.exception("获取资源快照失败")
         return success_response(message="获取资源快照失败")
 
 
 @router.get("/history")
-async def resource_history(points: int = 60):
+async def resource_history(points: int = 60) -> Response:
     """获取最近的服务器资源历史数据"""
     try:
         from qtrader.app_context import get_app_context
@@ -82,6 +82,6 @@ async def resource_history(points: int = 60):
         return success_response(
             ResourceHistory(points=history_data, interval_seconds=5).model_dump()
         )
-    except Exception as e:
-        logger.exception(f"获取资源历史数据失败: {e}")
+    except Exception:
+        logger.exception("获取资源历史数据失败")
         return success_response(message="获取资源历史数据失败")

@@ -5,6 +5,7 @@ CTP API 封装模块
 - CTP API 文档：https://www.simnow.com.cn
 """
 
+import contextlib
 import platform
 import threading
 import time
@@ -35,7 +36,8 @@ from qtrader.utils.logger import get_logger
 
 ctx = get_app_context()
 _config = ctx.get_config()
-assert _config is not None, "应用配置未初始化"
+if _config is None:
+    raise RuntimeError("应用配置未初始化")
 config: TraderConfig = _config
 logger = get_logger(__name__)
 
@@ -70,7 +72,10 @@ STATUS_CTP2VT = {
 
 
 # 方向映射: 系统内部 -> CTP
-DIRECTION_VT2CTP = {Direction.BUY: tdapi.THOST_FTDC_D_Buy, Direction.SELL: tdapi.THOST_FTDC_D_Sell}
+DIRECTION_VT2CTP = {
+    Direction.BUY: tdapi.THOST_FTDC_D_Buy,
+    Direction.SELL: tdapi.THOST_FTDC_D_Sell,
+}
 DIRECTION_CTP2VT = {v: k for k, v in DIRECTION_VT2CTP.items()}
 
 POS_DIRECTION_VT2CTP = {
@@ -139,7 +144,7 @@ def adjust_price(price: float, max_value: float = 1e308) -> float:
     return price
 
 
-class CtpMdApi(mdapi.CThostFtdcMdSpi):
+class CtpMdApi(mdapi.CThostFtdcMdSpi):  # type: ignore[misc]  # CTP SDK 无类型存根
     """
     CTP 行情接口
 
@@ -149,9 +154,10 @@ class CtpMdApi(mdapi.CThostFtdcMdSpi):
     def __init__(self, gateway: "CtpGateway"):
         """初始化行情接口"""
         super().__init__()
-        self.gateway: "CtpGateway" = gateway
+        self.gateway: CtpGateway = gateway
         self.config = gateway.config
-        assert self.config is not None, "CTP 网关配置缺失"
+        if self.config is None:
+            raise RuntimeError("CTP 网关配置缺失")
 
         # 连接状态
         self._running = False
@@ -161,7 +167,7 @@ class CtpMdApi(mdapi.CThostFtdcMdSpi):
         self.reqid = 0
 
         # 已订阅合约
-        self.subscribed: set = set()
+        self.subscribed: set[str] = set()
 
         # API 实例
         self.api: mdapi.CThostFtdcMdApi | None = None
@@ -198,8 +204,8 @@ class CtpMdApi(mdapi.CThostFtdcMdSpi):
             logger.info("CTP 行情接口开始连接...")
             return True
 
-        except Exception as e:
-            logger.exception(f"CTP 行情接口连接失败: {e}")
+        except Exception:
+            logger.exception("CTP 行情接口连接失败")
             return False
 
     def close(self) -> None:
@@ -214,7 +220,7 @@ class CtpMdApi(mdapi.CThostFtdcMdSpi):
                 # 释放API资源
                 self.api.Release()
             except Exception as e:
-                logger.warning(f"关闭行情接口异常: {e}")
+                logger.warning("关闭行情接口异常: {!r}", e)
             finally:
                 self.api = None
 
@@ -248,7 +254,8 @@ class CtpMdApi(mdapi.CThostFtdcMdSpi):
             return
 
         self.api.SubscribeMarketData(
-            [s.encode("utf-8") for s in symbols_to_subscribe if s], len(symbols_to_subscribe)
+            [s.encode("utf-8") for s in symbols_to_subscribe if s],
+            len(symbols_to_subscribe),
         )
         logger.info(f"CTP 订阅行情: {symbols_to_subscribe}")
 
@@ -300,73 +307,64 @@ class CtpMdApi(mdapi.CThostFtdcMdSpi):
             self.subscribed.add(pSpecificInstrument.InstrumentID)
             logger.info(f"CTP 订阅行情成功: {pSpecificInstrument.InstrumentID}")
 
+    @logger.catch(message="处理行情数据异常")
     def OnRtnDepthMarketData(self, data: mdapi.CThostFtdcDepthMarketDataField) -> None:
         """行情数据推送"""
-        try:
-            if not data or not data.UpdateTime:
-                return
-
-            symbol = data.InstrumentID
-            contract = self.gateway.get_contract(symbol)
-            if not contract:
-                return
-
-            # 解析时间
-            if not data.ActionDay or contract.exchange == Exchange.DCE:
-                date_str = self.current_date
-            else:
-                date_str = data.ActionDay
-
-            timestamp = f"{date_str} {data.UpdateTime}.{data.UpdateMillisec}"
-            dt = datetime.strptime(timestamp, "%Y%m%d %H:%M:%S.%f")
-
-            # 创建 Tick 数据
-            tick = TickData.model_construct(
-                symbol=symbol,
-                exchange=contract.exchange,
-                datetime=dt,
-                last_price=adjust_price(data.LastPrice),
-                volume=data.Volume,
-                turnover=data.Turnover,
-                open_interest=data.OpenInterest,
-                bid_price1=adjust_price(data.BidPrice1),
-                ask_price1=adjust_price(data.AskPrice1),
-                bid_volume1=data.BidVolume1,
-                ask_volume1=data.AskVolume1,
-                open_price=adjust_price(data.OpenPrice),
-                high_price=adjust_price(data.HighestPrice),
-                low_price=adjust_price(data.LowestPrice),
-                pre_close=adjust_price(data.PreClosePrice),
-                limit_up=data.UpperLimitPrice,
-                limit_down=data.LowerLimitPrice,
-                trading_day=data.TradingDay,
-                open_min_volume=contract.min_volume or 1,
-            )
-
-            # 五档行情
-            if data.BidVolume2 or data.AskVolume2:
-                tick.bid_price2 = adjust_price(data.BidPrice2)
-                tick.bid_price3 = adjust_price(data.BidPrice3)
-                tick.bid_price4 = adjust_price(data.BidPrice4)
-                tick.bid_price5 = adjust_price(data.BidPrice5)
-                tick.ask_price2 = adjust_price(data.AskPrice2)
-                tick.ask_price3 = adjust_price(data.AskPrice3)
-                tick.ask_price4 = adjust_price(data.AskPrice4)
-                tick.ask_price5 = adjust_price(data.AskPrice5)
-                tick.bid_volume2 = data.BidVolume2
-                tick.bid_volume3 = data.BidVolume3
-                tick.bid_volume4 = data.BidVolume4
-                tick.bid_volume5 = data.BidVolume5
-                tick.ask_volume2 = data.AskVolume2
-                tick.ask_volume3 = data.AskVolume3
-                tick.ask_volume4 = data.AskVolume4
-                tick.ask_volume5 = data.AskVolume5
-
-            # 推送 tick
-            self.gateway.on_tick(tick)
-
-        except Exception as e:
-            logger.exception(f"处理行情数据异常: {e}")
+        if not data or not data.UpdateTime:
+            return
+        symbol = data.InstrumentID
+        contract = self.gateway.get_contract(symbol)
+        if not contract:
+            return
+        # 解析时间
+        if not data.ActionDay or contract.exchange == Exchange.DCE:
+            date_str = self.current_date
+        else:
+            date_str = data.ActionDay
+        timestamp = f"{date_str} {data.UpdateTime}.{data.UpdateMillisec}"
+        dt = datetime.strptime(timestamp, "%Y%m%d %H:%M:%S.%f")
+        # 创建 Tick 数据
+        tick = TickData.model_construct(
+            symbol=symbol,
+            exchange=contract.exchange,
+            datetime=dt,
+            last_price=adjust_price(data.LastPrice),
+            volume=data.Volume,
+            turnover=data.Turnover,
+            open_interest=data.OpenInterest,
+            bid_price1=adjust_price(data.BidPrice1),
+            ask_price1=adjust_price(data.AskPrice1),
+            bid_volume1=data.BidVolume1,
+            ask_volume1=data.AskVolume1,
+            open_price=adjust_price(data.OpenPrice),
+            high_price=adjust_price(data.HighestPrice),
+            low_price=adjust_price(data.LowestPrice),
+            pre_close=adjust_price(data.PreClosePrice),
+            limit_up=data.UpperLimitPrice,
+            limit_down=data.LowerLimitPrice,
+            trading_day=data.TradingDay,
+            open_min_volume=contract.min_volume or 1,
+        )
+        # 五档行情
+        if data.BidVolume2 or data.AskVolume2:
+            tick.bid_price2 = adjust_price(data.BidPrice2)
+            tick.bid_price3 = adjust_price(data.BidPrice3)
+            tick.bid_price4 = adjust_price(data.BidPrice4)
+            tick.bid_price5 = adjust_price(data.BidPrice5)
+            tick.ask_price2 = adjust_price(data.AskPrice2)
+            tick.ask_price3 = adjust_price(data.AskPrice3)
+            tick.ask_price4 = adjust_price(data.AskPrice4)
+            tick.ask_price5 = adjust_price(data.AskPrice5)
+            tick.bid_volume2 = data.BidVolume2
+            tick.bid_volume3 = data.BidVolume3
+            tick.bid_volume4 = data.BidVolume4
+            tick.bid_volume5 = data.BidVolume5
+            tick.ask_volume2 = data.AskVolume2
+            tick.ask_volume3 = data.AskVolume3
+            tick.ask_volume4 = data.AskVolume4
+            tick.ask_volume5 = data.AskVolume5
+        # 推送 tick
+        self.gateway.on_tick(tick)
 
     def _get_temp_path(self, subdir: str) -> Path:
         """获取临时文件路径"""
@@ -375,7 +373,7 @@ class CtpMdApi(mdapi.CThostFtdcMdSpi):
         return temp_dir
 
 
-class CtpTdApi(tdapi.CThostFtdcTraderSpi):
+class CtpTdApi(tdapi.CThostFtdcTraderSpi):  # type: ignore[misc]  # CTP SDK 无类型存根
     """
     CTP 交易接口
 
@@ -386,9 +384,10 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
         """初始化交易接口"""
         super().__init__()
 
-        self.gateway: "CtpGateway" = gateway
+        self.gateway: CtpGateway = gateway
         self.config = gateway.config
-        assert self.config is not None, "CTP 网关配置缺失"
+        if self.config is None:
+            raise RuntimeError("CTP 网关配置缺失")
 
         # 连接状态
         self._running = False
@@ -428,11 +427,9 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
     def _safe_release_semaphore(self) -> None:
         """安全释放信号量（避免重复释放导致异常）"""
         sem = self.semaphore
-        try:
+        # 信号量已被释放，忽略
+        with contextlib.suppress(ValueError):
             sem.release()
-        except ValueError:
-            # 信号量已被释放，忽略
-            pass
 
     def connect(self) -> bool:
         """连接交易服务器"""
@@ -457,8 +454,8 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
             logger.info("CTP 交易接口开始连接...")
             return True
 
-        except Exception as e:
-            logger.exception(f"CTP 交易接口连接失败: {e}")
+        except Exception:
+            logger.exception("CTP 交易接口连接失败")
             return False
 
     def close(self) -> None:
@@ -473,7 +470,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
                 # 释放API资源
                 self.api.Release()
             except Exception as e:
-                logger.warning(f"关闭交易接口异常: {e}")
+                logger.warning("关闭交易接口异常: {!r}", e)
             finally:
                 self.api = None
 
@@ -676,7 +673,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
             logger.error(f"查询合约失败，错误代码：{ret}")
             self._safe_release_semaphore()
 
-    def query_trades(self):
+    def query_trades(self) -> None:
         """查询成交"""
         if not self.api or not self.connected:
             self._safe_release_semaphore()
@@ -691,7 +688,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
             logger.error(f"查询成交失败，错误代码：{ret}")
             self._safe_release_semaphore()
 
-    def query_orders(self):
+    def query_orders(self) -> None:
         """查询订单"""
         if not self.api or not self.connected:
             self._safe_release_semaphore()
@@ -1016,7 +1013,10 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
                             pInvestorPosition.PositionCost if volume > 0 else 0
                         )
                         position.hold_price_long = (
-                            round(position.hold_cost_long / position.pos_long / multiple, 2)
+                            round(
+                                position.hold_cost_long / position.pos_long / multiple,
+                                2,
+                            )
                             if position.pos_long > 0
                             else 0.0
                         )
@@ -1025,7 +1025,10 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
                             pInvestorPosition.PositionCost if volume > 0 else 0
                         )
                         position.hold_price_short = (
-                            round(position.hold_cost_short / position.pos_short / multiple, 2)
+                            round(
+                                position.hold_cost_short / position.pos_short / multiple,
+                                2,
+                            )
                             if position.pos_short > 0
                             else 0.0
                         )
@@ -1135,11 +1138,15 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
             self.gateway.add_trade(trade)
 
         if bIsLast:
-            logger.info(f"成交信息查询成功")
+            logger.info("成交信息查询成功")
             self._safe_release_semaphore()
 
     def OnRspQryOrder(
-        self, pOrder: tdapi.CThostFtdcOrderField, pRspInfo: Any, nRequestID: int, bIsLast: bool
+        self,
+        pOrder: tdapi.CThostFtdcOrderField,
+        pRspInfo: Any,
+        nRequestID: int,
+        bIsLast: bool,
     ) -> None:
         """请求查询订单响应"""
         if pRspInfo is not None and pRspInfo.ErrorID != 0:
@@ -1175,7 +1182,7 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):
                 self.order_map[pOrder.OrderRef] = order
 
         if bIsLast:
-            logger.info(f"订单信息查询成功")
+            logger.info("订单信息查询成功")
             self._safe_release_semaphore()
 
     def _run_query(self) -> None:

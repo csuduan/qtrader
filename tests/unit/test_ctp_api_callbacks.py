@@ -120,9 +120,7 @@ class TestOnRtnOrder:
         """全部成交 → FINISHED，成交数更新，本地订单移除"""
         order = seed_order(td_api)
         td_api.OnRtnOrder(
-            make_ctp_order(
-                ctp_api_mod.tdapi, ctp_api_mod.tdapi.THOST_FTDC_OST_AllTraded, traded=2
-            )
+            make_ctp_order(ctp_api_mod.tdapi, ctp_api_mod.tdapi.THOST_FTDC_OST_AllTraded, traded=2)
         )
         assert order.status == OrderStatus.FINISHED
         assert order.traded == 2

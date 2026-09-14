@@ -1,7 +1,7 @@
 # qrader Makefile
 # 常用命令快捷方式
 
-.PHONY: help test test-mypy test-unit test-integration test-api test-e2e test-all test-coverage clean lint format
+.PHONY: help test test-mypy test-unit test-integration test-api test-e2e test-all test-coverage clean lint check format
 
 help:  ## 显示帮助信息
 	@echo "qrader 开发命令："
@@ -42,14 +42,15 @@ clean:  ## 清理测试生成的文件
 	rm -rf .hypothesis/
 	rm -rf .playwright/
 
-lint:  ## 运行代码检查
-	uv run black src/qtrader/ --line-length 100 --target-version py312 --check
-	uv run isort src/qtrader/ --profile black --check
-	uv run mypy src/qtrader/
+lint:  ## 运行代码检查（ruff lint/format）
+	uv run ruff check src/
+	uv run ruff format --check src/
+
+check: test-mypy lint  ## 综合检查（先 mypy 静态检查，再 lint 代码检查）
 
 format:  ## 格式化代码
-	uv run black src/qtrader/ --line-length 100 --target-version py312
-	uv run isort src/qtrader/ --profile black
+	uv run ruff check --fix src/
+	uv run ruff format src/
 
 
 install:  ## 安装项目

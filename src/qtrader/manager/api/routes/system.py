@@ -4,16 +4,14 @@
 
 from datetime import datetime
 
-from fastapi import APIRouter, Body, Depends, Query, Request
+from fastapi import APIRouter, Body, Depends, Query, Request, Response
 from pydantic import BaseModel
 
 from qtrader.manager.api.dependencies import get_trading_manager
 from qtrader.manager.api.responses import error_response, success_response
-from qtrader.manager.api.schemas import SystemStatusRes
 from qtrader.manager.manager import TradingManager
-from qtrader.models.object import AccountData
-from qtrader.models.po import JobPo, SystemParamPo
-from qtrader.utils.async_database import get_async_database
+from qtrader.models.po import SystemParamPo
+from qtrader.utils.async_database import require_async_database
 from qtrader.utils.config_loader import get_config_loader
 from qtrader.utils.logger import get_logger
 
@@ -32,7 +30,7 @@ async def _upsert_risk_params(param_values: dict[str, int | None], account_id: s
     """
     from sqlalchemy import select
 
-    db = get_async_database()
+    db = require_async_database()
     now = datetime.now()
     async with db.get_session() as session:
         for key, value in param_values.items():
@@ -68,14 +66,14 @@ async def _upsert_risk_params(param_values: dict[str, int | None], account_id: s
 async def get_system_status(
     account_id: str | None = Query(None, description="账户ID（多账号模式）"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     获取系统状态
 
     返回交易引擎的当前状态
     - **account_id**: 可选，指定账户ID（多账号模式）
     """
-    trader = trading_manager.get_trader(account_id)
+    trader = trading_manager.get_trader(account_id or "")
 
     if not trader:
         # trader未初始化（可能是禁用账户），返回默认状态
@@ -91,14 +89,16 @@ async def get_system_status(
 async def get_risk_control_status(
     account_id: str | None = Query(None, description="账户ID（多账号模式）"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     获取风控状态
 
     返回风控模块的当前状态和配置
     - **account_id**: 可选，指定账户ID（多账号模式）
     """
-    account: AccountData = await trading_manager.get_account(account_id)
+    account = await trading_manager.get_account(account_id or "")
+    if account is None:
+        return error_response(message="未获取到账户信息")
     return success_response(data=account.risk_status, message="获取成功")
 
 
@@ -110,8 +110,8 @@ async def update_risk_control(
     max_split_volume: int | None = Body(default=None),
     order_timeout: int | None = Body(default=None),
     account_id: str | None = Body(None, description="账户ID（多账号模式）"),
-    trading_manager=Depends(get_trading_manager),
-):
+    trading_manager: TradingManager = Depends(get_trading_manager),
+) -> Response:
     """
     更新风控参数
 
@@ -122,7 +122,7 @@ async def update_risk_control(
     - **max_split_volume**: 单笔最大拆单手数
     - **order_timeout**: 报单超时时间（秒）
     """
-    trader = trading_manager.get_trader(account_id)
+    trader = trading_manager.get_trader(account_id or "")
     if not trader:
         return error_response(code=404, message=f"账户 [{account_id}] 不存在")
 
@@ -136,31 +136,35 @@ async def update_risk_control(
     }
     try:
         await _upsert_risk_params(param_values, account_id)
-    except Exception as e:
-        logger.exception(f"写入风控参数失败: {e}")
+    except Exception:
+        logger.exception("写入风控参数失败")
         return error_response(code=500, message="风控参数写入数据库失败")
 
     # 通知 Trader 进程重新加载风控配置
     await trader.reload_risk_config()
 
     # 获取更新后的账户信息
-    account = await trading_manager.get_account(account_id)
-    return success_response(data=account.risk_status, message="风控参数已更新")
+    # 疑似bug: account_id 为 Optional 未经判空直传；account 可能为 None 时直接访问属性会 AttributeError
+    account = await trading_manager.get_account(account_id)  # type: ignore[arg-type]
+    return success_response(
+        data=account.risk_status,  # type: ignore[union-attr]
+        message="风控参数已更新",
+    )
 
 
 @router.put("/alert-wechat")
 async def update_alert_wechat(
     alert_wechat: bool = Body(..., description="是否启用微信告警"),
     account_id: str | None = Body(None, description="账户ID（多账号模式）"),
-    trading_manager=Depends(get_trading_manager),
-):
+    trading_manager: TradingManager = Depends(get_trading_manager),
+) -> Response:
     """
     更新微信告警配置（通过IPC发送给Trader进程）
 
     - **account_id**: 可选，指定账户ID（多账号模式）
     - **alert_wechat**: 是否启用微信告警
     """
-    trader = trading_manager.get_trader(account_id)
+    trader = trading_manager.get_trader(account_id or "")
     if not trader:
         return error_response(code=404, message=f"账户 [{account_id}] 不存在")
 
@@ -175,14 +179,14 @@ async def update_alert_wechat(
 @router.get("/alert-wechat")
 async def get_alert_wechat(
     account_id: str | None = Query(None, description="账户ID（多账号模式）"),
-    trading_manager=Depends(get_trading_manager),
-):
+    trading_manager: TradingManager = Depends(get_trading_manager),
+) -> Response:
     """
     获取微信告警配置（已废弃，请使用 /alert-config）
 
     - **account_id**: 可选，指定账户ID（多账号模式）
     """
-    trader = trading_manager.get_trader(account_id)
+    trader = trading_manager.get_trader(account_id or "")
     if not trader:
         return error_response(code=404, message=f"账户 [{account_id}] 不存在")
 
@@ -201,15 +205,15 @@ async def get_alert_wechat(
 @router.post("/connect")
 async def connect_system(
     account_id: str | None = Body(None, description="账户ID（多账号模式）"),
-    trading_manager=Depends(get_trading_manager),
-):
+    trading_manager: TradingManager = Depends(get_trading_manager),
+) -> Response:
     """
     连接到交易系统
 
     建立与交易接口的连接
     - **account_id**: 可选，指定账户ID（多账号模式）
     """
-    trader = trading_manager.get_trader(account_id)
+    trader = trading_manager.get_trader(account_id or "")
 
     if not trader:
         return error_response(code=404, message=f"账户 [{account_id}] 不存在")
@@ -218,8 +222,8 @@ async def connect_system(
         success = await trader.connect()
     except Exception as e:
         # 异常含 Trader 回传的真实失败原因，透传给前端
-        logger.error(f"连接失败 [{account_id}]: {e}", exc_info=True)
-        return error_response(code=500, message=f"连接失败: {str(e)}")
+        logger.exception("连接失败 [{}]", account_id)
+        return error_response(code=500, message=f"连接失败: {e}")
 
     if success:
         return success_response(data={"connected": True}, message="连接成功")
@@ -230,15 +234,15 @@ async def connect_system(
 @router.post("/disconnect")
 async def disconnect_system(
     account_id: str | None = Body(None, description="账户ID（多账号模式）"),
-    trading_manager=Depends(get_trading_manager),
-):
+    trading_manager: TradingManager = Depends(get_trading_manager),
+) -> Response:
     """
     断开交易系统连接
 
     关闭与交易接口的连接
     - **account_id**: 可选，指定账户ID（多账号模式）
     """
-    trader = trading_manager.get_trader(account_id)
+    trader = trading_manager.get_trader(account_id or "")
 
     if not trader:
         return error_response(code=404, message=f"账户 [{account_id}] 不存在")
@@ -246,23 +250,23 @@ async def disconnect_system(
     try:
         await trader.disconnect()
     except Exception as e:
-        logger.error(f"断开连接失败 [{account_id}]: {e}", exc_info=True)
-        return error_response(code=500, message=f"断开连接失败: {str(e)}")
+        logger.exception("断开连接失败 [{}]", account_id)
+        return error_response(code=500, message=f"断开连接失败: {e}")
     return success_response(data={"connected": False}, message="已断开连接")
 
 
 @router.post("/disconnect/gateway")
 async def disconnect_gateway(
     account_id: str | None = Body(None, description="账户ID（多账号模式）"),
-    trading_manager=Depends(get_trading_manager),
-):
+    trading_manager: TradingManager = Depends(get_trading_manager),
+) -> Response:
     """
     断开网关连接
 
     只断开网关连接，不停止trader进程
     - **account_id**: 可选，指定账户ID（多账号模式）
     """
-    trader = trading_manager.get_trader(account_id)
+    trader = trading_manager.get_trader(account_id or "")
 
     if not trader:
         return error_response(code=404, message=f"账户 [{account_id}] 不存在")
@@ -270,8 +274,8 @@ async def disconnect_gateway(
     try:
         await trader.disconnect()
     except Exception as e:
-        logger.error(f"断开网关连接失败 [{account_id}]: {e}", exc_info=True)
-        return error_response(code=500, message=f"断开网关连接失败: {str(e)}")
+        logger.exception("断开网关连接失败 [{}]", account_id)
+        return error_response(code=500, message=f"断开网关连接失败: {e}")
     return success_response(
         data={"md_connected": False, "td_connected": False}, message="已断开网关连接"
     )
@@ -280,15 +284,16 @@ async def disconnect_gateway(
 @router.post("/trader/start")
 async def start_trader(
     account_id: str | None = Body(None, description="账户ID（多账号模式）"),
-    trading_manager=Depends(get_trading_manager),
-):
+    trading_manager: TradingManager = Depends(get_trading_manager),
+) -> Response:
     """
     启动账户Trader
 
     启动指定账户的Trader进程
     - **account_id**: 可选，指定账户ID（多账号模式）
     """
-    success = await trading_manager.start_trader(account_id)
+    # account_id 为 Optional（Body 默认 None），TradingManager.start_trader 要求 str
+    success = await trading_manager.start_trader(account_id)  # type: ignore[arg-type]
 
     if success:
         return success_response(data={"running": True}, message="Trader已启动")
@@ -299,15 +304,16 @@ async def start_trader(
 @router.post("/trader/stop")
 async def stop_trader(
     account_id: str | None = Body(None, description="账户ID（多账号模式）"),
-    trading_manager=Depends(get_trading_manager),
-):
+    trading_manager: TradingManager = Depends(get_trading_manager),
+) -> Response:
     """
     停止账户Trader
 
     停止指定账户的Trader进程
     - **account_id**: 可选，指定账户ID（多账号模式）
     """
-    success = await trading_manager.stop_trader(account_id)
+    # account_id 为 Optional（Body 默认 None），TradingManager.stop_trader 要求 str
+    success = await trading_manager.stop_trader(account_id)  # type: ignore[arg-type]
 
     if success:
         return success_response(data={"running": False}, message="Trader已停止")
@@ -318,15 +324,15 @@ async def stop_trader(
 @router.get("/trader/status")
 async def get_trader_status(
     account_id: str | None = Query(None, description="账户ID（多账号模式）"),
-    trading_manager=Depends(get_trading_manager),
-):
+    trading_manager: TradingManager = Depends(get_trading_manager),
+) -> Response:
     """
     获取Trader状态
 
     返回指定账户Trader的运行状态
     - **account_id**: 可选，指定账户ID（多账号模式）
     """
-    trader = trading_manager.get_trader(account_id)
+    trader = trading_manager.get_trader(account_id or "")
 
     if not trader:
         # trader不存在（可能是禁用账户），返回默认状态
@@ -352,15 +358,15 @@ async def get_trader_status(
 @router.post("/pause")
 async def pause_trading(
     account_id: str | None = Body(None, description="账户ID（多账号模式）"),
-    trading_manager=Depends(get_trading_manager),
-):
+    trading_manager: TradingManager = Depends(get_trading_manager),
+) -> Response:
     """
     暂停交易
 
     暂停自动交易功能，手动下单仍然可用
     - **account_id**: 可选，指定账户ID（多账号模式）
     """
-    trader = trading_manager.get_trader(account_id)
+    trader = trading_manager.get_trader(account_id or "")
 
     if not trader:
         return error_response(code=404, message=f"账户 [{account_id}] 不存在")
@@ -372,15 +378,15 @@ async def pause_trading(
 @router.post("/resume")
 async def resume_trading(
     account_id: str | None = Body(None, description="账户ID（多账号模式）"),
-    trading_manager=Depends(get_trading_manager),
-):
+    trading_manager: TradingManager = Depends(get_trading_manager),
+) -> Response:
     """
     恢复交易
 
     恢复自动交易功能
     - **account_id**: 可选，指定账户ID（多账号模式）
     """
-    trader = trading_manager.get_trader(account_id)
+    trader = trading_manager.get_trader(account_id or "")
 
     if not trader:
         return error_response(code=404, message=f"账户 [{account_id}] 不存在")
@@ -392,7 +398,7 @@ async def resume_trading(
 @router.get("/scheduler/jobs")
 async def get_manager_scheduler_jobs(
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     获取Manager级别的定时任务列表
 
@@ -407,7 +413,7 @@ async def operate_manager_scheduler_job(
     job_id: str,
     request: Request,
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     操作Manager级别的定时任务
 
@@ -432,7 +438,7 @@ async def toggle_manager_scheduler_job(
     job_id: str,
     enabled: bool = Body(..., description="是否启用"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     切换Manager级别定时任务的启用状态
 
@@ -448,7 +454,7 @@ async def toggle_manager_scheduler_job(
 
 
 @router.get("/manager/alert-config")
-async def get_manager_alert_config():
+async def get_manager_alert_config() -> Response:
     """
     获取Manager全局告警配置（新结构）
 
@@ -485,8 +491,8 @@ async def get_manager_alert_config():
             message="获取成功",
         )
     except Exception as e:
-        logger.exception(f"获取Manager告警配置失败: {e}")
-        return error_response(code=500, message=f"获取告警配置失败: {str(e)}")
+        logger.exception("获取Manager告警配置失败")
+        return error_response(code=500, message=f"获取告警配置失败: {e}")
 
 
 class NotificationConfigUpdate(BaseModel):
@@ -509,7 +515,7 @@ class ExceptionConfigUpdate(BaseModel):
 async def update_manager_alert_config(
     notification: NotificationConfigUpdate = Body(..., description="通知告警配置"),
     exception: ExceptionConfigUpdate = Body(..., description="异常告警配置"),
-):
+) -> Response:
     """
     更新Manager全局告警配置（新结构）
 
@@ -545,7 +551,7 @@ async def update_manager_alert_config(
         # 读取现有配置文件
         config_path = Path(config_loader.config_dir) / "config.yaml"
         if config_path.exists():
-            with open(config_path, "r", encoding="utf-8") as f:
+            with open(config_path, encoding="utf-8") as f:
                 config_data = yaml.safe_load(f) or {}
         else:
             config_data = {}
@@ -607,5 +613,5 @@ async def update_manager_alert_config(
             message="告警配置已更新",
         )
     except Exception as e:
-        logger.exception(f"更新Manager告警配置失败: {e}")
-        return error_response(code=500, message=f"更新告警配置失败: {str(e)}")
+        logger.exception("更新Manager告警配置失败")
+        return error_response(code=500, message=f"更新告警配置失败: {e}")

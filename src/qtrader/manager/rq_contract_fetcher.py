@@ -3,12 +3,13 @@
 通过 rqdatac 补充合约交易参数（最小开仓手数等）
 """
 
-import logging
 from datetime import datetime
 
 import pandas as pd
 
-logger = logging.getLogger(__name__)
+from qtrader.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class RqContractFetcher:
@@ -51,7 +52,7 @@ class RqContractFetcher:
         df_min_order = params["min_order_quantity"]
 
         # 构建 order_book_id -> exchange 映射，用于判断郑商所合约
-        ob_id_exchange = dict(zip(active["order_book_id"], active["exchange"]))
+        ob_id_exchange = dict(zip(active["order_book_id"], active["exchange"], strict=True))
 
         result: dict[str, int] = {}
         for ob_id in order_book_ids:

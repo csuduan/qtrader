@@ -4,23 +4,19 @@
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from qtrader.trader.req.base import BaseReqHandler
 from qtrader.utils.ipc import request
 from qtrader.utils.logger import get_logger
-
-if TYPE_CHECKING:
-    from qtrader.models.po import RotationInstructionPo
 
 logger = get_logger(__name__)
 
 
 class ConnectionReqHandler(BaseReqHandler):
     @request("connect_gateway")
-    async def _req_connect(self, data: dict) -> bool | None:
+    async def _req_connect(self, data: dict[str, Any]) -> bool | None:
         """处理连接请求"""
         if self.trader.trading_engine is None:
             logger.error(f"Trader [{self.account_id}] 交易引擎未初始化")
@@ -30,7 +26,7 @@ class ConnectionReqHandler(BaseReqHandler):
         return True
 
     @request("disconnect_gateway")
-    async def _req_disconnect(self, data: dict) -> bool | None:
+    async def _req_disconnect(self, data: dict[str, Any]) -> bool | None:
         """处理断开连接请求"""
         if self.trader.trading_engine is None:
             logger.error(f"Trader [{self.account_id}] 交易引擎未初始化")
@@ -40,7 +36,7 @@ class ConnectionReqHandler(BaseReqHandler):
         return True
 
     @request("subscribe")
-    async def _req_subscribe(self, data: dict) -> bool | None:
+    async def _req_subscribe(self, data: dict[str, Any]) -> bool | None:
         """处理订阅请求"""
         if self.trader.trading_engine is None:
             logger.error(f"Trader [{self.account_id}] 交易引擎未初始化")
@@ -50,13 +46,13 @@ class ConnectionReqHandler(BaseReqHandler):
         return True
 
     @request("unsubscribe")
-    async def _req_unsubscribe(self, data: dict) -> bool:
+    async def _req_unsubscribe(self, data: dict[str, Any]) -> bool:
         """处理取消订阅请求"""
         logger.info(f"Trader [{self.account_id}] 取消订阅成功")
         return True
 
     @request("order_req")
-    async def _req_order(self, data: dict) -> str | None:
+    async def _req_order(self, data: dict[str, Any]) -> str | None:
         """
         处理下单请求
 
@@ -95,7 +91,7 @@ class ConnectionReqHandler(BaseReqHandler):
         return order_data.order_id
 
     @request("cancel_req")
-    async def _req_cancel(self, data: dict) -> bool:
+    async def _req_cancel(self, data: dict[str, Any]) -> bool:
         """
         处理撤单请求
 
@@ -120,7 +116,7 @@ class ConnectionReqHandler(BaseReqHandler):
         return success
 
     @request("get_account")
-    async def _req_get_account(self, data: dict) -> dict | None:
+    async def _req_get_account(self, data: dict[str, Any]) -> dict[str, Any] | None:
         """处理获取账户数据请求"""
         if self.trader.trading_engine is None:
             return None
@@ -128,7 +124,7 @@ class ConnectionReqHandler(BaseReqHandler):
         return account.model_dump() if account else None
 
     @request("get_order")
-    async def _req_get_order(self, data: dict) -> dict | None:
+    async def _req_get_order(self, data: dict[str, Any]) -> dict[str, Any] | None:
         """处理获取订单数据请求"""
         if self.trader.trading_engine is None:
             return None
@@ -140,7 +136,7 @@ class ConnectionReqHandler(BaseReqHandler):
         return None
 
     @request("get_orders")
-    async def _req_get_orders(self, data: dict) -> list:
+    async def _req_get_orders(self, data: dict[str, Any]) -> list[dict[str, Any]]:
         """处理获取所有订单数据请求"""
         if self.trader.trading_engine is None:
             return []
@@ -148,7 +144,7 @@ class ConnectionReqHandler(BaseReqHandler):
         return [order.model_dump() for order in orders.values()]
 
     @request("get_active_orders")
-    async def _req_get_active_orders(self, data: dict) -> list:
+    async def _req_get_active_orders(self, data: dict[str, Any]) -> list[dict[str, Any]]:
         """处理获取活动订单请求"""
         if self.trader.trading_engine is None:
             return []
@@ -160,7 +156,7 @@ class ConnectionReqHandler(BaseReqHandler):
         ]
 
     @request("get_trade")
-    async def _req_get_trade(self, data: dict) -> dict | None:
+    async def _req_get_trade(self, data: dict[str, Any]) -> dict[str, Any] | None:
         """处理获取成交数据请求"""
         if self.trader.trading_engine is None:
             return None
@@ -172,7 +168,7 @@ class ConnectionReqHandler(BaseReqHandler):
         return None
 
     @request("get_trades")
-    async def _req_get_trades(self, data: dict) -> list:
+    async def _req_get_trades(self, data: dict[str, Any]) -> list[dict[str, Any]]:
         """处理获取所有成交数据请求"""
         if self.trader.trading_engine is None:
             return []
@@ -180,7 +176,7 @@ class ConnectionReqHandler(BaseReqHandler):
         return [trade.model_dump() for trade in trades.values()]
 
     @request("get_positions")
-    async def _req_get_positions(self, data: dict) -> list:
+    async def _req_get_positions(self, data: dict[str, Any]) -> list[dict[str, Any]]:
         """处理获取所有持仓数据请求"""
         if self.trader.trading_engine is None:
             return []
@@ -188,7 +184,7 @@ class ConnectionReqHandler(BaseReqHandler):
         return [pos.model_dump() for pos in positions.values()]
 
     @request("get_quotes")
-    async def _req_get_quotes(self, data: dict) -> list:
+    async def _req_get_quotes(self, data: dict[str, Any]) -> list[dict[str, Any]]:
         """处理获取行情请求"""
         if self.trader.trading_engine is None:
             return []
@@ -196,7 +192,7 @@ class ConnectionReqHandler(BaseReqHandler):
         return [quote.model_dump() for quote in quotes.values()]
 
     @request("get_account_details")
-    async def _req_get_account_details(self, data: dict) -> dict:
+    async def _req_get_account_details(self, data: dict[str, Any]) -> dict[str, Any]:
         """
         获取账户完整数据
 
@@ -238,7 +234,7 @@ class ConnectionReqHandler(BaseReqHandler):
         }
 
     @request("get_contracts")
-    async def _req_get_contracts(self, data: dict) -> list:
+    async def _req_get_contracts(self, data: dict[str, Any]) -> list[dict[str, Any]]:
         """
         处理获取合约列表请求
 
@@ -258,7 +254,7 @@ class ConnectionReqHandler(BaseReqHandler):
         return result
 
     @request("get_order_cmds_status")
-    async def _req_get_order_cmds_status(self, data: dict) -> list | None:
+    async def _req_get_order_cmds_status(self, data: dict[str, Any]) -> list[dict[str, Any]] | None:
         """
         处理获取报单指令状态请求
 
@@ -289,7 +285,7 @@ class ConnectionReqHandler(BaseReqHandler):
         return [cmd.to_dict() for cmd in cmd_list]
 
     @request("cancel_order_cmd")
-    async def _req_cancel_order_cmd(self, data: dict) -> dict:
+    async def _req_cancel_order_cmd(self, data: dict[str, Any]) -> dict[str, Any]:
         """
         处理取消报单指令请求
 
@@ -313,11 +309,11 @@ class ConnectionReqHandler(BaseReqHandler):
             else:
                 return {"success": False, "message": "取消指令失败，指令可能已完成或不存在"}
         except Exception as e:
-            logger.exception(f"Trader [{self.account_id}] 取消报单指令失败: {e}")
-            return {"success": False, "message": f"取消失败: {str(e)}"}
+            logger.exception(f"Trader [{self.account_id}] 取消报单指令失败")
+            return {"success": False, "message": f"取消失败: {e!s}"}
 
     @request("get_jobs")
-    async def _req_get_jobs(self, data: dict) -> list:
+    async def _req_get_jobs(self, data: dict[str, Any]) -> list[dict[str, Any]]:
         """处理获取所有任务请求"""
         if self.trader.trading_engine is None or self.trader.task_scheduler is None:
             return []
@@ -325,7 +321,7 @@ class ConnectionReqHandler(BaseReqHandler):
         return [job.model_dump() for job in jobs.values()]
 
     @request("trigger_job")
-    async def _req_trigger_job(self, data: dict) -> bool:
+    async def _req_trigger_job(self, data: dict[str, Any]) -> bool:
         """处理手动触发任务请求"""
         if self.trader.task_scheduler is None:
             logger.error(f"Trader [{self.account_id}] 任务调度器未初始化")
@@ -342,7 +338,7 @@ class ConnectionReqHandler(BaseReqHandler):
         return success
 
     @request("toggle_job")
-    async def _req_toggle_job(self, data: dict) -> bool:
+    async def _req_toggle_job(self, data: dict[str, Any]) -> bool:
         """处理切换任务状态请求"""
         if self.trader.task_scheduler is None:
             logger.error(f"Trader [{self.account_id}] 任务调度器未初始化")
@@ -360,7 +356,7 @@ class ConnectionReqHandler(BaseReqHandler):
         return success
 
     @request("pause_job")
-    async def _req_pause_job(self, data: dict) -> bool:
+    async def _req_pause_job(self, data: dict[str, Any]) -> bool:
         """处理暂停任务请求"""
         if self.trader.task_scheduler is None:
             logger.error(f"Trader [{self.account_id}] 任务调度器未初始化")
@@ -377,7 +373,7 @@ class ConnectionReqHandler(BaseReqHandler):
         return success
 
     @request("resume_job")
-    async def _req_resume_job(self, data: dict) -> bool:
+    async def _req_resume_job(self, data: dict[str, Any]) -> bool:
         """处理恢复任务请求"""
         if self.trader.task_scheduler is None:
             logger.error(f"Trader [{self.account_id}] 任务调度器未初始化")

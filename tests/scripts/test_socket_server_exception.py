@@ -9,14 +9,14 @@ SocketServer 异常测试
 """
 
 import asyncio
-import sys
 import os
+import sys
 from pathlib import Path
 
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from qtrader.utils.ipc import SocketServer, SocketClient, request
+from qtrader.utils.ipc import SocketClient, SocketServer, request
 from qtrader.utils.logger import get_logger
 
 logger = get_logger("socket_exception_test")
@@ -24,6 +24,7 @@ logger = get_logger("socket_exception_test")
 
 class TestException(Exception):
     """测试用异常"""
+
     pass
 
 

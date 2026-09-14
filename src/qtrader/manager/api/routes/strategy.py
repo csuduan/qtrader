@@ -5,15 +5,14 @@
 """
 
 import asyncio
+from typing import Any, NoReturn
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
 
 from qtrader.manager.api.dependencies import get_trading_manager
 from qtrader.manager.api.responses import error_response, success_response
 from qtrader.manager.api.schemas import (
     StrategyBatchOpReq,
-    StrategyConfig,
-    StrategyRes,
     StrategyStatusRes,
     StrategyUpdateReq,
 )
@@ -28,23 +27,23 @@ router = APIRouter(prefix="/api/strategies", tags=["策略管理"])
 # ============ 辅助函数 ============
 
 
-def _handle_trader_not_found(account_id: str):
+def _handle_trader_not_found(account_id: str) -> NoReturn:
     """处理Trader未找到的情况"""
     logger.warning(f"Trader [{account_id}] 未找到或未连接")
     raise HTTPException(status_code=404, detail=f"Trader [{account_id}] 未找到或未连接")
 
 
-def _handle_strategy_error(operation: str, strategy_id: str, error: Exception):
+def _handle_strategy_error(operation: str, strategy_id: str, error: Exception) -> NoReturn:
     """处理策略操作错误"""
-    logger.error(f"{operation}策略 [{strategy_id}] 失败: {error}")
-    raise HTTPException(status_code=500, detail=f"{operation}策略失败: {str(error)}")
+    logger.error("{}策略 [{}] 失败: {!r}", operation, strategy_id, error)
+    raise HTTPException(status_code=500, detail=f"{operation}策略失败: {error}")
 
 
 @router.get("")
 async def list_strategies(
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     获取策略列表
 
@@ -58,8 +57,8 @@ async def list_strategies(
         strategies = await trading_manager.list_strategies(account_id)
         return success_response(data=strategies)
     except Exception as e:
-        logger.error(f"获取策略列表失败: {e}")
-        return error_response(message=f"获取策略列表失败: {str(e)}")
+        logger.exception("获取策略列表失败")
+        return error_response(message=f"获取策略列表失败: {e}")
 
 
 @router.get("/{strategy_id}")
@@ -67,7 +66,7 @@ async def get_strategy(
     strategy_id: str,
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     获取指定策略状态
 
@@ -86,8 +85,8 @@ async def get_strategy(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"获取策略状态失败: {e}")
-        return error_response(message=f"获取策略状态失败: {str(e)}")
+        logger.exception("获取策略状态失败")
+        return error_response(message=f"获取策略状态失败: {e}")
 
 
 @router.post("/{strategy_id}/start")
@@ -95,7 +94,7 @@ async def start_strategy(
     strategy_id: str,
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     启动指定策略
 
@@ -115,8 +114,8 @@ async def start_strategy(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"启动策略失败: {e}")
-        return error_response(message=f"启动策略失败: {str(e)}")
+        logger.exception("启动策略失败")
+        return error_response(message=f"启动策略失败: {e}")
 
 
 @router.post("/{strategy_id}/stop")
@@ -124,7 +123,7 @@ async def stop_strategy(
     strategy_id: str,
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     停止指定策略
 
@@ -144,15 +143,15 @@ async def stop_strategy(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"停止策略失败: {e}")
-        return error_response(message=f"停止策略失败: {str(e)}")
+        logger.exception("停止策略失败")
+        return error_response(message=f"停止策略失败: {e}")
 
 
 @router.post("/start-all")
 async def start_all_strategies(
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     启动所有已启用的策略
 
@@ -169,15 +168,15 @@ async def start_all_strategies(
         else:
             return error_response(message="启动策略失败")
     except Exception as e:
-        logger.error(f"启动策略失败: {e}")
-        return error_response(message=f"启动策略失败: {str(e)}")
+        logger.exception("启动策略失败")
+        return error_response(message=f"启动策略失败: {e}")
 
 
 @router.post("/stop-all")
 async def stop_all_strategies(
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     停止所有策略
 
@@ -194,8 +193,8 @@ async def stop_all_strategies(
         else:
             return error_response(message="停止策略失败")
     except Exception as e:
-        logger.error(f"停止策略失败: {e}")
-        return error_response(message=f"停止策略失败: {str(e)}")
+        logger.exception("停止策略失败")
+        return error_response(message=f"停止策略失败: {e}")
 
 
 @router.post("/batch")
@@ -203,7 +202,7 @@ async def batch_operate_strategies(
     request: StrategyBatchOpReq,
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     批量操作策略
 
@@ -219,7 +218,7 @@ async def batch_operate_strategies(
         if not trader:
             _handle_trader_not_found(account_id)
 
-        results = {"success": [], "failed": []}
+        results: dict[str, list[str | dict[str, str]]] = {"success": [], "failed": []}
 
         for strategy_id in request.strategy_ids:
             try:
@@ -250,8 +249,8 @@ async def batch_operate_strategies(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"批量操作策略失败: {e}")
-        return error_response(message=f"批量操作策略失败: {str(e)}")
+        logger.exception("批量操作策略失败")
+        return error_response(message=f"批量操作策略失败: {e}")
 
 
 @router.patch("/{strategy_id}")
@@ -260,7 +259,7 @@ async def update_strategy(
     request: StrategyUpdateReq,
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     更新策略参数或信号
 
@@ -294,17 +293,17 @@ async def update_strategy(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"更新策略参数失败: {e}")
-        return error_response(message=f"更新策略参数失败: {str(e)}")
+        logger.exception("更新策略参数失败")
+        return error_response(message=f"更新策略参数失败: {e}")
 
 
 @router.post("/{strategy_id}/update-signal")
 async def update_strategy_signal(
     strategy_id: str,
-    signal: dict | None = Body(None, description="信号数据，不传或传空表示清除信号"),
+    signal: dict[str, Any] | None = Body(None, description="信号数据，不传或传空表示清除信号"),
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     更新策略信号
 
@@ -336,17 +335,17 @@ async def update_strategy_signal(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"更新策略信号失败: {e}")
-        return error_response(message=f"更新策略信号失败: {str(e)}")
+        logger.exception("更新策略信号失败")
+        return error_response(message=f"更新策略信号失败: {e}")
 
 
 @router.post("/{strategy_id}/update-position")
 async def update_strategy_position(
     strategy_id: str,
-    position: dict = Body(..., description="持仓数据 {pos_long, pos_short, pos_price}"),
+    position: dict[str, Any] = Body(..., description="持仓数据 {pos_long, pos_short, pos_price}"),
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     更新策略持仓（独立接口）
 
@@ -371,8 +370,8 @@ async def update_strategy_position(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"更新策略持仓失败: {e}")
-        return error_response(message=f"更新策略持仓失败: {str(e)}")
+        logger.exception("更新策略持仓失败")
+        return error_response(message=f"更新策略持仓失败: {e}")
 
 
 @router.get("/{strategy_id}/status")
@@ -399,8 +398,8 @@ async def get_strategy_status(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"获取策略状态失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取策略状态失败: {str(e)}")
+        logger.error("获取策略状态失败: {!r}", e)
+        raise HTTPException(status_code=500, detail=f"获取策略状态失败: {e}") from e
 
 
 @router.get("/{strategy_id}/params")
@@ -408,7 +407,7 @@ async def get_strategy_params(
     strategy_id: str,
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     获取策略参数（用于前端显示）
     - params_file: 参数文件路径（默认显示）
@@ -453,15 +452,15 @@ async def get_strategy_params(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"获取策略参数失败: {e}")
-        return error_response(message=f"获取策略参数失败: {str(e)}")
+        logger.exception("获取策略参数失败")
+        return error_response(message=f"获取策略参数失败: {e}")
 
 
 @router.post("/replay-all")
 async def replay_all_strategies(
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     回播所有有效策略行情
 
@@ -487,7 +486,9 @@ async def replay_all_strategies(
 
         # 通过socket发送回播请求到Trader进程
         response = await trader.send_request(
-            "replay_all_strategies", {}, timeout=120.0  # 回播可能需要较长时间
+            "replay_all_strategies",
+            {},
+            timeout=120.0,  # 回播可能需要较长时间
         )
 
         if response is None:
@@ -495,7 +496,7 @@ async def replay_all_strategies(
 
         if isinstance(response, dict) and response.get("success"):
             return success_response(
-                message=f"回播完成", data={"replayed_count": response.get("replayed_count", 0)}
+                message="回播完成", data={"replayed_count": response.get("replayed_count", 0)}
             )
         else:
             error_msg = (
@@ -506,17 +507,17 @@ async def replay_all_strategies(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"回播策略失败: {e}")
-        return error_response(message=f"回播策略失败: {str(e)}")
+        logger.exception("回播策略失败")
+        return error_response(message=f"回播策略失败: {e}")
 
 
 @router.post("/{strategy_id}/trading-status")
 async def set_strategy_trading_status(
     strategy_id: str,
-    request: dict = Body(..., description="交易状态设置"),
+    request: dict[str, Any] = Body(..., description="交易状态设置"),
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     设置策略交易状态（统一接口）
 
@@ -552,8 +553,8 @@ async def set_strategy_trading_status(
         else:
             return error_response(message=result.get("message", "设置交易状态失败"))
     except Exception as e:
-        logger.error(f"设置策略交易状态失败: {e}")
-        return error_response(message=f"设置交易状态失败: {str(e)}")
+        logger.exception("设置策略交易状态失败")
+        return error_response(message=f"设置交易状态失败: {e}")
 
 
 @router.post("/{strategy_id}/enable")
@@ -561,7 +562,7 @@ async def enable_strategy(
     strategy_id: str,
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """启用策略"""
     try:
         trader = trading_manager.get_trader(account_id)
@@ -574,8 +575,8 @@ async def enable_strategy(
         else:
             return error_response(message=result.get("message", "启用策略失败"))
     except Exception as e:
-        logger.error(f"启用策略失败: {e}")
-        return error_response(message=f"启用策略失败: {str(e)}")
+        logger.exception("启用策略失败")
+        return error_response(message=f"启用策略失败: {e}")
 
 
 @router.post("/{strategy_id}/disable")
@@ -583,7 +584,7 @@ async def disable_strategy(
     strategy_id: str,
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """禁用策略"""
     try:
         trader = trading_manager.get_trader(account_id)
@@ -596,8 +597,8 @@ async def disable_strategy(
         else:
             return error_response(message=result.get("message", "禁用策略失败"))
     except Exception as e:
-        logger.error(f"禁用策略失败: {e}")
-        return error_response(message=f"禁用策略失败: {str(e)}")
+        logger.exception("禁用策略失败")
+        return error_response(message=f"禁用策略失败: {e}")
 
 
 @router.post("/{strategy_id}/init")
@@ -605,7 +606,7 @@ async def init_strategy(
     strategy_id: str,
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     初始化策略
     调用策略的 init() 方法
@@ -621,8 +622,8 @@ async def init_strategy(
         else:
             return error_response(message=result.get("message", "初始化策略失败"))
     except Exception as e:
-        logger.error(f"初始化策略失败: {e}")
-        return error_response(message=f"初始化策略失败: {str(e)}")
+        logger.exception("初始化策略失败")
+        return error_response(message=f"初始化策略失败: {e}")
 
 
 @router.get("/{strategy_id}/order-cmds")
@@ -631,7 +632,7 @@ async def get_strategy_order_cmds(
     account_id: str = Query(..., description="账户ID"),
     status: str | None = Query(None, description="状态过滤: active/finished"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """获取策略的报单指令历史"""
     try:
         trader = trading_manager.get_trader(account_id)
@@ -644,17 +645,17 @@ async def get_strategy_order_cmds(
         else:
             return error_response(message="获取报单指令失败")
     except Exception as e:
-        logger.error(f"获取策略报单指令失败: {e}")
-        return error_response(message=f"获取报单指令失败: {str(e)}")
+        logger.exception("获取策略报单指令失败")
+        return error_response(message=f"获取报单指令失败: {e}")
 
 
 @router.post("/{strategy_id}/send-order-cmd")
 async def send_strategy_order_cmd(
     strategy_id: str,
-    request: dict = Body(..., description="订单指令数据"),
+    request: dict[str, Any] = Body(..., description="订单指令数据"),
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     发送策略报单指令
 
@@ -688,7 +689,7 @@ async def send_strategy_order_cmd(
         volume = request.get("volume")
         price = request.get("price", 0)
 
-        if not all([symbol, direction, offset, volume is not None]):
+        if not symbol or not direction or not offset or volume is None:
             return error_response(message="缺少必要参数: symbol, direction, offset, volume")
 
         # 验证方向
@@ -742,20 +743,20 @@ async def send_strategy_order_cmd(
             )
 
     except Exception as e:
-        logger.error(f"发送策略报单指令失败: {e}")
-        return error_response(message=f"发送报单指令失败: {str(e)}")
+        logger.exception("发送策略报单指令失败")
+        return error_response(message=f"发送报单指令失败: {e}")
 
 
 @router.post("/{strategy_id}/update-position-detail")
 async def update_strategy_position_detail(
     strategy_id: str,
-    position: dict = Body(
+    position: dict[str, Any] = Body(
         ...,
         description="持仓详情数据 {symbol, pos_long_td, pos_long_yd, pos_short_td, pos_short_yd, hold_price_long, hold_price_short, close_profit}",
     ),
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     更新策略持仓详情（单个合约）
 
@@ -786,17 +787,17 @@ async def update_strategy_position_detail(
             )
 
     except Exception as e:
-        logger.error(f"更新策略持仓详情失败: {e}")
-        return error_response(message=f"更新持仓详情失败: {str(e)}")
+        logger.exception("更新策略持仓详情失败")
+        return error_response(message=f"更新持仓详情失败: {e}")
 
 
 @router.post("/{strategy_id}/delete-position")
 async def delete_strategy_position(
     strategy_id: str,
-    data: dict = Body(..., description="{symbol: 合约代码}"),
+    data: dict[str, Any] = Body(..., description="{symbol: 合约代码}"),
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     删除策略持仓（清空单个合约持仓）
 
@@ -831,5 +832,5 @@ async def delete_strategy_position(
             )
 
     except Exception as e:
-        logger.error(f"删除策略持仓失败: {e}")
-        return error_response(message=f"删除持仓失败: {str(e)}")
+        logger.exception("删除策略持仓失败")
+        return error_response(message=f"删除持仓失败: {e}")

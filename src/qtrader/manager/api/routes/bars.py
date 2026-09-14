@@ -5,7 +5,7 @@ K线数据相关API路由
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 
 from qtrader.manager.api.dependencies import get_trading_manager
 from qtrader.manager.api.responses import error_response, success_response
@@ -25,7 +25,7 @@ async def get_bars(
     start: datetime = Query(..., description="起始时间（ISO格式）"),
     end: datetime = Query(..., description="结束时间（ISO格式）"),
     limit: int = Query(default=500, ge=1, le=5000, description="最大返回条数"),
-):
+) -> Response:
     """
     查询K线数据（bars_history + bars_today 合并去重，当日表优先）
 
@@ -36,14 +36,14 @@ async def get_bars(
         bars = await BarDao().query_bars(symbol, interval, start, end, limit)
         return success_response(data=bars, message=f"获取成功，共{len(bars)}根")
     except Exception as e:
-        logger.exception(f"查询K线失败: {symbol} {interval}: {e}")
-        return error_response(code=500, message=f"查询K线失败: {str(e)}")
+        logger.exception("查询K线失败: {} {}", symbol, interval)
+        return error_response(code=500, message=f"查询K线失败: {e}")
 
 
 @router.post("/sync")
 async def sync_bars(
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     手动同步K线数据（故障恢复）
 
@@ -57,14 +57,14 @@ async def sync_bars(
         message = data_feed.request_resync()
         return success_response(data={"message": message}, message="同步已触发")
     except Exception as e:
-        logger.exception(f"手动同步K线失败: {e}")
-        return error_response(code=500, message=f"手动同步K线失败: {str(e)}")
+        logger.exception("手动同步K线失败")
+        return error_response(code=500, message=f"手动同步K线失败: {e}")
 
 
 @router.get("/feed/status")
 async def get_feed_status(
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """查询数据服务状态"""
     data_feed = trading_manager.data_feed
     if not data_feed:
@@ -74,8 +74,7 @@ async def get_feed_status(
             "enabled": True,
             "connected": data_feed.connected,
             "subscriptions": [
-                {"symbol": symbol, "interval": interval}
-                for symbol, interval in data_feed._klines.keys()
+                {"symbol": symbol, "interval": interval} for symbol, interval in data_feed._klines
             ],
         }
     )

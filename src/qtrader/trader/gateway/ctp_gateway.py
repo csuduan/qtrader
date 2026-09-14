@@ -7,9 +7,6 @@ CTP Gateway 适配器（异步版本）
 - CTP API 文档：https://www.simnow.com.cn
 """
 
-import queue
-from typing import Any
-
 import pandas as pd
 
 from qtrader.app_context import get_app_context
@@ -19,13 +16,9 @@ from qtrader.models.object import (
     CancelRequest,
     ContractData,
     Direction,
-    Exchange,
-    Offset,
     OrderData,
     OrderRequest,
-    OrderType,
     PositionData,
-    ProductType,
     TickData,
     TradeData,
 )
@@ -34,7 +27,7 @@ from qtrader.trader.gateway.base_gateway import BaseGateway
 # 从 ctp_api 导入 CTP API 封装类
 from qtrader.trader.gateway.ctp_api import CtpMdApi, CtpTdApi
 from qtrader.utils.bar_generator import MultiSymbolBarGenerator, parse_interval
-from qtrader.utils.config_loader import GatewayConfig, TraderConfig
+from qtrader.utils.config_loader import TraderConfig
 from qtrader.utils.event import EventTypes
 from qtrader.utils.logger import get_logger
 
@@ -123,8 +116,8 @@ class CtpGateway(BaseGateway):
 
             return True
 
-        except Exception as e:
-            logger.exception(f"CTP Gateway 连接失败: {e}")
+        except Exception:
+            logger.exception("CTP Gateway 连接失败")
             return False
 
     async def disconnect(self) -> bool:
@@ -261,10 +254,10 @@ class CtpGateway(BaseGateway):
             # 调用API查询合约（force=True 跳过缓存判断）
             self.td_api.query_instrument(force=True)
 
-            logger.info(f"强制刷新CTP合约信息请求已发送")
+            logger.info("强制刷新CTP合约信息请求已发送")
             return True
-        except Exception as e:
-            logger.exception(f"强制刷新CTP合约信息失败: {e}")
+        except Exception:
+            logger.exception("强制刷新CTP合约信息失败")
             return False
 
     def get_quotes(self) -> dict[str, TickData]:
@@ -294,20 +287,19 @@ class CtpGateway(BaseGateway):
             return None
 
         # 转换为 DataFrame
-        data = []
-        for bar in bars:
-            data.append(
-                {
-                    "datetime": bar.datetime,
-                    "open": bar.open_price,
-                    "high": bar.high_price,
-                    "low": bar.low_price,
-                    "close": bar.close_price,
-                    "volume": bar.volume or 0,
-                    "turnover": bar.turnover or 0,
-                    "open_interest": bar.open_interest or 0,
-                }
-            )
+        data = [
+            {
+                "datetime": bar.datetime,
+                "open": bar.open_price,
+                "high": bar.high_price,
+                "low": bar.low_price,
+                "close": bar.close_price,
+                "volume": bar.volume or 0,
+                "turnover": bar.turnover or 0,
+                "open_interest": bar.open_interest or 0,
+            }
+            for bar in bars
+        ]
 
         df = pd.DataFrame(data)
         return df
@@ -320,7 +312,7 @@ class CtpGateway(BaseGateway):
             logger.warning("CTP 行情接口未连接，延迟订阅")
             self._sub_symbols.update(symbol)
             return False
-        self.md_api.subscribe(symbol)  # type: ignore[arg-type]
+        self.md_api.subscribe(symbol)
         return True
 
     def subscribe_bars(self, symbol: str, interval: str) -> bool:

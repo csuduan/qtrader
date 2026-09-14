@@ -49,7 +49,9 @@ class TargetPosManager:
         """
         self.config: AccountConfig = config
         self.trading_engine: TradingEngine = trading_engine
-        self.account_id: str = config.account_id  # type: ignore[assignment]
+        if not config.account_id:
+            raise ValueError("账户配置缺少 account_id")
+        self.account_id: str = config.account_id
 
         app_config: AppConfig = get_config_loader()._load_app_config()
         self.target_pos_dir: str = app_config.paths.target_pos
@@ -57,7 +59,7 @@ class TargetPosManager:
 
     # ==================== 文件导入 ====================
 
-    def import_target_file(self, csv_text: str, filename: str) -> dict:
+    def import_target_file(self, csv_text: str, filename: str) -> dict[str, Any]:
         """
         手动导入目标仓位文件：保存到目标仓位目录，供比对扫描读取
 
@@ -182,11 +184,11 @@ class TargetPosManager:
         file_name = f"SwitchPos-{self.account_id}-{now:%Y%m%d}-{now:%H%M%S}.csv"
 
         lines = ["account,strategy,symbol,offset,direction,volume"]
-        for r in rows:
-            lines.append(
-                f"{self.account_id},{r['strategy_id']},{r['symbol']},"
-                f"{_OFFSET_TEXT[r['offset']]},{_DIRECTION_TEXT[r['direction']]},{r['volume']}"
-            )
+        lines.extend(
+            f"{self.account_id},{r['strategy_id']},{r['symbol']},"
+            f"{_OFFSET_TEXT[r['offset']]},{_DIRECTION_TEXT[r['direction']]},{r['volume']}"
+            for r in rows
+        )
         file_path = date_dir / file_name
         # 指令换仓扫描按 gbk 读取文件
         file_path.write_text("\n".join(lines) + "\n", encoding="gbk")
@@ -291,18 +293,16 @@ class TargetPosManager:
         if file_path.exists():
             text = self._read_file(file_path)
             reader = csv.DictReader(StringIO(text))
-            for row in reader:
-                rows.append(
-                    {
-                        "account": (row.get("account") or self.account_id).strip(),
-                        "strategy": (
-                            row.get("strategy") or row.get("stragegy") or "manual"
-                        ).strip(),
-                        "symbol": (row.get("symbol") or "").strip(),
-                        "direction": (row.get("direction") or "").strip(),
-                        "volume": (row.get("volume") or "0").strip(),
-                    }
-                )
+            rows.extend(
+                {
+                    "account": (row.get("account") or self.account_id).strip(),
+                    "strategy": (row.get("strategy") or row.get("stragegy") or "manual").strip(),
+                    "symbol": (row.get("symbol") or "").strip(),
+                    "direction": (row.get("direction") or "").strip(),
+                    "volume": (row.get("volume") or "0").strip(),
+                }
+                for row in reader
+            )
 
         updated = False
         new_rows: list[dict[str, str]] = []
@@ -334,10 +334,10 @@ class TargetPosManager:
             return {"saved": True, "file_name": None, "deleted": True}
 
         lines = ["account,strategy,symbol,direction,volume"]
-        for row in new_rows:
-            lines.append(
-                f"{row['account']},{row['strategy']},{row['symbol']},{row['direction']},{row['volume']}"
-            )
+        lines.extend(
+            f"{row['account']},{row['strategy']},{row['symbol']},{row['direction']},{row['volume']}"
+            for row in new_rows
+        )
         file_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         logger.info(
             f"[{self.account_id}] 已更新目标仓位 {symbol} {side}={target_volume} -> {file_name}"
@@ -364,8 +364,8 @@ class TargetPosManager:
                 for symbol, info in self._aggregate_rows(rows, csv_file.name).items():
                     for side, side_info in info.items():
                         targets.setdefault(symbol, {})[side] = side_info
-            except Exception as e:
-                logger.exception(f"[{self.account_id}] 解析目标仓位文件 {csv_file.name} 失败: {e}")
+            except Exception:
+                logger.exception("[{}] 解析目标仓位文件 {} 失败", self.account_id, csv_file.name)
         return targets
 
     def _parse_csv(self, csv_text: str) -> list[dict[str, Any]]:

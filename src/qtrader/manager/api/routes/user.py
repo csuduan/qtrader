@@ -4,15 +4,16 @@
 """
 
 from datetime import datetime
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from qtrader.manager.api.responses import error_response, success_response
 from qtrader.manager.api.routes.auth import hash_password, require_admin
 from qtrader.models.po import UserPo
-from qtrader.utils.async_database import get_async_database
+from qtrader.utils.async_database import require_async_database
 from qtrader.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -56,39 +57,40 @@ class UserResponse(BaseModel):
 
 
 @router.get("")
-async def get_users(current_user: dict = Depends(require_admin)):
+async def get_users(current_user: dict[str, Any] = Depends(require_admin)) -> Response:
     """
     获取用户列表
 
     Returns:
         统一响应格式: {code: 0, message: "success", data: [用户列表]}
     """
-    db = get_async_database()
+    db = require_async_database()
 
     async with db.get_session() as session:
         stmt = select(UserPo).order_by(UserPo.created_at.desc())
         result = await session.execute(stmt)
         users = result.scalars().all()
 
-        user_list = []
-        for user in users:
-            user_list.append(
-                {
-                    "user_id": user.user_id,
-                    "username": user.user_id,  # 使用 user_id 作为 username
-                    "role": user.role,
-                    "is_active": user.is_active,
-                    "created_at": user.created_at.isoformat() if user.created_at else None,
-                    "updated_at": user.updated_at.isoformat() if user.updated_at else None,
-                }
-            )
+        user_list = [
+            {
+                "user_id": user.user_id,
+                "username": user.user_id,  # 使用 user_id 作为 username
+                "role": user.role,
+                "is_active": user.is_active,
+                "created_at": user.created_at.isoformat() if user.created_at else None,
+                "updated_at": user.updated_at.isoformat() if user.updated_at else None,
+            }
+            for user in users
+        ]
 
         logger.info(f"管理员 {current_user['user_id']} 获取用户列表，共 {len(user_list)} 个用户")
         return success_response(data=user_list)
 
 
 @router.post("")
-async def create_user(request: UserCreateRequest, current_user: dict = Depends(require_admin)):
+async def create_user(
+    request: UserCreateRequest, current_user: dict[str, Any] = Depends(require_admin)
+) -> Response:
     """
     创建新用户
 
@@ -98,7 +100,7 @@ async def create_user(request: UserCreateRequest, current_user: dict = Depends(r
     Returns:
         统一响应格式: {code: 0, message: "success", data: 用户信息}
     """
-    db = get_async_database()
+    db = require_async_database()
 
     async with db.get_session() as session:
         # 检查用户名是否已存在
@@ -140,8 +142,8 @@ async def create_user(request: UserCreateRequest, current_user: dict = Depends(r
 
 @router.put("/{user_id}")
 async def update_user(
-    user_id: str, request: UserUpdateRequest, current_user: dict = Depends(require_admin)
-):
+    user_id: str, request: UserUpdateRequest, current_user: dict[str, Any] = Depends(require_admin)
+) -> Response:
     """
     更新用户信息
 
@@ -152,7 +154,7 @@ async def update_user(
     Returns:
         统一响应格式: {code: 0, message: "success", data: 用户信息}
     """
-    db = get_async_database()
+    db = require_async_database()
 
     async with db.get_session() as session:
         # 查询用户
@@ -204,7 +206,9 @@ async def update_user(
 
 
 @router.delete("/{user_id}")
-async def delete_user(user_id: str, current_user: dict = Depends(require_admin)):
+async def delete_user(
+    user_id: str, current_user: dict[str, Any] = Depends(require_admin)
+) -> Response:
     """
     删除用户
 
@@ -218,7 +222,7 @@ async def delete_user(user_id: str, current_user: dict = Depends(require_admin))
     if user_id == current_user["user_id"]:
         return error_response(message="不能删除当前登录用户", code=403)
 
-    db = get_async_database()
+    db = require_async_database()
 
     async with db.get_session() as session:
         # 查询用户

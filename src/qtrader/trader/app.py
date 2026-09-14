@@ -6,10 +6,13 @@ Trader子进程入口
 """
 
 import asyncio
+import contextlib
 import os
 import signal
 import sys
+from argparse import Namespace
 from pathlib import Path
+from types import FrameType
 
 # 添加项目根目录到Python路径
 project_root = Path(__file__).parent.parent.parent
@@ -19,10 +22,8 @@ from qtrader.app_context import AppContext, get_app_context
 from qtrader.trader.trader import Trader
 from qtrader.utils.async_event_engine import AsyncEventEngine
 from qtrader.utils.config_loader import (
-    AppConfig,
     TraderConfig,
     get_config_loader,
-    get_database_path,
     get_log_dir,
 )
 from qtrader.utils.logger import get_logger, setup_logger
@@ -35,14 +36,14 @@ trader: Trader | None = None
 stop_event: asyncio.Event | None = None
 
 
-def signal_handler(signum, frame):
+def signal_handler(signum: int, frame: FrameType | None) -> None:
     """信号处理器"""
     logger.info(f"收到信号 {signum}，准备退出...")
     if stop_event:
         stop_event.set()
 
 
-async def main_async(args):
+async def main_async(args: Namespace) -> None:
     """异步主函数"""
     global trader, stop_event
     account_id = args.account_id
@@ -66,7 +67,7 @@ async def main_async(args):
 
     if pid_file.exists():
         try:
-            with open(pid_file, "r") as f:
+            with open(pid_file) as f:
                 pid = int(f.read().strip())
             # 检查进程是否存在
             try:
@@ -77,7 +78,7 @@ async def main_async(args):
                 # 进程不存在，清理过期的PID文件
                 pid_file.unlink(missing_ok=True)
         except Exception as e:
-            logger.warning(f"检查PID文件失败: {e}")
+            logger.warning("检查PID文件失败: {!r}", e)
             pid_file.unlink(missing_ok=True)
 
     # 设置日志
@@ -102,7 +103,7 @@ async def main_async(args):
     init_executors()
 
     # 启动事件引擎
-    event_engine = AsyncEventEngine(name=f"Trader")
+    event_engine = AsyncEventEngine(name="Trader")
     event_engine.start()
     ctx.register(AppContext.KEY_EVENT_ENGINE, event_engine)
 
@@ -127,15 +128,13 @@ async def main_async(args):
         await trader.start(socket_path=socket_path)
 
         # 等待服务器任务或停止事件
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await stop_event.wait()
-        except asyncio.CancelledError:
-            pass
 
         logger.info("收到停止信号，开始停止Trader...")
         await trader.stop()
-    except Exception as e:
-        logger.exception(f"Trader运行出错: {e}")
+    except Exception:
+        logger.exception("Trader运行出错")
     finally:
         if not stop_event.is_set():
             await trader.stop()
@@ -148,10 +147,10 @@ async def main_async(args):
             pid_file.unlink(missing_ok=True)
             logger.info(f"已清理PID文件: {pid_file}")
         except Exception as e:
-            logger.warning(f"清理PID文件失败: {e}")
+            logger.warning("清理PID文件失败: {!r}", e)
 
         logger.info("Trader 已退出")
 
 
-def main(args):
+def main(args: Namespace) -> None:
     asyncio.run(main_async(args))

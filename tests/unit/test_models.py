@@ -2,25 +2,27 @@
 
 包含所有业务数据模型的单元测试
 """
-import pytest
+
 from datetime import datetime
 from decimal import Decimal
 
+import pytest
+
 from qtrader.models.object import (
     AccountData,
-    PositionData,
-    OrderData,
-    TradeData,
-    TickData,
     BarData,
-    ContractData,
-    OrderRequest,
     CancelRequest,
-    SubscribeRequest,
-    Exchange,
+    ContractData,
     Direction,
+    Exchange,
     Offset,
+    OrderData,
+    OrderRequest,
     OrderStatus,
+    PositionData,
+    SubscribeRequest,
+    TickData,
+    TradeData,
 )
 
 
@@ -313,9 +315,7 @@ class TestSubscribeRequest:
 
     def test_subscribe_request_multiple_symbols(self):
         """测试订阅多个合约"""
-        req = SubscribeRequest(
-            symbols=["SHFE.rb2505", "SHFE.ag2505", "DCE.m2505"]
-        )
+        req = SubscribeRequest(symbols=["SHFE.rb2505", "SHFE.ag2505", "DCE.m2505"])
         assert len(req.symbols) == 3
         assert "SHFE.rb2505" in req.symbols
 

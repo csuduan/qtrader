@@ -156,32 +156,19 @@ class TestCleanupLogs:
 
 @pytest.mark.unit
 class TestCreateAlarm:
-    """告警创建（委托给 AlarmService）"""
+    """告警创建（委托给 AlarmService.notify_alarm）"""
 
-    def test_notification_type(self, tm, job):
+    def test_delegates_to_notify_alarm(self, tm, job):
         from unittest.mock import MagicMock
-
-        from qtrader.models.object import AlarmType
-
-        alarm = MagicMock()
-        tm.alarm_service = alarm
-
-        job._create_alarm("DQ", "SRC", "标题", "详情", "notification")
-
-        alarm.create_alarm.assert_called_once()
-        assert alarm.create_alarm.call_args.kwargs["alarm_type"] == AlarmType.NOTIFICATION
-
-    def test_exception_type_default(self, tm, job):
-        from unittest.mock import MagicMock
-
-        from qtrader.models.object import AlarmType
 
         alarm = MagicMock()
         tm.alarm_service = alarm
 
         job._create_alarm("DQ", "SRC", "标题", "详情")
 
-        assert alarm.create_alarm.call_args.kwargs["alarm_type"] == AlarmType.EXCEPTION
+        alarm.notify_alarm.assert_called_once_with(
+            account_id="DQ", source="SRC", title="标题", detail="详情"
+        )
 
     def test_no_alarm_service_skips(self, tm, job):
         tm.alarm_service = None

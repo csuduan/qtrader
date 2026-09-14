@@ -7,11 +7,11 @@ Socket消息协议模块
 import asyncio
 import struct
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Any, Callable
+from typing import Any
 
 import orjson
 
@@ -58,7 +58,7 @@ class MessageBody:
     timestamp: str = field(default_factory=lambda: datetime.now().isoformat())  # 时间戳
     error: str | None = None  # 错误信息
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
         return {
             "msg_type": self.msg_type.value,
@@ -69,7 +69,7 @@ class MessageBody:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "MessageBody":
+    def from_dict(cls, data: dict[str, Any]) -> "MessageBody":
         """从字典创建"""
         return cls(
             msg_type=MessageType(data["msg_type"]),
@@ -127,7 +127,7 @@ class MessageProtocol:
 
             return MessageBody.from_dict(message_dict)
         except (struct.error, orjson.JSONDecodeError) as e:
-            logger.error(f"Failed to decode message: {e}")
+            logger.error("Failed to decode message: {!r}", e)
             return None
 
     async def read_message(self, reader: asyncio.StreamReader) -> MessageBody | None:
@@ -165,8 +165,8 @@ class MessageProtocol:
         except (asyncio.IncompleteReadError, ConnectionError):
             # 连接已关闭
             return None
-        except Exception as e:
-            logger.error(f"Error reading message: {e}")
+        except Exception:
+            logger.exception("Error reading message")
             return None
 
 

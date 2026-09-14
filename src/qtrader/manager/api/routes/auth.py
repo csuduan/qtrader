@@ -6,18 +6,19 @@
 import hashlib
 import os
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from qtrader.manager.api.responses import error_response, success_response
+from qtrader.manager.api.responses import success_response
 from qtrader.models.po import UserPo
-from qtrader.utils.async_database import get_async_database
+from qtrader.utils.async_database import require_async_database
 from qtrader.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -88,13 +89,13 @@ def create_access_token(user_id: str, role: str) -> str:
     Returns:
         JWT Token字符串
     """
-    expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    expire = datetime.now(UTC) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     payload = {"sub": user_id, "role": role, "exp": expire}
     token = jwt.encode(payload, get_secret_key(), algorithm=ALGORITHM)
     return token
 
 
-def verify_token(token: str) -> dict | None:
+def verify_token(token: str) -> dict[str, Any] | None:
     """
     验证JWT Token
 
@@ -111,7 +112,7 @@ def verify_token(token: str) -> dict | None:
         logger.warning("Token已过期")
         return None
     except jwt.InvalidTokenError as e:
-        logger.warning(f"无效的Token: {e}")
+        logger.warning("无效的Token: {!r}", e)
         return None
 
 
@@ -160,7 +161,9 @@ def verify_password(password: str, stored: str) -> tuple[bool, bool]:
 # ============ 依赖项 ============
 
 
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+) -> dict[str, Any]:
     """
     获取当前登录用户
 
@@ -196,7 +199,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     return {"user_id": user_id, "role": role}
 
 
-async def require_admin(current_user: dict = Depends(get_current_user)) -> dict:
+async def require_admin(current_user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
     """
     要求管理员权限
 
@@ -214,7 +217,9 @@ async def require_admin(current_user: dict = Depends(get_current_user)) -> dict:
     return current_user
 
 
-async def require_trader(current_user: dict = Depends(get_current_user)) -> dict:
+async def require_trader(
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
     """
     要求交易权限（admin 或 trader 角色，guest 只读）
 
@@ -236,7 +241,7 @@ async def require_trader(current_user: dict = Depends(get_current_user)) -> dict
 
 
 @router.post("/login")
-async def login(request: LoginRequest):
+async def login(request: LoginRequest) -> Response:
     """
     用户登录
 
@@ -246,7 +251,7 @@ async def login(request: LoginRequest):
     Returns:
         统一响应格式: {code: 0, message: "success", data: {token, user}}
     """
-    db = get_async_database()
+    db = require_async_database()
 
     async with db.get_session() as session:
         # 查询用户
@@ -291,7 +296,7 @@ async def login(request: LoginRequest):
 
 
 @router.get("/me")
-async def get_me(current_user: dict = Depends(get_current_user)):
+async def get_me(current_user: dict[str, Any] = Depends(get_current_user)) -> Response:
     """
     获取当前登录用户信息
 
@@ -308,7 +313,7 @@ async def get_me(current_user: dict = Depends(get_current_user)):
 
 
 @router.post("/logout")
-async def logout(current_user: dict = Depends(get_current_user)):
+async def logout(current_user: dict[str, Any] = Depends(get_current_user)) -> Response:
     """
     用户退出登录
 
@@ -328,7 +333,7 @@ async def logout(current_user: dict = Depends(get_current_user)):
 # ============ 初始化默认用户 ============
 
 
-async def init_default_users():
+async def init_default_users() -> None:
     """初始化管理员用户
 
     从 config.yaml 读取 admin 配置。仅在用户不存在时创建；
@@ -337,7 +342,7 @@ async def init_default_users():
     """
     from qtrader.utils.config_loader import get_config_loader
 
-    db = get_async_database()
+    db = require_async_database()
     config_loader = get_config_loader()
     app_config = config_loader.load_config()
 

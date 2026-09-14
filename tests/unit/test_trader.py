@@ -55,7 +55,7 @@ class TestTraderInit:
         assert trader.socket_server is None
 
     def test_init_batch_state(self, trader):
-        assert trader._cached_account == {}
+        assert trader._cached_account is None
         assert trader._pending_positions == {}
         assert trader._pending_ticks == []
         assert trader._persist_interval == 30.0

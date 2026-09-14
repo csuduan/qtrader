@@ -3,13 +3,11 @@
 所有操作通过TradingManager路由到Trader
 """
 
-from datetime import datetime
-
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query, Response
 
 from qtrader.manager.api.dependencies import get_trading_manager
 from qtrader.manager.api.responses import error_response, success_response
-from qtrader.manager.api.schemas import SystemParamRes, SystemParamUpdateReq
+from qtrader.manager.api.schemas import SystemParamUpdateReq
 from qtrader.manager.manager import TradingManager
 from qtrader.utils.logger import get_logger
 
@@ -23,7 +21,7 @@ async def list_system_params(
     account_id: str = Query(..., description="账户ID"),
     group: str | None = Query(None, description="参数分组"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     获取系统参数列表
 
@@ -36,10 +34,10 @@ async def list_system_params(
     """
     try:
         params = await trading_manager.list_system_params(account_id, group)
-        return params
+        return success_response(data=params, message="获取成功")
     except Exception as e:
-        logger.error(f"获取系统参数失败: {e}", exc_info=True)
-        return error_response(code=500, message=f"获取系统参数失败: {str(e)}")
+        logger.exception("获取系统参数失败")
+        return error_response(code=500, message=f"获取系统参数失败: {e}")
 
 
 @router.get("/{param_key}")
@@ -47,7 +45,7 @@ async def get_system_param(
     param_key: str,
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     获取单个系统参数
 
@@ -64,11 +62,11 @@ async def get_system_param(
         if not param:
             return error_response(code=404, message=f"参数 {param_key} 不存在")
 
-        return param
+        return success_response(data=param, message="获取成功")
 
     except Exception as e:
-        logger.error(f"获取系统参数失败: {e}", exc_info=True)
-        return error_response(code=500, message=f"获取系统参数失败: {str(e)}")
+        logger.exception("获取系统参数失败")
+        return error_response(code=500, message=f"获取系统参数失败: {e}")
 
 
 @router.put("/{param_key}")
@@ -77,7 +75,7 @@ async def update_system_param(
     req: SystemParamUpdateReq,
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     更新系统参数
 
@@ -100,8 +98,8 @@ async def update_system_param(
         return success_response(data=param, message="参数更新成功")
 
     except Exception as e:
-        logger.error(f"更新系统参数失败: {e}", exc_info=True)
-        return error_response(code=500, message=f"更新系统参数失败: {str(e)}")
+        logger.exception("更新系统参数失败")
+        return error_response(code=500, message=f"更新系统参数失败: {e}")
 
 
 @router.get("/group/{group}")
@@ -109,7 +107,7 @@ async def get_system_params_by_group(
     group: str,
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     根据分组获取系统参数
 
@@ -129,5 +127,5 @@ async def get_system_params_by_group(
         return success_response(data=result, message="获取成功")
 
     except Exception as e:
-        logger.error(f"获取系统参数失败: {e}", exc_info=True)
-        return error_response(code=500, message=f"获取系统参数失败: {str(e)}")
+        logger.exception("获取系统参数失败")
+        return error_response(code=500, message=f"获取系统参数失败: {e}")

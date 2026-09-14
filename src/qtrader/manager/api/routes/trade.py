@@ -3,8 +3,9 @@
 """
 
 from datetime import datetime
+from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 
 from qtrader.manager.api.dependencies import get_trading_manager
 from qtrader.manager.api.responses import error_response, success_response
@@ -21,7 +22,7 @@ router = APIRouter(prefix="/api/trade", tags=["成交"])
 async def _query_trades_from_db(
     account_id: str | None,
     date: str,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """从PG查询历史成交记录
 
     Args:
@@ -40,20 +41,17 @@ async def _query_trades_from_db(
     if not db:
         return []
 
-    # 将日期转为时间戳范围
+    # 将日期转为当日时间范围（与DAO落库口径一致：naive datetime）
     try:
-        target_date = datetime.strptime(date, "%Y-%m-%d")
-        start_ts = int(target_date.timestamp())
-        end_ts = int(
-            datetime(target_date.year, target_date.month, target_date.day, 23, 59, 59).timestamp()
-        )
+        start_dt = datetime.strptime(date, "%Y-%m-%d")
+        end_dt = datetime(start_dt.year, start_dt.month, start_dt.day, 23, 59, 59)
     except ValueError:
         return []
 
     async with db.get_session() as session:
         stmt = select(TradePo).filter(
-            TradePo.trade_date_time >= start_ts,
-            TradePo.trade_date_time <= end_ts,
+            TradePo.trade_date_time >= start_dt,
+            TradePo.trade_date_time <= end_dt,
         )
         if account_id:
             stmt = stmt.filter(TradePo.account_id == account_id)
@@ -62,26 +60,21 @@ async def _query_trades_from_db(
             (await session.execute(stmt.order_by(TradePo.trade_date_time.desc()))).scalars().all()
         )
 
-        result = []
-        for t in trade_pos:
-            result.append(
-                {
-                    "account_id": t.account_id,
-                    "trade_id": t.trade_id,
-                    "order_id": t.order_id or "",
-                    "symbol": t.symbol,
-                    "direction": t.direction,
-                    "offset": t.offset,
-                    "price": float(t.price) if t.price else 0,
-                    "volume": t.volume or 0,
-                    "trade_date_time": (
-                        datetime.fromtimestamp(t.trade_date_time)
-                        if t.trade_date_time
-                        else datetime.now()
-                    ),
-                    "created_at": t.created_at or datetime.now(),
-                }
-            )
+        result = [
+            {
+                "account_id": t.account_id,
+                "trade_id": t.trade_id,
+                "order_id": t.order_id or "",
+                "symbol": t.symbol,
+                "direction": t.direction,
+                "offset": t.offset,
+                "price": float(t.price) if t.price else 0,
+                "volume": t.volume or 0,
+                "trade_date_time": t.trade_date_time or datetime.now(),
+                "created_at": t.created_at or datetime.now(),
+            }
+            for t in trade_pos
+        ]
         return result
 
 
@@ -90,7 +83,7 @@ async def get_trades(
     account_id: str | None = Query(None, description="账户ID（多账号模式）"),
     date: str | None = Query(None, description="查询日期（YYYY-MM-DD格式），默认为今日"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     获取成交记录
 
@@ -164,8 +157,8 @@ async def get_trades(
 
         return success_response(data=data, message="获取成功")
     except Exception as e:
-        logger.exception(f"获取成交记录失败: {e}", exc_info=True)
-        return error_response(code=500, message=f"获取成交记录失败: {str(e)}")
+        logger.exception("获取成交记录失败")
+        return error_response(code=500, message=f"获取成交记录失败: {e}")
 
 
 @router.get("/order/{order_id}")
@@ -173,7 +166,7 @@ async def get_trades_by_order(
     order_id: str,
     account_id: str | None = Query(None, description="账户ID（多账号模式）"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     获取指定委托单的成交记录
 
@@ -209,5 +202,5 @@ async def get_trades_by_order(
 
         return success_response(data=order_trades, message="获取成功")
     except Exception as e:
-        logger.error(f"获取委托单成交记录失败: {e}", exc_info=True)
-        return error_response(code=500, message=f"获取委托单成交记录失败: {str(e)}")
+        logger.exception("获取委托单成交记录失败")
+        return error_response(code=500, message=f"获取委托单成交记录失败: {e}")

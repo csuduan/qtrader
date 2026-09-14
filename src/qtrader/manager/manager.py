@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 from qtrader.manager.public_data_service import PublicDataService
 from qtrader.manager.service.alarm_service import AlarmService
 from qtrader.manager.trader_proxy import TraderProxy
-from qtrader.models.object import AccountData, Direction, Offset, OrderData, OrderRequest
+from qtrader.models.object import AccountData, Direction, Offset, OrderData
 from qtrader.utils.config_loader import (
     AccountConfig,
     AppConfig,
@@ -74,7 +74,7 @@ class TradingManager:
         # 运行状态
         self._running = False
         self._health_check_running = False
-        self._health_check_task: asyncio.Task | None = None
+        self._health_check_task: asyncio.Task[None] | None = None
 
         # Scheduler（将在 start() 中初始化）
         self._scheduler: TaskScheduler | None = None
@@ -83,19 +83,19 @@ class TradingManager:
         self.public_data_service: PublicDataService | None = None
 
         # 数据服务（data-only TqApi 订阅K线落库，将在 start() 中初始化）
-        self.data_feed: "ManagerDataFeed | None" = None
+        self.data_feed: ManagerDataFeed | None = None
 
         # 告警服务
         self.alarm_service: AlarmService | None = None
 
         # 服务器资源监控历史缓存（5秒采样一次，默认保存2880条约4小时）
-        self._resource_history: deque = deque(maxlen=2880)
-        self._resource_sample_task: asyncio.Task | None = None
+        self._resource_history: deque[dict[str, Any]] = deque(maxlen=2880)
+        self._resource_sample_task: asyncio.Task[None] | None = None
 
         logger.info("交易管理器初始化完成")
 
     # ==================== Trader Proxy管理 ====================
-    async def create_trader_proxy(self, account_id) -> bool:
+    async def create_trader_proxy(self, account_id: str) -> bool:
         """
         创建指定账户的Trader Proxy
         Args:
@@ -242,8 +242,8 @@ class TradingManager:
                 logger.warning(f"Trader Proxy [{account_id}] 启动返回 False")
             return success
 
-        except Exception as e:
-            logger.exception(f"启动Trader Proxy [{account_id}] 失败: {e}")
+        except Exception:
+            logger.exception("启动Trader Proxy [{}] 失败", account_id)
             return False
 
     async def stop_trader(self, account_id: str) -> bool:
@@ -268,8 +268,8 @@ class TradingManager:
                 logger.info(f"Trader [{account_id}] 已停止")
             return success
 
-        except Exception as e:
-            logger.exception(f"停止Trader [{account_id}] 失败: {e}")
+        except Exception:
+            logger.exception("停止Trader [{}] 失败", account_id)
             return False
 
     def is_running(self, account_id: str) -> bool:
@@ -287,7 +287,7 @@ class TradingManager:
             return trader.is_running()
         return False
 
-    def get_trader_status(self, account_id: str) -> dict | None:
+    def get_trader_status(self, account_id: str) -> dict[str, Any] | None:
         """
         获取Trader状态
 
@@ -325,17 +325,14 @@ class TradingManager:
             return False
         return await self.start_trader(account_id)
 
-    def get_all_trader_status(self) -> list[dict]:
+    def get_all_trader_status(self) -> list[dict[str, Any]]:
         """
         获取所有Trader状态
 
         Returns:
             状态列表
         """
-        statuses = []
-        for trader in self.traders.values():
-            statuses.append(trader.get_status())
-        return statuses
+        return [trader.get_status() for trader in self.traders.values()]
 
     # ==================== 交易接口 ====================
 
@@ -401,7 +398,7 @@ class TradingManager:
         """
         return None
 
-    def get_manager_scheduler_jobs(self) -> list[dict]:
+    def get_manager_scheduler_jobs(self) -> list[dict[str, Any]]:
         """
         获取Manager级别的定时任务列表
 
@@ -468,7 +465,7 @@ class TradingManager:
 
     # ==================== 数据查询接口（查询Trader） ====================
 
-    async def sync_account(self, account_id: str) -> dict | None:
+    async def sync_account(self, account_id: str) -> dict[str, Any] | None:
         """手动触发全量同步：账户+持仓+报单+成交"""
         trader = self.traders.get(account_id)
         if trader:
@@ -505,7 +502,7 @@ class TradingManager:
         """获取Trader实例"""
         return self.traders.get(account_id)
 
-    async def sync_account_data(self, account_id: str) -> dict:
+    async def sync_account_data(self, account_id: str) -> dict[str, Any]:
         """
         触发指定账户的全量数据同步
 
@@ -519,10 +516,10 @@ class TradingManager:
             result = await trader.sync_all()
             return result
         except Exception as e:
-            logger.exception(f"同步账户 [{account_id}] 数据失败: {e}")
-            return {"success": False, "message": f"同步失败: {str(e)}"}
+            logger.exception("同步账户 [{}] 数据失败", account_id)
+            return {"success": False, "message": f"同步失败: {e}"}
 
-    async def refresh_contracts(self, account_id: str | None = None) -> dict:
+    async def refresh_contracts(self, account_id: str | None = None) -> dict[str, Any]:
         """
         强制刷新合约信息
 
@@ -545,8 +542,8 @@ class TradingManager:
                 result = await trader.refresh_contracts()
                 results[acc_id] = result
             except Exception as e:
-                logger.exception(f"刷新账户 [{acc_id}] 合约信息失败: {e}")
-                results[acc_id] = {"success": False, "message": f"请求异常: {str(e)}"}
+                logger.exception("刷新账户 [{}] 合约信息失败", acc_id)
+                results[acc_id] = {"success": False, "message": f"请求异常: {e}"}
 
         # 统计总体结果
         all_success = all(r.get("success", False) for r in results.values())
@@ -558,7 +555,7 @@ class TradingManager:
         exchange_id: str | None = None,
         product_type: str | None = None,
         symbol_keyword: str | None = None,
-    ) -> list:
+    ) -> list[dict[str, Any]]:
         """
         获取合约列表
 
@@ -573,7 +570,7 @@ class TradingManager:
         Returns:
             合约信息字典列表
         """
-        all_contracts: dict[str, dict] = {}
+        all_contracts: dict[str, dict[str, Any]] = {}
         seen_symbols: set[str] = set()
 
         # 确定要查询的账户列表
@@ -606,8 +603,8 @@ class TradingManager:
 
                     seen_symbols.add(symbol)
                     all_contracts[symbol] = contract
-            except Exception as e:
-                logger.exception(f"获取账户 [{acc_id}] 合约列表失败: {e}")
+            except Exception:
+                logger.exception("获取账户 [{}] 合约列表失败", acc_id)
 
         # 按合约代码排序
         return sorted(all_contracts.values(), key=lambda x: x.get("symbol", ""))
@@ -673,7 +670,7 @@ class TradingManager:
 
     # ==================== 策略管理接口 ====================
 
-    async def list_strategies(self, account_id: str) -> list:
+    async def list_strategies(self, account_id: str) -> list[Any]:
         """获取策略列表"""
         trader = self.traders.get(account_id)
         if trader:
@@ -681,7 +678,7 @@ class TradingManager:
             return strategies if isinstance(strategies, list) else []
         return []
 
-    async def get_strategy(self, account_id: str, strategy_id: str) -> dict | None:
+    async def get_strategy(self, account_id: str, strategy_id: str) -> dict[str, Any] | None:
         """获取指定策略状态"""
         trader = self.traders.get(account_id)
         if trader:
@@ -730,18 +727,25 @@ class TradingManager:
         offset: int = 0,
         status: str = None,
         enabled: bool = None,
-    ) -> dict | None:
+    ) -> dict[str, Any] | None:
         """获取换仓指令列表"""
         trader = self.traders.get(account_id)
         if trader:
             result: Any = await trader.send_request(
                 "get_rotation_instructions",
-                {"limit": limit, "offset": offset, "status": status, "enabled": enabled},
+                {
+                    "limit": limit,
+                    "offset": offset,
+                    "status": status,
+                    "enabled": enabled,
+                },
             )
             return result if isinstance(result, dict) else None
         return None
 
-    async def get_rotation_instruction(self, account_id: str, instruction_id: int) -> dict | None:
+    async def get_rotation_instruction(
+        self, account_id: str, instruction_id: int
+    ) -> dict[str, Any] | None:
         """获取指定换仓指令"""
         trader = self.traders.get(account_id)
         if trader:
@@ -752,8 +756,8 @@ class TradingManager:
         return None
 
     async def create_rotation_instruction(
-        self, account_id: str, instruction_data: dict
-    ) -> dict | None:
+        self, account_id: str, instruction_data: dict[str, Any]
+    ) -> dict[str, Any] | None:
         """创建换仓指令"""
         trader = self.traders.get(account_id)
         if trader:
@@ -762,13 +766,14 @@ class TradingManager:
         return None
 
     async def update_rotation_instruction(
-        self, account_id: str, instruction_id: int, update_data: dict
-    ) -> dict | None:
+        self, account_id: str, instruction_id: int, update_data: dict[str, Any]
+    ) -> dict[str, Any] | None:
         """更新换仓指令"""
         trader = self.traders.get(account_id)
         if trader:
             result: Any = await trader.send_request(
-                "update_rotation_instruction", {"instruction_id": instruction_id, **update_data}
+                "update_rotation_instruction",
+                {"instruction_id": instruction_id, **update_data},
             )
             return result if isinstance(result, dict) else None
         return None
@@ -793,7 +798,7 @@ class TradingManager:
 
     async def import_rotation_instructions(
         self, account_id: str, csv_text: str, filename: str, mode: str = "append"
-    ) -> dict | None:
+    ) -> dict[str, Any] | None:
         """批量导入换仓指令"""
         trader = self.traders.get(account_id)
         if trader:
@@ -830,7 +835,7 @@ class TradingManager:
 
     # ==================== 报单指令管理接口 ====================
 
-    async def get_order_cmds_status(self, account_id: str, status: str = None) -> list | None:
+    async def get_order_cmds_status(self, account_id: str, status: str = None) -> list[Any] | None:
         """获取报单指令状态"""
         trader = self.traders.get(account_id)
         if trader:
@@ -838,7 +843,7 @@ class TradingManager:
             return result if isinstance(result, list) else None
         return None
 
-    async def cancel_order_cmd(self, account_id: str, cmd_id: str) -> dict | None:
+    async def cancel_order_cmd(self, account_id: str, cmd_id: str) -> dict[str, Any] | None:
         """取消报单指令"""
         trader = self.traders.get(account_id)
         if trader:
@@ -846,7 +851,9 @@ class TradingManager:
             return result if isinstance(result, dict) else None
         return None
 
-    async def batch_execute_instructions(self, account_id: str, ids: list[int]) -> dict | None:
+    async def batch_execute_instructions(
+        self, account_id: str, ids: list[int]
+    ) -> dict[str, Any] | None:
         """批量执行换仓指令"""
         trader = self.traders.get(account_id)
         if trader:
@@ -854,7 +861,9 @@ class TradingManager:
             return result if isinstance(result, dict) else None
         return None
 
-    async def batch_delete_instructions(self, account_id: str, ids: list[int]) -> dict | None:
+    async def batch_delete_instructions(
+        self, account_id: str, ids: list[int]
+    ) -> dict[str, Any] | None:
         """批量删除换仓指令"""
         trader = self.traders.get(account_id)
         if trader:
@@ -864,7 +873,7 @@ class TradingManager:
 
     # ==================== 目标仓位比对接口 ====================
 
-    async def get_target_comparison(self, account_id: str) -> dict | None:
+    async def get_target_comparison(self, account_id: str) -> dict[str, Any] | None:
         """获取目标仓位与当前持仓的比对结果"""
         trader = self.traders.get(account_id)
         if trader:
@@ -874,7 +883,7 @@ class TradingManager:
 
     async def import_target_instructions(
         self, account_id: str, csv_text: str, filename: str
-    ) -> dict | None:
+    ) -> dict[str, Any] | None:
         """导入目标仓位文件（保存到目标仓位目录）"""
         trader = self.traders.get(account_id)
         if trader:
@@ -885,7 +894,7 @@ class TradingManager:
             return result if isinstance(result, dict) else None
         return None
 
-    async def export_target_instructions(self, account_id: str) -> dict | None:
+    async def export_target_instructions(self, account_id: str) -> dict[str, Any] | None:
         """按目标仓位偏差导出换仓指令文件"""
         trader = self.traders.get(account_id)
         if trader:
@@ -895,7 +904,7 @@ class TradingManager:
 
     async def export_target_positions(
         self, account_id: str, strategy_id: str = "manual"
-    ) -> dict | None:
+    ) -> dict[str, Any] | None:
         """按当前持仓导出目标仓位文件"""
         trader = self.traders.get(account_id)
         if trader:
@@ -907,7 +916,7 @@ class TradingManager:
 
     async def update_target_volume(
         self, account_id: str, symbol: str, side: str, target_volume: int | None
-    ) -> dict | None:
+    ) -> dict[str, Any] | None:
         """手动修改某合约某侧的目标手数"""
         trader = self.traders.get(account_id)
         if trader:
@@ -920,7 +929,7 @@ class TradingManager:
 
     # ==================== 系统参数接口 ====================
 
-    async def list_system_params(self, account_id: str, group: str | None = None) -> list:
+    async def list_system_params(self, account_id: str, group: str | None = None) -> list[Any]:
         """获取系统参数列表"""
         trader = self.traders.get(account_id)
         if trader:
@@ -928,7 +937,7 @@ class TradingManager:
             return result if isinstance(result, list) else []
         return []
 
-    async def get_system_param(self, account_id: str, param_key: str) -> dict | None:
+    async def get_system_param(self, account_id: str, param_key: str) -> dict[str, Any] | None:
         """获取单个系统参数"""
         trader = self.traders.get(account_id)
         if trader:
@@ -938,17 +947,20 @@ class TradingManager:
 
     async def update_system_param(
         self, account_id: str, param_key: str, param_value: str
-    ) -> dict | None:
+    ) -> dict[str, Any] | None:
         """更新系统参数"""
         trader = self.traders.get(account_id)
         if trader:
             result: Any = await trader.send_request(
-                "update_system_param", {"param_key": param_key, "param_value": param_value}
+                "update_system_param",
+                {"param_key": param_key, "param_value": param_value},
             )
             return result if isinstance(result, dict) else None
         return None
 
-    async def get_system_params_by_group(self, account_id: str, group: str) -> dict | None:
+    async def get_system_params_by_group(
+        self, account_id: str, group: str
+    ) -> dict[str, Any] | None:
         """根据分组获取系统参数"""
         trader = self.traders.get(account_id)
         if trader:
@@ -973,13 +985,13 @@ class TradingManager:
         logger.info("Manager 使用新架构：Trader 直接写入 PG，Manager 只读模式")
 
         # 获取所有账号
-        accounts = [acc for acc in self.account_configs]
+        accounts = list(self.account_configs)
         logger.info(f"识别到账号: {[acc.account_id for acc in accounts]}")
 
         # 创建所有TraderProxy（TraderProxy会自动检测socket文件并决定是否连接）
         for account in accounts:
             if account.account_id is None:
-                logger.warning(f"跳过没有 account_id 的账户配置")
+                logger.warning("跳过没有 account_id 的账户配置")
                 continue
             await self.create_trader_proxy(account.account_id)
 
@@ -1013,95 +1025,82 @@ class TradingManager:
 
         logger.info("交易管理器启动完成")
 
+    @logger.catch(message="启动数据服务失败")
     def _start_data_feed(self) -> None:
         """启动 Manager 数据服务（未配置 tq_data 时跳过）"""
-        try:
-            from qtrader.manager.data_feed import ManagerDataFeed, collect_bar_subscriptions
+        from qtrader.manager.data_feed import ManagerDataFeed, collect_bar_subscriptions
 
-            tq_config = self._get_data_service_config("tq_data")
-            if not tq_config:
-                logger.warning("未找到天勤数据配置(data_service.tq_data)，数据服务未启动")
-                return
+        tq_config = self._get_data_service_config("tq_data")
+        if not tq_config:
+            logger.warning("未找到天勤数据配置(data_service.tq_data)，数据服务未启动")
+            return
+        app_config = self.app_config or get_config_loader().load_config()
+        self.data_feed = ManagerDataFeed(
+            tq_config["username"],
+            tq_config["password"],
+            subscriptions_getter=lambda: collect_bar_subscriptions(
+                app_config, self.account_configs
+            ),
+        )
+        self.data_feed.start()
 
-            app_config = self.app_config or get_config_loader().load_config()
-            self.data_feed = ManagerDataFeed(
-                tq_config["username"],
-                tq_config["password"],
-                subscriptions_getter=lambda: collect_bar_subscriptions(
-                    app_config, self.account_configs
-                ),
-            )
-            self.data_feed.start()
-        except Exception as e:
-            logger.exception(f"启动数据服务失败: {e}")
-
+    @logger.catch(message="初始化公共数据服务失败")
     async def _init_public_data(self) -> None:
         """初始化公共数据服务"""
-        try:
-            # 创建公共数据服务并加载历史数据（使用全局异步数据库实例）
-            self.public_data_service = PublicDataService()
-            count = await self.public_data_service.load_from_database()
+        # 创建公共数据服务并加载历史数据（使用全局异步数据库实例）
+        self.public_data_service = PublicDataService()
+        count = await self.public_data_service.load_from_database()
+        # 检查合约新鲜度，过期则从 TqSdk + 米筐刷新
+        if not self.public_data_service.has_fresh_contracts():
+            logger.info("数据库合约信息已过期，从 TqSdk + 米筐 API 刷新...")
+            await self._refresh_contracts_from_tq()
+        else:
+            logger.info(f"合约信息新鲜，已加载 {count} 个合约")
 
-            # 检查合约新鲜度，过期则从 TqSdk + 米筐刷新
-            if not self.public_data_service.has_fresh_contracts():
-                logger.info("数据库合约信息已过期，从 TqSdk + 米筐 API 刷新...")
-                await self._refresh_contracts_from_tq()
-            else:
-                logger.info(f"合约信息新鲜，已加载 {count} 个合约")
-        except Exception as e:
-            logger.exception(f"初始化公共数据服务失败: {e}")
-
+    @logger.catch(message="刷新合约信息失败")
     async def _refresh_contracts_from_tq(self) -> None:
         """通过 TqSdk + 米筐 API 刷新合约信息"""
-        try:
-            # 1. TqSdk 获取基础合约信息
-            tq_config = self._get_data_service_config("tq_data")
-            if not tq_config:
-                logger.warning("未找到天勤认证配置(data_service.tq_data)，跳过合约刷新")
-                return
+        # 1. TqSdk 获取基础合约信息
+        tq_config = self._get_data_service_config("tq_data")
+        if not tq_config:
+            logger.warning("未找到天勤认证配置(data_service.tq_data)，跳过合约刷新")
+            return
+        from qtrader.manager.tq_contract_fetcher import TqContractFetcher
 
-            from qtrader.manager.tq_contract_fetcher import TqContractFetcher
+        fetcher = TqContractFetcher(tq_config["username"], tq_config["password"])
+        # TqSdk 同步SDK重IO调用，走独立IO线程池
+        contracts = await submit_long_task(fetcher.fetch_contracts)
+        if contracts is None:
+            logger.error("从 TqSdk 获取合约信息失败（连接超时或认证失败）")
+            return
+        if len(contracts) == 0:
+            logger.warning("从 TqSdk 未获取到合约信息（返回空列表）")
+            return
+        # 2. 米筐补充最小开仓手数（失败不阻塞）
+        min_order_map: dict[str, int] = {}
+        rq_config = self._get_data_service_config("rice_data")
+        if rq_config:
+            try:
+                from qtrader.manager.rq_contract_fetcher import RqContractFetcher
 
-            fetcher = TqContractFetcher(tq_config["username"], tq_config["password"])
-            # TqSdk 同步SDK重IO调用，走独立IO线程池
-            contracts = await submit_long_task(fetcher.fetch_contracts)
+                rq_fetcher = RqContractFetcher(rq_config["username"], rq_config["password"])
+                min_order_map = await submit_long_task(rq_fetcher.fetch_min_order_quantities)
+                logger.info(f"从米筐获取了 {len(min_order_map)} 个合约的最小开仓手数")
+            except Exception as e:
+                logger.warning("从米筐获取最小开仓手数失败（不影响主流程）: {!r}", e)
+        # 3. 合并数据：将 min_volume 写入 contracts
+        # 米筐合约代码为大写，匹配时统一转大写
+        min_order_map_upper = {k.upper(): v for k, v in min_order_map.items()}
+        for contract in contracts:
+            raw_symbol = contract["symbol"]  # Tq格式: "rb2505" (无交易所前缀)
+            contract["min_open_volume"] = min_order_map_upper.get(raw_symbol.upper(), 1)
+        # 4. 写入共享库（异步批量 upsert）
+        if self.public_data_service is None:
+            return
+        count = await self.public_data_service.upsert_contracts(contracts, "tq")
+        logger.info(f"从 TqSdk + 米筐刷新了 {count} 个合约信息")
 
-            if contracts is None:
-                logger.error("从 TqSdk 获取合约信息失败（连接超时或认证失败）")
-                return
-            if len(contracts) == 0:
-                logger.warning("从 TqSdk 未获取到合约信息（返回空列表）")
-                return
-
-            # 2. 米筐补充最小开仓手数（失败不阻塞）
-            min_order_map: dict[str, int] = {}
-            rq_config = self._get_data_service_config("rice_data")
-            if rq_config:
-                try:
-                    from qtrader.manager.rq_contract_fetcher import RqContractFetcher
-
-                    rq_fetcher = RqContractFetcher(rq_config["username"], rq_config["password"])
-                    min_order_map = await submit_long_task(rq_fetcher.fetch_min_order_quantities)
-                    logger.info(f"从米筐获取了 {len(min_order_map)} 个合约的最小开仓手数")
-                except Exception as e:
-                    logger.warning(f"从米筐获取最小开仓手数失败（不影响主流程）: {e}")
-
-            # 3. 合并数据：将 min_volume 写入 contracts
-            # 米筐合约代码为大写，匹配时统一转大写
-            min_order_map_upper = {k.upper(): v for k, v in min_order_map.items()}
-            for contract in contracts:
-                raw_symbol = contract["symbol"]  # Tq格式: "rb2505" (无交易所前缀)
-                contract["min_open_volume"] = min_order_map_upper.get(raw_symbol.upper(), 1)
-
-            # 4. 写入共享库（异步批量 upsert）
-            if self.public_data_service is None:
-                return
-            count = await self.public_data_service.upsert_contracts(contracts, "tq")
-            logger.info(f"从 TqSdk + 米筐刷新了 {count} 个合约信息")
-        except Exception as e:
-            logger.exception(f"刷新合约信息失败: {e}")
-
-    def _get_data_service_config(self, key: str) -> dict | None:
+    def _get_data_service_config(self, key: str) -> dict[str, Any] | None:
         """
         获取数据服务配置
 
@@ -1121,7 +1120,7 @@ class TradingManager:
         data_service = getattr(app_config, "data_service", None)
         if not data_service or not isinstance(data_service, dict):
             return None
-        config: dict | None = data_service.get(key)
+        config: dict[str, Any] | None = data_service.get(key)
         if config and config.get("username"):
             return config
         return None
@@ -1153,8 +1152,8 @@ class TradingManager:
             else:
                 logger.warning(f"推送公共数据给 Trader [{account_id}] 失败")
             return result
-        except Exception as e:
-            logger.exception(f"推送公共数据给 Trader [{account_id}] 出错: {e}")
+        except Exception:
+            logger.exception("推送公共数据给 Trader [{}] 出错", account_id)
             return False
 
     async def stop(self) -> None:
@@ -1216,41 +1215,36 @@ class TradingManager:
                 await asyncio.sleep(5)
         except asyncio.CancelledError:
             logger.info("资源采样任务被取消")
-        except Exception as e:
-            logger.exception(f"资源采样任务出错: {e}")
+        except Exception:
+            logger.exception("资源采样任务出错")
 
+    @logger.catch(message="资源采样失败")
     def _sample_resource(self) -> None:
         """采集一次服务器资源数据并写入历史缓存"""
-        try:
-            import psutil
+        import psutil
 
-            now = datetime.now()
-            cpu_percent = psutil.cpu_percent(interval=None)
+        now = datetime.now()
+        cpu_percent = psutil.cpu_percent(interval=None)
+        mem = psutil.virtual_memory()
+        memory_used_gb = round(mem.used / (1024**3), 2)
+        memory_total_gb = round(mem.total / (1024**3), 2)
+        memory_percent = round(mem.percent, 2)
+        disk = psutil.disk_usage("/")
+        disk_used_gb = round(disk.used / (1024**3), 2)
+        disk_total_gb = round(disk.total / (1024**3), 2)
+        disk_percent = round(disk.percent, 2)
+        point = {
+            "timestamp": now.isoformat(),
+            "cpu_percent": cpu_percent,
+            "memory_percent": memory_percent,
+            "memory_used_gb": memory_used_gb,
+            "memory_total_gb": memory_total_gb,
+            "disk_percent": disk_percent,
+            "disk_used_gb": disk_used_gb,
+            "disk_total_gb": disk_total_gb,
+        }
+        self._resource_history.append(point)
 
-            mem = psutil.virtual_memory()
-            memory_used_gb = round(mem.used / (1024**3), 2)
-            memory_total_gb = round(mem.total / (1024**3), 2)
-            memory_percent = round(mem.percent, 2)
-
-            disk = psutil.disk_usage("/")
-            disk_used_gb = round(disk.used / (1024**3), 2)
-            disk_total_gb = round(disk.total / (1024**3), 2)
-            disk_percent = round(disk.percent, 2)
-
-            point = {
-                "timestamp": now.isoformat(),
-                "cpu_percent": cpu_percent,
-                "memory_percent": memory_percent,
-                "memory_used_gb": memory_used_gb,
-                "memory_total_gb": memory_total_gb,
-                "disk_percent": disk_percent,
-                "disk_used_gb": disk_used_gb,
-                "disk_total_gb": disk_total_gb,
-            }
-            self._resource_history.append(point)
-        except Exception as e:
-            logger.exception(f"资源采样失败: {e}")
-
-    def get_resource_history(self, points: int = 60) -> list[dict]:
+    def get_resource_history(self, points: int = 60) -> list[dict[str, Any]]:
         """获取最近 N 个资源采样点"""
         return list(self._resource_history)[-points:]

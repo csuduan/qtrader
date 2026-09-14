@@ -4,12 +4,14 @@
 
 import math
 from datetime import datetime
+from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 
 from qtrader.manager.api.dependencies import get_trading_manager
 from qtrader.manager.api.responses import error_response, success_response
 from qtrader.manager.api.schemas import PositionRes
+from qtrader.manager.manager import TradingManager
 from qtrader.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -20,8 +22,8 @@ router = APIRouter(prefix="/api/position", tags=["持仓"])
 @router.get("")
 async def get_positions(
     account_id: str | None = Query(None, description="账户ID（多账号模式）"),
-    trading_manager=Depends(get_trading_manager),
-):
+    trading_manager: TradingManager = Depends(get_trading_manager),
+) -> Response:
     """
     获取持仓信息
 
@@ -33,18 +35,17 @@ async def get_positions(
         positions_dict = await trading_manager.get_positions(account_id)
 
         # 过滤禁用账户的持仓数据
-        enabled_accounts = set(
+        enabled_accounts = {
             acc.account_id for acc in trading_manager.account_configs if acc.enabled
-        )
+        }
         filtered_positions = {k: v for k, v in positions_dict.items() if k in enabled_accounts}
 
         # 转换为列表（保留账户ID信息）
-        positions_with_account = []
+        positions_with_account: list[tuple[str, Any]] = []
         for acc_id, positions in filtered_positions.items():
             if account_id and acc_id != account_id:
                 continue
-            for pos in positions:
-                positions_with_account.append((acc_id, pos))
+            positions_with_account.extend((acc_id, pos) for pos in positions)
 
         return success_response(
             data=[
@@ -76,16 +77,16 @@ async def get_positions(
             message="获取成功",
         )
     except Exception as e:
-        logger.exception(f"获取持仓信息失败: {e}")
-        return error_response(code=500, message=f"获取持仓信息失败: {str(e)}")
+        logger.exception("获取持仓信息失败")
+        return error_response(code=500, message=f"获取持仓信息失败: {e}")
 
 
 @router.get("/{symbol}")
 async def get_position_by_symbol(
     symbol: str,
     account_id: str | None = Query(None, description="账户ID（多账号模式）"),
-    trading_manager=Depends(get_trading_manager),
-):
+    trading_manager: TradingManager = Depends(get_trading_manager),
+) -> Response:
     """
     获取指定合约的持仓信息
 
@@ -96,14 +97,14 @@ async def get_position_by_symbol(
         # 从 TradingManager 获取持仓数据
         positions_dict = await trading_manager.get_positions(account_id)
 
-        result_positions = []
+        result_positions: list[Any] = []
 
         # 遍历所有账户查找指定合约的持仓
-        for acc_id, positions in positions_dict.items():
-            for pos in positions:
-                # 检查 symbol 是否匹配（支持模糊匹配）
-                if symbol in pos.symbol or pos.symbol in symbol:
-                    result_positions.append(pos)
+        for positions in positions_dict.values():
+            # 检查 symbol 是否匹配（支持模糊匹配）
+            result_positions.extend(
+                pos for pos in positions if symbol in pos.symbol or pos.symbol in symbol
+            )
 
         if not result_positions:
             return success_response(data=[], message="获取成功")
@@ -139,15 +140,15 @@ async def get_position_by_symbol(
             message="获取成功",
         )
     except Exception as e:
-        logger.error(f"获取指定合约持仓失败: {e}", exc_info=True)
-        return error_response(code=500, message=f"获取指定合约持仓失败: {str(e)}")
+        logger.exception("获取指定合约持仓失败")
+        return error_response(code=500, message=f"获取指定合约持仓失败: {e}")
 
 
 @router.post("/close")
 async def close_position(
-    request: dict,
-    trading_manager=Depends(get_trading_manager),
-):
+    request: dict[str, Any],
+    trading_manager: TradingManager = Depends(get_trading_manager),
+) -> Response:
     """
     平仓
 
@@ -203,9 +204,9 @@ async def close_position(
 
 @router.post("/close-batch")
 async def close_batch_positions(
-    request: dict,
-    trading_manager=Depends(get_trading_manager),
-):
+    request: dict[str, Any],
+    trading_manager: TradingManager = Depends(get_trading_manager),
+) -> Response:
     """
     批量平仓
 

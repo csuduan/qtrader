@@ -9,9 +9,11 @@ Socket客户端 - V2版本，使用标准协议
 """
 
 import asyncio
+import contextlib
 import inspect
 import uuid
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from qtrader.utils.ipc.protocol import (
     MessageBody,
@@ -20,15 +22,16 @@ from qtrader.utils.ipc.protocol import (
     RemoteHandlerError,
     create_heartbeat,
     create_request,
-    create_response,
 )
-from qtrader.utils.ipc.utils import BackoffStrategy, HealthChecker, generate_request_id
+from qtrader.utils.ipc.utils import BackoffStrategy, HealthChecker
 from qtrader.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 HandlerType = Callable[[str, Any], None] | Callable[[str, Any], Awaitable[None]]
-PushHandlerType = Callable[[str, dict], Any] | Callable[[str, dict], Awaitable[Any]]
+PushHandlerType = (
+    Callable[[str, dict[str, Any]], Any] | Callable[[str, dict[str, Any]], Awaitable[Any]]
+)
 
 
 class SocketClient:
@@ -80,26 +83,29 @@ class SocketClient:
         self.protocol = MessageProtocol()
 
         # 请求-响应相关
-        self._pending_requests: dict[str, asyncio.Future] = {}
-        self._receiving_task: asyncio.Task | None = None
+        self._pending_requests: dict[str, asyncio.Future[dict[str, Any]]] = {}
+        self._receiving_task: asyncio.Task[None] | None = None
         self._request_timeout = request_timeout
 
         # 重连相关
         self._auto_reconnect = auto_reconnect
         self._reconnect_interval = reconnect_interval
         self._max_reconnect_attempts = max_reconnect_attempts
-        self._reconnect_task: asyncio.Task | None = None
+        self._reconnect_task: asyncio.Task[None] | None = None
         self._backoff = BackoffStrategy(
             initial_delay=reconnect_interval, max_delay=60.0, multiplier=1.5
         )
 
         # 心跳相关
         self._heartbeat_interval = heartbeat_interval
-        self._heartbeat_task: asyncio.Task | None = None
+        self._heartbeat_task: asyncio.Task[None] | None = None
         self._health_checker = HealthChecker(interval=heartbeat_interval, timeout=5.0)
 
         # 推送处理器
         self._push_handlers: dict[str, PushHandlerType] = {}
+
+        # fire-and-forget后台任务引用，防止被GC
+        self._bg_tasks: set[asyncio.Task[None]] = set()
 
         # 连接断开回调
         self._on_disconnect_callback: (Callable[[], Any]) | None = None
@@ -107,7 +113,7 @@ class SocketClient:
 
         logger.info(f"SocketClient V2 初始化: {socket_path}")
 
-    def on_push(self, push_type: str) -> Callable:
+    def on_push(self, push_type: str) -> Callable[[PushHandlerType], PushHandlerType]:
         """
         推送处理器装饰器
 
@@ -132,10 +138,8 @@ class SocketClient:
                 task.cancel()
         for task in (self._receiving_task, self._heartbeat_task):
             if task is not None:
-                try:
+                with contextlib.suppress(asyncio.CancelledError):
                     await task
-                except asyncio.CancelledError:
-                    pass
         self._receiving_task = None
         self._heartbeat_task = None
 
@@ -147,10 +151,8 @@ class SocketClient:
 
         if self.writer:
             self.writer.close()
-            try:
+            with contextlib.suppress(Exception):
                 await self.writer.wait_closed()
-            except Exception:
-                pass
             self.writer = None
         self.reader = None
 
@@ -194,27 +196,27 @@ class SocketClient:
                             await self._on_connect_callback()
                         else:
                             self._on_connect_callback()
-                    except Exception as e:
-                        logger.error(f"执行连接回调时出错: {e}")
+                    except Exception:
+                        logger.exception("执行连接回调时出错")
 
                 return True
 
             except FileNotFoundError:
                 logger.debug(
-                    f"Socket文件不存在，将在{retry_interval}秒后重试 " f"({i+1}/{max_retries})"
+                    f"Socket文件不存在，将在{retry_interval}秒后重试 ({i + 1}/{max_retries})"
                 )
                 await asyncio.sleep(retry_interval)
             except Exception as e:
-                logger.error(f"连接服务器失败: {e}")
+                logger.error("连接服务器失败: {!r}", e)
                 await asyncio.sleep(retry_interval)
 
-        logger.error(f"连接服务器失败，已达到最大重试次数")
+        logger.error("连接服务器失败，已达到最大重试次数")
         return False
 
     async def disconnect(self) -> None:
         """断开连接"""
         await self._cleanup_stale_resources()
-        logger.info(f"SocketClient V2 已断开")
+        logger.info("SocketClient V2 已断开")
 
     async def request(
         self, request_type: str, data: dict[str, Any], timeout: float | None = None
@@ -231,7 +233,7 @@ class SocketClient:
             响应数据，失败返回None
         """
         if not self.connected or not self.writer:
-            logger.warning(f"未连接到服务器")
+            logger.warning("未连接到服务器")
             return None
 
         request_id = str(uuid.uuid4())
@@ -258,12 +260,12 @@ class SocketClient:
             # （如"盘中非交易时段，禁止报单"），不再吞为 None
             self._pending_requests.pop(request_id, None)
             raise
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(f"请求超时: {request_type}")
             self._pending_requests.pop(request_id, None)
             return None
-        except Exception as e:
-            logger.exception(f"请求失败: {request_type}, {e}")
+        except Exception:
+            logger.exception("请求失败: {},", request_type)
             self._pending_requests.pop(request_id, None)
             return None
 
@@ -290,8 +292,8 @@ class SocketClient:
             except ConnectionAbortedError:
                 logger.warning("连接被中止")
                 break
-            except Exception as e:
-                logger.error(f"接收消息时出错: {e}")
+            except Exception:
+                logger.exception("接收消息时出错")
                 break
 
         # 连接断开
@@ -299,7 +301,9 @@ class SocketClient:
         self.connected = False
 
         if was_connected:
-            asyncio.create_task(self._notify_disconnection())
+            task = asyncio.create_task(self._notify_disconnection())
+            self._bg_tasks.add(task)
+            task.add_done_callback(self._bg_tasks.discard)
 
     async def _handle_message(self, message: MessageBody) -> None:
         """处理消息"""
@@ -332,8 +336,8 @@ class SocketClient:
                         await handler(push_type, data)
                     else:
                         handler(push_type, data)
-                except Exception as e:
-                    logger.error(f"处理推送消息时出错: {e}")
+                except Exception:
+                    logger.exception("处理推送消息时出错")
             # 调用通用回调
             elif self.on_data_callback:
                 try:
@@ -341,8 +345,8 @@ class SocketClient:
                         await self.on_data_callback(push_type, data)
                     else:
                         self.on_data_callback(push_type, data)
-                except Exception as e:
-                    logger.error(f"处理消息时出错: {e}")
+                except Exception:
+                    logger.exception("处理消息时出错")
             else:
                 logger.debug(f"收到推送消息但未处理: {push_type}")
 
@@ -381,8 +385,8 @@ class SocketClient:
                     self._backoff.reset()
                 else:
                     logger.warning("重连失败，将在下次重试")
-            except Exception as e:
-                logger.error(f"重连时出错: {e}")
+            except Exception:
+                logger.exception("重连时出错")
 
     async def _heartbeat_loop(self) -> None:
         """心跳发送循环"""
@@ -398,8 +402,8 @@ class SocketClient:
                     logger.warning("心跳发送失败")
             except asyncio.CancelledError:
                 break
-            except Exception as e:
-                logger.error(f"心跳循环出错: {e}")
+            except Exception:
+                logger.exception("心跳循环出错")
 
     async def _send_heartbeat(self) -> bool:
         """发送心跳包"""
@@ -424,8 +428,8 @@ class SocketClient:
                     await self._on_disconnect_callback()
                 else:
                     self._on_disconnect_callback()
-            except Exception as e:
-                logger.error(f"执行断开回调时出错: {e}")
+            except Exception:
+                logger.exception("执行断开回调时出错")
 
     def set_disconnect_callback(self, callback: Callable[[], Any]) -> None:
         """设置连接断开回调"""

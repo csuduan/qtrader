@@ -56,7 +56,7 @@ class PositionDao:
 class StrategyPositionService:
     """策略持仓服务"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """初始化服务"""
         pass
 
@@ -84,14 +84,14 @@ class StrategyPositionService:
 
                 if existing:
                     # 更新现有记录
-                    existing.pos_long_td = position.pos_long_td or 0  # type: ignore[assignment]
-                    existing.pos_long_yd = position.pos_long_yd or 0  # type: ignore[assignment]
-                    existing.pos_short_td = position.pos_short_td or 0  # type: ignore[assignment]
-                    existing.pos_short_yd = position.pos_short_yd or 0  # type: ignore[assignment]
-                    existing.hold_price_long = position.hold_price_long or 0  # type: ignore[assignment]
-                    existing.hold_price_short = position.hold_price_short or 0  # type: ignore[assignment]
-                    existing.close_profit_long = position.close_profit_long or 0  # type: ignore[assignment]
-                    existing.close_profit_short = position.close_profit_short or 0  # type: ignore[assignment]
+                    existing.pos_long_td = position.pos_long_td or 0
+                    existing.pos_long_yd = position.pos_long_yd or 0
+                    existing.pos_short_td = position.pos_short_td or 0
+                    existing.pos_short_yd = position.pos_short_yd or 0
+                    existing.hold_price_long = Decimal(str(position.hold_price_long or 0))
+                    existing.hold_price_short = Decimal(str(position.hold_price_short or 0))
+                    existing.close_profit_long = Decimal(str(position.close_profit_long or 0))
+                    existing.close_profit_short = Decimal(str(position.close_profit_short or 0))
                     logger.debug(
                         f"更新策略持仓: {position.extras.get('account_id', '')}/{position.strategy_id}/{position.symbol}"
                     )
@@ -119,8 +119,8 @@ class StrategyPositionService:
 
             return True
 
-        except Exception as e:
-            logger.exception(f"保存策略持仓失败: {e}")
+        except Exception:
+            logger.exception("保存策略持仓失败")
             return False
 
     async def load_positions(self, account_id: str, strategy_id: str) -> list[PositionData]:
@@ -155,7 +155,7 @@ class StrategyPositionService:
                     ) > 0:
                         position = PositionData(
                             symbol=record.symbol,
-                            exchange=Exchange.from_str(record.exchange),  # type: ignore[arg-type]
+                            exchange=Exchange.from_str(record.exchange),
                             multiple=record.multiple or 0,
                             strategy_id=record.strategy_id,
                             pos_long_td=record.pos_long_td or 0,
@@ -172,8 +172,8 @@ class StrategyPositionService:
 
                 logger.debug(f"加载策略持仓: {account_id}/{strategy_id}, 共 {len(positions)} 条")
 
-        except Exception as e:
-            logger.exception(f"加载策略持仓失败: {e}")
+        except Exception:
+            logger.exception("加载策略持仓失败")
 
         return positions
 
@@ -214,7 +214,7 @@ class StrategyPositionService:
                 ):
                     return PositionData(
                         symbol=record.symbol,
-                        exchange=Exchange.from_str(record.exchange),  # type: ignore[arg-type]
+                        exchange=Exchange.from_str(record.exchange),
                         strategy_id=record.strategy_id,
                         pos_long_td=record.pos_long_td or 0,
                         pos_long_yd=record.pos_long_yd or 0,
@@ -227,8 +227,8 @@ class StrategyPositionService:
                         extras={"account_id": record.account_id},
                     )
 
-        except Exception as e:
-            logger.exception(f"加载策略持仓失败: {e}")
+        except Exception:
+            logger.exception("加载策略持仓失败")
 
         return None
 
@@ -265,8 +265,8 @@ class StrategyPositionService:
 
                 return True
 
-        except Exception as e:
-            logger.exception(f"清空策略持仓失败: {e}")
+        except Exception:
+            logger.exception("清空策略持仓失败")
             return False
 
     async def clear_all_positions(self, account_id: str) -> bool:
@@ -291,6 +291,6 @@ class StrategyPositionService:
                 logger.info(f"清空账户所有策略持仓: {account_id}")
                 return True
 
-        except Exception as e:
-            logger.exception(f"清空账户策略持仓失败: {e}")
+        except Exception:
+            logger.exception("清空账户策略持仓失败")
             return False

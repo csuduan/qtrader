@@ -10,6 +10,7 @@
 """
 
 from datetime import datetime
+from typing import Any
 
 from qtrader.utils.logger import get_logger
 
@@ -68,7 +69,7 @@ class ContractInfo:
         self.is_active = is_active
         self.is_main = is_main
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典（用于IPC传输）"""
         return {
             "symbol": self.symbol,
@@ -97,7 +98,7 @@ class PublicDataService:
     Trader进程通过IPC消息接收数据。
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """
         初始化公共数据服务（使用全局异步数据库实例）
         """
@@ -111,7 +112,7 @@ class PublicDataService:
 
     # ==================== 合约数据写入 ====================
 
-    async def upsert_contracts(self, contracts: list[dict], data_source: str) -> int:
+    async def upsert_contracts(self, contracts: list[dict[str, Any]], data_source: str) -> int:
         """
         批量写入/更新合约信息（来自某个数据源）
 
@@ -133,7 +134,7 @@ class PublicDataService:
         now = datetime.now()
 
         # 按 symbol 去重（保留最后一个）
-        seen: dict[str, dict] = {}
+        seen: dict[str, dict[str, Any]] = {}
         for contract_dict in contracts:
             symbol = contract_dict.get("symbol")
             if symbol:
@@ -249,7 +250,7 @@ class PublicDataService:
 
         return contracts
 
-    def get_contracts_for_push(self, data_source: str | None = None) -> list[dict]:
+    def get_contracts_for_push(self, data_source: str | None = None) -> list[dict[str, Any]]:
         """
         获取用于推送给Trader的合约数据
 
@@ -294,33 +295,33 @@ class PublicDataService:
 
                 for po in contract_pos:
                     info = ContractInfo(
-                        symbol=po.symbol,  # type: ignore[arg-type]
-                        exchange_id=po.exchange_id,  # type: ignore[arg-type]
-                        instrument_name=po.instrument_name,  # type: ignore[arg-type]
-                        product_type=po.product_type,  # type: ignore[arg-type]
-                        volume_multiple=po.volume_multiple,  # type: ignore[arg-type]
+                        symbol=po.symbol,
+                        exchange_id=po.exchange_id,
+                        instrument_name=po.instrument_name,
+                        product_type=po.product_type,
+                        volume_multiple=po.volume_multiple,
                         price_tick=float(po.price_tick),
-                        min_volume=po.min_volume,  # type: ignore[arg-type]
+                        min_volume=po.min_volume,
                         option_strike=float(po.option_strike) if po.option_strike else None,
-                        option_underlying=po.option_underlying,  # type: ignore[arg-type]
-                        option_type=po.option_type,  # type: ignore[arg-type]
-                        update_date=po.update_date,  # type: ignore[arg-type]
-                        data_source=po.data_source,  # type: ignore[arg-type]
+                        option_underlying=po.option_underlying,
+                        option_type=po.option_type,
+                        update_date=po.update_date,
+                        data_source=po.data_source,
                         is_active=bool(po.is_active),
                         is_main=bool(po.is_main),
                     )
-                    self._contracts[po.symbol] = info  # type: ignore[index]
+                    self._contracts[po.symbol] = info
                     source = str(po.data_source or "unknown")
                     if source not in self._contracts_by_source:
                         self._contracts_by_source[source] = {}
-                    self._contracts_by_source[source][po.symbol] = info  # type: ignore[index]
+                    self._contracts_by_source[source][po.symbol] = info
                     count += 1
 
             if count > 0:
                 self._last_updated = datetime.now()
             logger.info(f"PublicDataService: 从数据库加载了 {count} 个合约 (日期: {filter_date})")
-        except Exception as e:
-            logger.exception(f"PublicDataService: 从数据库加载合约失败: {e}")
+        except Exception:
+            logger.exception("PublicDataService: 从数据库加载合约失败")
 
         return count
 

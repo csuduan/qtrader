@@ -180,7 +180,7 @@ class TestRiskControlUpdate:
         mock_trading_manager.get_trader = MagicMock(return_value=trader)
         mock_trading_manager.get_account = AsyncMock(return_value=make_account())
 
-        with patch("qtrader.manager.api.routes.system.get_async_database", return_value=db):
+        with patch("qtrader.manager.api.routes.system.require_async_database", return_value=db):
             resp = client.put(
                 f"{BASE}/risk-control",
                 json={
@@ -217,7 +217,7 @@ class TestRiskControlUpdate:
         mock_trading_manager.get_trader = MagicMock(return_value=trader)
         mock_trading_manager.get_account = AsyncMock(return_value=make_account())
 
-        with patch("qtrader.manager.api.routes.system.get_async_database", return_value=db):
+        with patch("qtrader.manager.api.routes.system.require_async_database", return_value=db):
             client.put(f"{BASE}/risk-control", json={"max_daily_orders": 50, "account_id": ACCOUNT})
             client.put(f"{BASE}/risk-control", json={"max_daily_orders": 60, "account_id": ACCOUNT})
 

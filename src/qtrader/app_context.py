@@ -23,7 +23,7 @@ class AppContext:
 
     """应用上下文"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.container: dict[str, Any] = {}
 
     def set(self, key: str, value: Any) -> None:
@@ -59,7 +59,7 @@ class AppContext:
         """清空所有上下文"""
         self.container.clear()
 
-    def keys(self) -> list:
+    def keys(self) -> list[str]:
         """获取所有上下文键"""
         return list(self.container.keys())
 

@@ -3,6 +3,7 @@
 """
 
 from datetime import datetime, time
+from typing import Any
 
 from qtrader.utils.logger import get_logger
 
@@ -51,7 +52,7 @@ def datetime_to_nanos(dt: datetime) -> int:
     return int(dt.timestamp() * 1_000_000_000)
 
 
-def _get_float_param(config: dict, keys: list, default: float) -> float:
+def _get_float_param(config: dict[str, Any], keys: list[str], default: float) -> float:
     """获取浮点数参数（支持多个key）"""
     for key in keys:
         val = config.get(key)
@@ -63,7 +64,7 @@ def _get_float_param(config: dict, keys: list, default: float) -> float:
     return default
 
 
-def _get_str_param(config: dict, keys: list, default: str) -> str:
+def _get_str_param(config: dict[str, Any], keys: list[str], default: str) -> str:
     """获取字符串参数（支持多个key）"""
     for key in keys:
         val = config.get(key)
@@ -72,7 +73,7 @@ def _get_str_param(config: dict, keys: list, default: str) -> str:
     return default
 
 
-def _get_bool_param(config: dict, keys: list, default: bool) -> bool:
+def _get_bool_param(config: dict[str, Any], keys: list[str], default: bool) -> bool:
     """获取布尔参数（支持多个key）"""
     for key in keys:
         val = config.get(key)
@@ -88,15 +89,14 @@ def _get_bool_param(config: dict, keys: list, default: bool) -> bool:
     return default
 
 
-def _get_int_param(config: dict, keys: list, default: int) -> int:
-    """获取整数参数（支持多个key）"""
-    for key in keys:
-        val = config.get(key)
-        if val is not None:
-            try:
-                return int(val)
-            except (ValueError, TypeError):
-                continue
+def _get_int_param(config: dict[str, Any], key: str, default: int) -> int:
+    """获取整数参数"""
+    val = config.get(key)
+    if val is not None:
+        try:
+            return int(val)
+        except (ValueError, TypeError):
+            pass
     return default
 
 
@@ -106,7 +106,7 @@ def _parse_time(time_str: str) -> time:
         h, m, s = time_str.split(":")
         return time(int(h), int(m), int(s))
     except Exception as e:
-        logger.warning(f"时间解析失败: {time_str}, {e}")
+        logger.warning("时间解析失败: {}, {!r}", time_str, e)
         return time(0, 0, 0)
 
 

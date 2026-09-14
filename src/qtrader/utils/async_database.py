@@ -7,9 +7,11 @@ Manager 与 Trader 共用同一套 AsyncDatabase 实例访问同一个 PostgreSQ
 因为 asyncpg 连接池绑定为创建它的事件循环，跨循环共享会报错。
 """
 
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Any
 
+from sqlalchemy import Select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from qtrader.models.po import Base
@@ -33,7 +35,7 @@ class AsyncDatabase:
         pool_size: int = 5,
         max_overflow: int = 10,
         statement_timeout: int = 30,
-    ):
+    ) -> None:
         """
         初始化异步数据库连接
 
@@ -86,7 +88,7 @@ class AsyncDatabase:
         logger.warning("数据库表已重建")
 
     @asynccontextmanager
-    async def get_session(self):
+    async def get_session(self) -> AsyncIterator[AsyncSession]:
         """
         获取异步数据库会话的上下文管理器
 
@@ -161,7 +163,7 @@ def get_async_database(name: str = DEFAULT_DB_NAME) -> AsyncDatabase | None:
 
 
 @asynccontextmanager
-async def get_async_session(name: str = DEFAULT_DB_NAME):
+async def get_async_session(name: str = DEFAULT_DB_NAME) -> AsyncIterator[AsyncSession]:
     """
     获取异步数据库会话的上下文管理器
 
@@ -178,6 +180,22 @@ async def get_async_session(name: str = DEFAULT_DB_NAME):
         yield session
 
 
+def require_async_database(name: str = DEFAULT_DB_NAME) -> AsyncDatabase:
+    """
+    获取异步数据库实例（未初始化时抛异常，供启动后必然可用的调用方收窄类型）
+
+    Args:
+        name: 实例名称
+
+    Returns:
+        AsyncDatabase: 异步数据库实例
+    """
+    db = get_async_database(name)
+    if db is None:
+        raise RuntimeError(f"数据库未初始化，请先调用 init_async_database(name={name})")
+    return db
+
+
 async def close_async_database(name: str = DEFAULT_DB_NAME) -> None:
     """关闭异步数据库连接"""
     if name in _async_dbs:
@@ -192,13 +210,13 @@ async def close_all_async_databases() -> None:
         await close_async_database(name)
 
 
-async def fetch_one(session: AsyncSession, stmt):
+async def fetch_one(session: AsyncSession, stmt: Select[Any]) -> Any:
     """执行查询并返回单条结果（无则None）"""
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
 
 
-async def fetch_all(session: AsyncSession, stmt) -> list:
+async def fetch_all(session: AsyncSession, stmt: Select[Any]) -> list[Any]:
     """执行查询并返回全部结果列表"""
     result = await session.execute(stmt)
     return list(result.scalars().all())

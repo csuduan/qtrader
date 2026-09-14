@@ -4,8 +4,10 @@ Trader端告警处理器
 """
 
 from datetime import datetime
+from typing import Any
 
 from qtrader.models.object import AlarmData
+from qtrader.utils.ipc import SocketServer
 from qtrader.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -18,7 +20,7 @@ class TraderAlarmHandler:
     捕获ERROR级别日志，包装成AlarmData推送给Manager
     """
 
-    def __init__(self, account_id: str, socket_server):
+    def __init__(self, account_id: str, socket_server: SocketServer | None) -> None:
         """
         初始化告警处理器
 
@@ -52,7 +54,7 @@ class TraderAlarmHandler:
         else:
             logger.warning("Socket服务器未初始化，通知未推送")
 
-    async def __call__(self, message) -> None:
+    async def __call__(self, message: Any) -> None:
         """
         处理日志记录
 
@@ -135,9 +137,9 @@ class TraderAlarmHandler:
             else:
                 logger.warning("Socket服务器未初始化，告警未推送")
 
-        except Exception as e:
+        except Exception:
             # 避免告警处理器自身出错导致日志系统异常
             import traceback
 
-            logger.error(f"Trader告警处理器异常: {e}")
+            logger.exception("Trader告警处理器异常")
             traceback.print_exc()

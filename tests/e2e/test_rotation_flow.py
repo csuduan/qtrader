@@ -29,7 +29,9 @@ from playwright.sync_api import Page, expect
 API_PREFIX = re.compile(r"^\w+://[^/]+/api")
 
 
-def _wait_for_request(page: Page, backend: "RotationBackend", req: tuple[str, str], timeout: float = 5.0):
+def _wait_for_request(
+    page: Page, backend: "RotationBackend", req: tuple[str, str], timeout: float = 5.0
+):
     """轮询等待 mock 后端收到指定请求（expect() 不支持普通 Python 断言）"""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -162,7 +164,9 @@ class RotationBackend:
             body = json.loads(request.post_data or "{}")
             for iid in body.get("ids", []):
                 self.instructions.pop(int(iid), None)
-            return self._json(route, {"code": 0, "message": "ok", "data": {"deleted": len(body.get("ids", []))}})
+            return self._json(
+                route, {"code": 0, "message": "ok", "data": {"deleted": len(body.get("ids", []))}}
+            )
 
         # 其余账户/系统类接口返回空态，保证页面可渲染
         return self._json(route, {"code": 0, "message": "ok", "data": {}})
@@ -196,12 +200,14 @@ class RotationBackend:
                 inst["pending_volume"] = 0
                 inst["current_order_id"] = None
         # 所有指令都到终态后结束 working（停止轮询）
-        if self.progress_script and all(
-            not seq for seq in self.progress_script.values()
-        ) and all(
-            self.instructions[i].get("status") in ("COMPLETED", "FAILED")
-            for i in self.progress_script
-            if i in self.instructions
+        if (
+            self.progress_script
+            and all(not seq for seq in self.progress_script.values())
+            and all(
+                self.instructions[i].get("status") in ("COMPLETED", "FAILED")
+                for i in self.progress_script
+                if i in self.instructions
+            )
         ):
             self.working = False
 
@@ -222,14 +228,26 @@ def rotation_page(page: Page) -> Page:
     # 先导航到应用域（about:blank 上无法访问 localStorage）
     page.goto("/login")
     _authed(page)
-    backend = RotationBackend([
-        _instruction(1, volume=10, status="PENDING"),
-        _instruction(2, symbol="SHFE.hc2505", strategy_id="rsi_002", direction="SELL",
-                     offset="CLOSE", volume=5, status="RUNNING", filled_volume=2),
-        _instruction(3, symbol="SHFE.ru2505", volume=8, status="COMPLETED", filled_volume=8),
-        _instruction(4, symbol="SHFE.cu2505", volume=4, status="FAILED", error_message="报单被拒"),
-        _instruction(5, symbol="SHFE.ag2506", volume=6, enabled=False, status="PENDING"),
-    ])
+    backend = RotationBackend(
+        [
+            _instruction(1, volume=10, status="PENDING"),
+            _instruction(
+                2,
+                symbol="SHFE.hc2505",
+                strategy_id="rsi_002",
+                direction="SELL",
+                offset="CLOSE",
+                volume=5,
+                status="RUNNING",
+                filled_volume=2,
+            ),
+            _instruction(3, symbol="SHFE.ru2505", volume=8, status="COMPLETED", filled_volume=8),
+            _instruction(
+                4, symbol="SHFE.cu2505", volume=4, status="FAILED", error_message="报单被拒"
+            ),
+            _instruction(5, symbol="SHFE.ag2506", volume=6, enabled=False, status="PENDING"),
+        ]
+    )
     backend.install(page)
     page.goto("/rotation")
     expect(page.get_by_test_id("rotation-instructions-table")).to_be_visible()
@@ -261,9 +279,7 @@ class TestRotationListRender:
     def test_disabled_row_styled(self, rotation_page: Page):
         """停用指令行应有 disabled-row 样式类"""
         expect(
-            rotation_page.get_by_test_id("rotation-instructions-table").locator(
-                "tr.disabled-row"
-            )
+            rotation_page.get_by_test_id("rotation-instructions-table").locator("tr.disabled-row")
         ).to_have_count(1)
 
     def test_compare_tab_renders(self, rotation_page: Page):
@@ -278,9 +294,12 @@ class TestRotationEdit:
 
     def test_edit_volume_and_save(self, rotation_page: Page):
         """编辑手数 → 保存 → PUT 请求携带新值且行刷新"""
-        row = rotation_page.get_by_test_id("rotation-instructions-table").locator("tr").filter(
-            has_text="SHFE.rb2505"
-        ).first
+        row = (
+            rotation_page.get_by_test_id("rotation-instructions-table")
+            .locator("tr")
+            .filter(has_text="SHFE.rb2505")
+            .first
+        )
         row.get_by_test_id("rotation-edit-btn-1").click()
 
         dialog = rotation_page.get_by_role("dialog").filter(has_text="编辑换仓指令")

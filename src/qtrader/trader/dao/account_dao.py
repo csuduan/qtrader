@@ -9,6 +9,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from qtrader.models.object import AccountData
 from qtrader.models.po import AccountPo
 from qtrader.utils.async_database import fetch_one, get_async_session
 from qtrader.utils.logger import get_logger
@@ -19,15 +20,15 @@ logger = get_logger(__name__)
 class AccountDao:
     """账户数据访问对象"""
 
-    async def save(self, account_id: str, data) -> None:
+    @logger.catch(message="持久化账户数据失败")
+    async def save(self, account_id: str, data: AccountData) -> None:
         """持久化账户数据"""
-        try:
-            async with get_async_session() as session:
-                await self._save_with_session(session, account_id, data)
-        except Exception as e:
-            logger.exception(f"持久化账户数据失败: {e}")
+        async with get_async_session() as session:
+            await self._save_with_session(session, account_id, data)
 
-    async def _save_with_session(self, session: AsyncSession, account_id: str, data) -> None:
+    async def _save_with_session(
+        self, session: AsyncSession, account_id: str, data: AccountData
+    ) -> None:
         """在指定会话中持久化账户数据"""
         account_po = await fetch_one(session, select(AccountPo).filter_by(account_id=account_id))
         if not account_po:

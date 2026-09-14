@@ -408,9 +408,7 @@ class TestTraderProxyStopProcess:
     async def test_stop_escalates_to_sigkill(self, proxy):
         """SIGTERM 后进程仍在时应升级为 SIGKILL，退出后返回成功"""
         with (
-            patch.object(
-                proxy, "_get_process", AsyncMock(side_effect=[111] * 7 + [None, None])
-            ),
+            patch.object(proxy, "_get_process", AsyncMock(side_effect=[111] * 7 + [None, None])),
             patch("qtrader.manager.trader_proxy.os.kill") as mock_kill,
             patch("qtrader.manager.trader_proxy.asyncio.sleep", new_callable=AsyncMock),
         ):

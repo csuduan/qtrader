@@ -3,7 +3,7 @@
 import math
 import traceback
 from datetime import datetime
-from typing import Any, Generic, TypeVar
+from typing import Any
 
 import orjson
 from fastapi import Request, Response
@@ -12,9 +12,6 @@ from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from qtrader.utils.logger import get_logger
-
-# 泛型类型变量
-T = TypeVar("T")
 
 logger = get_logger(__name__)
 
@@ -47,7 +44,7 @@ def _convert_pydantic_to_dict(obj: Any) -> Any:
         return obj
 
 
-class ApiResponse(BaseModel, Generic[T]):
+class ApiResponse[T](BaseModel):
     """统一API响应格式"""
 
     code: int = 0
@@ -129,7 +126,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException) 
 
     处理 FastAPI/Starlette HTTPException
     """
-    logger.error(f"HTTP异常: {exc.status_code} - {exc.detail if exc.detail else '请求失败'}")
+    logger.error("HTTP异常: {!r} - {!r}", exc.status_code, exc.detail if exc.detail else "请求失败")
     return error_response(code=exc.status_code, message=exc.detail if exc.detail else "请求失败")
 
 

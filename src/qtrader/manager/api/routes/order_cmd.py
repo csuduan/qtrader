@@ -2,7 +2,9 @@
 报单指令相关API路由
 """
 
-from fastapi import APIRouter, Body, Depends, Query
+from typing import Any
+
+from fastapi import APIRouter, Body, Depends, Query, Response
 
 from qtrader.manager.api.dependencies import get_trading_manager
 from qtrader.manager.api.responses import error_response, success_response
@@ -20,7 +22,7 @@ async def get_order_cmds_status(
     account_id: str | None = Query(None, description="账户ID（多账号模式）"),
     status: str | None = Query(None, description="状态过滤 (active/finished)"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     获取报单指令状态
 
@@ -60,16 +62,16 @@ async def get_order_cmds_status(
             message="获取成功",
         )
     except Exception as e:
-        logger.exception(f"获取报单指令失败: {e}", exc_info=True)
-        return error_response(code=500, message=f"获取报单指令失败: {str(e)}")
+        logger.exception("获取报单指令失败")
+        return error_response(code=500, message=f"获取报单指令失败: {e}")
 
 
 @router.post("")
 async def send_order_cmd(
-    request: dict = Body(..., description="订单指令数据"),
+    request: dict[str, Any] = Body(..., description="订单指令数据"),
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     发送账户级报单指令（手动平仓等）
 
@@ -95,7 +97,7 @@ async def send_order_cmd(
         price = request.get("price", 0)
         source = request.get("source")
 
-        if not all([symbol, direction, offset, volume is not None]):
+        if not symbol or not direction or not offset or volume is None:
             return error_response(message="缺少必要参数: symbol, direction, offset, volume")
 
         if source is not None and not isinstance(source, str):
@@ -141,8 +143,8 @@ async def send_order_cmd(
                 message=result.get("message", "发送报单指令失败") if result else "发送报单指令失败"
             )
     except Exception as e:
-        logger.exception(f"发送报单指令失败: {e}")
-        return error_response(message=f"发送报单指令失败: {str(e)}")
+        logger.exception("发送报单指令失败")
+        return error_response(message=f"发送报单指令失败: {e}")
 
 
 @router.post("/{cmd_id}/cancel")
@@ -150,7 +152,7 @@ async def cancel_order_cmd(
     cmd_id: str,
     account_id: str | None = Query(None, description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     强制取消报单指令
 
@@ -175,5 +177,5 @@ async def cancel_order_cmd(
         else:
             return error_response(code=400, message=result.get("message", "取消指令失败"))
     except Exception as e:
-        logger.exception(f"取消报单指令失败: {e}", exc_info=True)
-        return error_response(code=500, message=f"取消报单指令失败: {str(e)}")
+        logger.exception("取消报单指令失败")
+        return error_response(code=500, message=f"取消报单指令失败: {e}")

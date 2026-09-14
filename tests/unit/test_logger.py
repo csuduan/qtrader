@@ -16,7 +16,6 @@ import pytest
 
 from qtrader.utils.logger import enable_alarm_handler, get_logger, setup_logger
 
-
 # ==================== Fixtures ====================
 
 
@@ -369,6 +368,7 @@ class TestLoggerPerformance:
         logger = get_logger("test")
 
         import time
+
         start = time.time()
         for i in range(1000):
             logger.info(f"快速写入 {i}")

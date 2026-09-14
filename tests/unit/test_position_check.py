@@ -4,10 +4,11 @@
 验证手动更新策略持仓时，各持仓维度不能超过账户持仓
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
 
-from qtrader.models.object import PositionData, Exchange
+import pytest
+
+from qtrader.models.object import Exchange, PositionData
 
 
 class TestUpdateStrategyPositionDetailCheck:
@@ -42,9 +43,7 @@ class TestUpdateStrategyPositionDetailCheck:
     async def test_update_position_success(self, mock_trader, mock_strategy):
         """测试持仓更新成功 - 策略持仓不超过账户持仓"""
         # 设置账户持仓: 多头今仓5, 多头昨仓10, 空头今仓3, 空头昨仓2
-        account_pos = self._create_account_position(
-            long_td=5, long_yd=10, short_td=3, short_yd=2
-        )
+        account_pos = self._create_account_position(long_td=5, long_yd=10, short_td=3, short_yd=2)
         mock_trader.trading_engine.positions = {"IM2506": account_pos}
         mock_trader.strategy_manager.strategies = {"strategy_001": mock_strategy}
 
@@ -198,9 +197,7 @@ class TestUpdateStrategyPositionDetailCheck:
     @pytest.mark.asyncio
     async def test_update_position_exact_match(self, mock_trader, mock_strategy):
         """测试策略持仓与账户持仓完全相等 - 应该成功"""
-        account_pos = self._create_account_position(
-            long_td=5, long_yd=10, short_td=3, short_yd=2
-        )
+        account_pos = self._create_account_position(long_td=5, long_yd=10, short_td=3, short_yd=2)
         mock_trader.trading_engine.positions = {"IM2506": account_pos}
 
         # 策略持仓与账户持仓完全相等
@@ -256,9 +253,7 @@ class TestPositionCheckEdgeCases:
     @pytest.mark.asyncio
     async def test_mixed_position_directions(self):
         """测试同时有多头和空头持仓的情况"""
-        account_pos = self._create_account_position(
-            long_td=5, long_yd=5, short_td=3, short_yd=2
-        )
+        account_pos = self._create_account_position(long_td=5, long_yd=5, short_td=3, short_yd=2)
 
         # 策略多头和空头都在范围内
         new_pos_long_td = 3

@@ -17,7 +17,6 @@ import pytest
 from qtrader.utils.config_loader import JobConfig, SchedulerConfig
 from qtrader.utils.scheduler import Job, TaskScheduler
 
-
 # ==================== Fixtures ====================
 
 
@@ -138,16 +137,18 @@ class TestTaskSchedulerSetupJob:
 
     def test_setup_job_missing_method(self, mock_job_manager):
         """测试缺少方法时的处理"""
-        config = SchedulerConfig(jobs=[
-            JobConfig(
-                job_id="invalid_job",
-                job_name="无效任务",
-                job_description="",
-                cron_expression="0 9 * * *",
-                job_method="nonexistent_method",
-                enabled=True,
-            ),
-        ])
+        config = SchedulerConfig(
+            jobs=[
+                JobConfig(
+                    job_id="invalid_job",
+                    job_name="无效任务",
+                    job_description="",
+                    cron_expression="0 9 * * *",
+                    job_method="nonexistent_method",
+                    enabled=True,
+                ),
+            ]
+        )
 
         scheduler = TaskScheduler(config=config, job_manager=mock_job_manager)
 
@@ -156,16 +157,18 @@ class TestTaskSchedulerSetupJob:
 
     def test_setup_job_no_method_field(self, mock_job_manager):
         """测试没有方法字段的处理"""
-        config = SchedulerConfig(jobs=[
-            JobConfig(
-                job_id="no_method_job",
-                job_name="无方法任务",
-                job_description="",
-                cron_expression="0 9 * * *",
-                job_method="",
-                enabled=True,
-            ),
-        ])
+        config = SchedulerConfig(
+            jobs=[
+                JobConfig(
+                    job_id="no_method_job",
+                    job_name="无方法任务",
+                    job_description="",
+                    cron_expression="0 9 * * *",
+                    job_method="",
+                    enabled=True,
+                ),
+            ]
+        )
 
         scheduler = TaskScheduler(config=config, job_manager=mock_job_manager)
 
@@ -185,7 +188,9 @@ class TestTaskSchedulerGetJobFunction:
 
         assert func == mock_job_manager.sample_method
 
-    def test_get_job_function_with_underscore_prefix(self, scheduler: TaskScheduler, mock_job_manager):
+    def test_get_job_function_with_underscore_prefix(
+        self, scheduler: TaskScheduler, mock_job_manager
+    ):
         """测试带下划线前缀的方法名（按原名查找，不再去除前缀）"""
         func = scheduler._get_job_function("_sample_method")
 

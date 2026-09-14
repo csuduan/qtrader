@@ -37,6 +37,7 @@ def require_trading_session(symbol: str = E2E_SYMBOL) -> None:
     if not is_symbol_trading_time(symbol):
         pytest.skip(f"{symbol} 非交易时段，跳过真实交易用例")
 
+
 # 仅匹配后端接口路径（host 后紧跟 /api/ 或 /ws），
 # 不能用 **/api/** 通配——那会把 Vite 的源码模块 /src/api/*.ts 也拦掉，导致应用无法挂载
 API_ROUTE = re.compile(r"^\w+://[^/]+/api/")

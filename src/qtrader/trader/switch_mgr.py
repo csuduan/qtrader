@@ -10,17 +10,17 @@ import re
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from sqlalchemy import select, update
 
-from qtrader.models.object import OrderCmdFinishReason
+from qtrader.models.object import Direction, Offset, OrderCmdFinishReason
 from qtrader.models.po import RotationInstructionPo
 from qtrader.models.po import SwitchPosImportPo as OrderFile
-from qtrader.trader.order_cmd import OrderCmd, SplitStrategyType
+from qtrader.trader.order_cmd import OrderCmd
 from qtrader.trader.trading_engine import TradingEngine
 from qtrader.utils.async_database import fetch_all, fetch_one, get_async_session
 from qtrader.utils.config_loader import AccountConfig, get_config_loader
-from qtrader.utils.helpers import parse_symbol
 from qtrader.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -47,7 +47,7 @@ class OrderInstruction:
         self.price = price  # 价格（0表示使用对手价）
         self.order_time = order_time  # 报单时间（格式HH:MM:SS，空则不限制）
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"OrderInstruction(symbol={self.symbol}, direction={self.direction}, "
             f"offset={self.offset}, volume={self.volume}, price={self.price})"
@@ -73,10 +73,10 @@ class SwitchPosManager:
         self.working = False
         self.running_instructions: list[RotationInstructionPo] | None = None
         self.is_manual = False
-        self.all_instructions = []
+        self.all_instructions: list[RotationInstructionPo] = []
         self._stop_requested = False
 
-    async def start(self):
+    async def start(self) -> None:
         """启动换仓管理器"""
         # 加载所有换仓指令
         await self.load_rotation_instructions()
@@ -94,7 +94,7 @@ class SwitchPosManager:
         today = datetime.now().strftime("%Y%m%d")
         return [x for x in self.all_instructions if x.trading_date == today]
 
-    async def update_instruction(self, data: dict) -> "RotationInstructionPo":
+    async def update_instruction(self, data: dict[str, Any]) -> "RotationInstructionPo":
         """更新换仓指令"""
         instruction_id = data.get("instruction_id")
         if not instruction_id:
@@ -126,7 +126,7 @@ class SwitchPosManager:
 
         return instruction
 
-    async def delete_instruction(self, ids: list[str]):
+    async def delete_instruction(self, ids: list[int]) -> None:
         """删除换仓指令"""
         self.all_instructions = [x for x in self.all_instructions if x.id not in ids]
         # 更新数据库
@@ -137,7 +137,7 @@ class SwitchPosManager:
                 .values(is_deleted=True)
             )
 
-    async def load_rotation_instructions(self):
+    async def load_rotation_instructions(self) -> None:
         """加载所有换仓指令"""
         try:
             # 从数据库加载今日换仓指令
@@ -153,14 +153,16 @@ class SwitchPosManager:
                 )
 
             # 订阅所有指令中的合约
-            symbols = list(set([instruction.symbol for instruction in self.all_instructions]))
+            symbols = list({instruction.symbol for instruction in self.all_instructions})
             logger.info(f"换仓指令合约列表: {symbols}")
             self.trading_engine.subscribe_symbol(symbols)
-        except Exception as e:
-            logger.error(f"获取所有指令列表时出错: {e}")
+        except Exception:
+            logger.exception("获取所有指令列表时出错")
         logger.info(f"加载换仓指令完成，共 {len(self.all_instructions)} 条")
 
-    async def import_csv(self, csv_text: str, filename: str, mode: str = "replace") -> dict:
+    async def import_csv(
+        self, csv_text: str, filename: str, mode: str = "replace"
+    ) -> dict[str, Any]:
         """
         导入换仓指令文件
 
@@ -221,8 +223,18 @@ class SwitchPosManager:
                 instrument_str = instrument_str.strip()
                 symbol = instrument_str
 
-                offset_map = {"Open": "OPEN", "Close": "CLOSE", "开仓": "OPEN", "平仓": "CLOSE"}
-                direction_map = {"Buy": "BUY", "Sell": "SELL", "买入": "BUY", "卖出": "SELL"}
+                offset_map = {
+                    "Open": "OPEN",
+                    "Close": "CLOSE",
+                    "开仓": "OPEN",
+                    "平仓": "CLOSE",
+                }
+                direction_map = {
+                    "Buy": "BUY",
+                    "Sell": "SELL",
+                    "买入": "BUY",
+                    "卖出": "SELL",
+                }
 
                 offset = offset_map.get(offset_str, offset_str.upper())
                 direction = direction_map.get(direction_str, direction_str.upper())
@@ -268,7 +280,7 @@ class SwitchPosManager:
                 imported_count += 1
 
             except Exception as e:
-                logger.exception(f"第{line_num}行解析失败: {e}, 内容: {line}")
+                logger.exception("第{}行解析失败: , 内容: {}", line_num, line)
                 failed_count += 1
                 errors.append({"row": line_num, "error": str(e), "content": line})
                 continue
@@ -289,80 +301,77 @@ class SwitchPosManager:
         # 重新加载数据
         await self.load_rotation_instructions()
         logger.info(f"CSV导入完成，成功: {imported_count}, 失败: {failed_count}")
-        data = {"imported": imported_count, "failed": failed_count, "errors": errors[:10]}
+        data = {
+            "imported": imported_count,
+            "failed": failed_count,
+            "errors": errors[:10],
+        }
         return data
 
+    @logger.catch(message="扫描订单文件时出错")
     async def scan_and_process_orders(self) -> None:
         """扫描并处理交易指令文件"""
-        try:
-            today_dir = Path(self.switchPos_files_dir) / datetime.now().strftime("%Y%m%d")
-            today_str = datetime.now().strftime("%Y%m%d")
-            csv_files = [
-                f
-                for f in today_dir.glob("*.csv")
-                if today_str in f.name and self.config.account_id in f.name
-            ]
-            if not csv_files:
-                return
-
-            # 文件时间戳与系统时间偏差的绝对值不超过10秒时跳过，
-            # 避免导入未写完的文件（未来值一般是时区/时钟偏差，偏差大于10秒直接放行）
-            now_ts = time.time()
-            stable_files = []
-            for f in csv_files:
-                if abs(now_ts - f.stat().st_mtime) <= 10:
-                    logger.debug(f"文件 {f.name} 时间戳与系统时间偏差不足10秒，跳过本次扫描")
+        today_dir = Path(self.switchPos_files_dir) / datetime.now().strftime("%Y%m%d")
+        today_str = datetime.now().strftime("%Y%m%d")
+        csv_files = [
+            f
+            for f in today_dir.glob("*.csv")
+            if today_str in f.name and self.config.account_id and self.config.account_id in f.name
+        ]
+        if not csv_files:
+            return
+        # 文件时间戳与系统时间偏差的绝对值不超过10秒时跳过，
+        # 避免导入未写完的文件（未来值一般是时区/时钟偏差，偏差大于10秒直接放行）
+        now_ts = time.time()
+        stable_files = []
+        for f in csv_files:
+            if abs(now_ts - f.stat().st_mtime) <= 10:
+                logger.debug(f"文件 {f.name} 时间戳与系统时间偏差不足10秒，跳过本次扫描")
+                continue
+            stable_files.append(f)
+        csv_files = stable_files
+        if not csv_files:
+            return
+        csv_files = sorted(
+            csv_files,
+            key=lambda f: f.stat().st_mtime if f.is_file() else 0,
+            reverse=True,
+        )
+        # logger.info(f"扫描到 {len(csv_files)} 个换仓文件")
+        async with get_async_session() as session:
+            for csv_file in csv_files:
+                # 检查该文件是否已导入
+                existing = await fetch_one(
+                    session,
+                    select(OrderFile).filter_by(
+                        account_id=self.config.account_id, file_name=csv_file.name
+                    ),
+                )
+                if existing:
                     continue
-                stable_files.append(f)
-            csv_files = stable_files
-            if not csv_files:
-                return
-
-            csv_files = sorted(
-                csv_files, key=lambda f: f.stat().st_mtime if f.is_file() else 0, reverse=True
-            )
-
-            # logger.info(f"扫描到 {len(csv_files)} 个换仓文件")
-            async with get_async_session() as session:
-                for csv_file in csv_files:
-                    # 检查该文件是否已导入
-                    existing = await fetch_one(
-                        session,
-                        select(OrderFile).filter_by(
-                            account_id=self.config.account_id, file_name=csv_file.name
-                        ),
-                    )
-                    if existing:
-                        continue
-
-                    # 读取一次内容，用于导入与计算文件指纹
-                    try:
-                        content = csv_file.read_text(encoding="gbk")
-                    except Exception as e:
-                        logger.error(f"读取文件 {csv_file.name} 失败: {e}")
-                        continue
-
-                    # 导入文件
-                    try:
-                        await self.import_csv(content, csv_file.name, mode="replace")
-                    except Exception as e:
-                        # 导入失败不写导入记录，下轮扫描重试
-                        logger.error(f"导入文件 {csv_file.name} 时出错: {e}")
-                        continue
-
-                    # 导入成功后写入导入记录
-                    record = OrderFile(
-                        account_id=self.config.account_id,
-                        file_name=csv_file.name,
-                        file_path=str(csv_file.parent),
-                        file_hash=hashlib.md5(content.encode("utf-8")).hexdigest(),
-                        created_at=datetime.now(),
-                    )
-                    session.add(record)
-                    logger.info(f"文件 {csv_file.name} 导入记录已保存")
-
-        except Exception as e:
-            logger.exception(f"扫描订单文件时出错: {e}")
+                # 读取一次内容，用于导入与计算文件指纹
+                try:
+                    content = csv_file.read_text(encoding="gbk")
+                except Exception:
+                    logger.exception("读取文件 {} 失败", csv_file.name)
+                    continue
+                # 导入文件
+                try:
+                    await self.import_csv(content, csv_file.name, mode="replace")
+                except Exception:
+                    # 导入失败不写导入记录，下轮扫描重试
+                    logger.exception("导入文件 {} 时出错", csv_file.name)
+                    continue
+                # 导入成功后写入导入记录
+                record = OrderFile(
+                    account_id=self.config.account_id,
+                    file_name=csv_file.name,
+                    file_path=str(csv_file.parent),
+                    file_hash=hashlib.md5(content.encode("utf-8")).hexdigest(),
+                    created_at=datetime.now(),
+                )
+                session.add(record)
+                logger.info(f"文件 {csv_file.name} 导入记录已保存")
 
     async def execute_position_rotation(
         self, trading_type: str = "", is_manual: bool = False
@@ -411,6 +420,13 @@ class SwitchPosManager:
             # 平仓/平今排在前面，优先释放保证金与持仓
             todo_instructions.sort(key=lambda inst: 0 if inst.offset != "OPEN" else 1)
 
+            # 单笔最大拆单手数（未配置风控时用默认值5）
+            max_split_volume = (
+                self.config.trading.risk_control.max_split_volume
+                if self.config.trading and self.config.trading.risk_control
+                else 5
+            )
+
             for instruction in todo_instructions:
                 if instruction.status != "PENDING":
                     continue
@@ -420,14 +436,18 @@ class SwitchPosManager:
                     continue
 
                 # 创建报单指令
-                price = instruction.price if instruction.price and instruction.price > 0 else None
+                price = (
+                    float(instruction.price)
+                    if instruction.price and instruction.price > 0
+                    else None
+                )
                 order_cmd: OrderCmd = OrderCmd(
                     symbol=instruction.symbol,
-                    direction=instruction.direction,
-                    offset=instruction.offset,
+                    direction=Direction(instruction.direction),
+                    offset=Offset(instruction.offset),
                     volume=instruction.remaining_volume,
                     price=price,
-                    max_volume_per_order=self.config.trading.risk_control.max_split_volume,
+                    max_volume_per_order=max_split_volume,
                     order_interval=1,
                     total_timeout=180,  # 总超时为单笔超时的10倍
                     order_timeout=10,
@@ -445,15 +465,15 @@ class SwitchPosManager:
             # 监控OrderCmd执行状态
             await self._monitor_order_commands(todo_instructions)
 
-        except Exception as e:
-            logger.exception(f"换仓执行时出错: {e}")
+        except Exception:
+            logger.exception("换仓执行时出错")
         finally:
             snapshots = [self._snapshot_instruction(inst) for inst in todo_instructions]
             await self._update_instructions(snapshots)
             self.working = False
             logger.info("换仓任务结束")
 
-    def _on_cmd_changed(self, order_cmd: OrderCmd):
+    def _on_cmd_changed(self, order_cmd: OrderCmd) -> None:
         """处理订单状态变化"""
         if not order_cmd.is_finished:
             return
@@ -544,7 +564,7 @@ class SwitchPosManager:
         # self.trading_engine.cleanup_finished_order_cmds()
 
     @staticmethod
-    def _snapshot_instruction(instruction: RotationInstructionPo) -> dict:
+    def _snapshot_instruction(instruction: RotationInstructionPo) -> dict[str, Any]:
         """
         提取指令待更新字段的快照
 
@@ -562,7 +582,8 @@ class SwitchPosManager:
             "updated_at": datetime.now(),
         }
 
-    async def _update_instructions(self, snapshots: list[dict]) -> None:
+    @logger.catch(message="更新指令状态时出错")
+    async def _update_instructions(self, snapshots: list[dict[str, Any]]) -> None:
         """
         更新指令状态（接收 _snapshot_instruction 生成的快照，按 id 批量更新）
 
@@ -572,17 +593,14 @@ class SwitchPosManager:
         if not snapshots:
             return
 
-        try:
-            async with get_async_session() as session:
-                for snap in snapshots:
-                    values = {k: v for k, v in snap.items() if k != "id"}
-                    await session.execute(
-                        update(RotationInstructionPo)
-                        .where(RotationInstructionPo.id == snap["id"])
-                        .values(**values)
-                    )
-        except Exception as e:
-            logger.error(f"更新指令状态时出错: {e}")
+        async with get_async_session() as session:
+            for snap in snapshots:
+                values = {k: v for k, v in snap.items() if k != "id"}
+                await session.execute(
+                    update(RotationInstructionPo)
+                    .where(RotationInstructionPo.id == snap["id"])
+                    .values(**values)
+                )
 
     def _check_instruction(
         self, instruction: RotationInstructionPo, is_manual: bool = False
@@ -613,11 +631,12 @@ class SwitchPosManager:
                 if instruction.order_time and instruction.order_time > now_time:
                     return False
 
-        except Exception as e:
-            logger.error(f"检查指令状态时出错: {e}")
+        except Exception:
+            logger.exception("检查指令状态时出错")
 
         return True
 
+    @logger.catch(message="更新指令状态时出错")
     async def _update_instruction(self, instruction: RotationInstructionPo) -> None:
         """
         更新指令状态
@@ -625,8 +644,5 @@ class SwitchPosManager:
         Args:
             instruction: 待更新的指令
         """
-        try:
-            async with get_async_session() as session:
-                await session.merge(instruction)
-        except Exception as e:
-            logger.error(f"更新指令状态时出错: {e}")
+        async with get_async_session() as session:
+            await session.merge(instruction)

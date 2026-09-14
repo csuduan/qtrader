@@ -4,13 +4,19 @@ Trader交易执行器
 """
 
 import asyncio
-import signal
+import contextlib
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any
 
 from qtrader.app_context import AppContext, get_app_context
-from qtrader.models.object import OrderData, TradeData
+from qtrader.models.object import (
+    AccountData,
+    OrderData,
+    PositionData,
+    TickData,
+    TradeData,
+)
 from qtrader.trader.alarm_handler import TraderAlarmHandler
 from qtrader.trader.dao.account_dao import AccountDao
 from qtrader.trader.dao.order_dao import OrderDao
@@ -21,11 +27,15 @@ from qtrader.trader.req import TraderReqHandler
 from qtrader.trader.strategy_manager import StrategyManager
 from qtrader.trader.switch_mgr import SwitchPosManager
 from qtrader.trader.trading_engine import TradingEngine
-from qtrader.utils.async_event_engine import AsyncEventEngine, EventTypes
+from qtrader.utils.async_event_engine import EventTypes
 from qtrader.utils.config_loader import TraderConfig
+from qtrader.utils.executors import submit_loop
 from qtrader.utils.ipc import SocketServer
-from qtrader.utils.logger import get_logger, logger
+from qtrader.utils.logger import get_logger
 from qtrader.utils.scheduler import TaskScheduler
+
+if TYPE_CHECKING:
+    from qtrader.trader.target_pos_mgr import TargetPosManager
 
 logger = get_logger(__name__)
 ctx = get_app_context()
@@ -52,6 +62,8 @@ class Trader:
             global_config: 全局配置
         """
         self.account_config = account_config
+        if not account_config.account_id:
+            raise ValueError("账户配置缺少 account_id")
         self.account_id = account_config.account_id
 
         # 交易引擎
@@ -61,7 +73,7 @@ class Trader:
         self.switchPos_manager: SwitchPosManager | None = None
 
         # 目标仓位换仓管理器
-        self.targetPos_manager: "TargetPosManager | None" = None
+        self.targetPos_manager: TargetPosManager | None = None
 
         # 作业管理器
         self.job_manager: JobManager | None = None
@@ -74,7 +86,7 @@ class Trader:
 
         # Socket服务器（独立模式）
         self.socket_server: SocketServer | None = None
-        self._server_task: asyncio.Task | None = None
+        self._server_task: asyncio.Task[None] | None = None
 
         # 运行状态
         self._running = False
@@ -84,19 +96,19 @@ class Trader:
         # Manager 启动后会通过 init_public_data 消息推送合约信息
         self._public_data_initialized: bool = False
         # 用于等待 Manager 推送公共数据的 Future
-        self._init_data_future: asyncio.Future | None = None
+        self._init_data_future: asyncio.Future[bool] | None = None
 
         # 批量持久化相关
         self._pending_accounts = None
-        self._cached_account: dict[str, Any] = {}
+        self._cached_account: dict[str, Any] | None = None
         self._pending_positions: dict[str, Any] = {}  # key: symbol
         self._persist_interval: float = 30.0  # 30秒批量写一次
-        self._persist_task: asyncio.Task | None = None
+        self._persist_task: asyncio.Task[None] | None = None
 
         # Tick批量推送相关
-        self._pending_ticks: list[dict] = []
+        self._pending_ticks: list[dict[str, Any]] = []
         self._tick_push_interval: float = 1.0  # 每秒批量推送一次
-        self._tick_push_task: asyncio.Task | None = None
+        self._tick_push_task: asyncio.Task[None] | None = None
 
         # 数据访问对象
         self._account_dao = AccountDao()
@@ -136,7 +148,12 @@ class Trader:
 
         # 启用Trader端告警处理器
         alarm_handler = TraderAlarmHandler(self.account_id, self.socket_server)
-        logger.add(lambda msg: asyncio.create_task(alarm_handler(msg)), level="ERROR")
+
+        def alarm_sink(msg: Any) -> None:
+            """sink 在日志产生线程同步执行，投递到主事件循环处理（兼容 TqSdk 等外部线程）"""
+            submit_loop(alarm_handler(msg))
+
+        logger.add(alarm_sink, level="ERROR")
         logger.info(f"Trader [{self.account_id}] 告警处理器已启用")
 
         # 启动交易引擎
@@ -171,7 +188,7 @@ class Trader:
             app_config = loader._load_app_config()
             scheduler_config = app_config.account_scheduler
         except Exception as e:
-            logger.warning(f"Trader [{self.account_id}] 无法加载全局定时任务配置: {e}")
+            logger.warning("Trader [{}] 无法加载全局定时任务配置: {!r}", self.account_id, e)
 
         if scheduler_config and scheduler_config.jobs:
             self.task_scheduler = TaskScheduler(scheduler_config, self.job_manager)
@@ -181,7 +198,9 @@ class Trader:
             logger.info(f"Trader [{self.account_id}] 未配置任务调度器")
 
         # 启动策略管理器
-        self.strategy_manager = StrategyManager(self.account_config.strategies, self.trading_engine)
+        self.strategy_manager = StrategyManager(
+            self.account_config.strategies or {}, self.trading_engine
+        )
         ctx.register(AppContext.KEY_STRATEGY_MANAGER, self.strategy_manager)
         await self.strategy_manager.start()
 
@@ -221,10 +240,12 @@ class Trader:
         loader = get_config_loader()
         app_config = loader._load_app_config()
         db_config = app_config.data_base
+        if db_config is None:
+            raise RuntimeError("全局配置缺少 data_base 数据库配置")
         db_url = build_async_db_url(db_config)
 
         # 连接到共享数据库
-        db = await init_async_database(
+        _ = await init_async_database(
             db_url,
             account_id=self.account_id,
             echo=False,
@@ -329,7 +350,7 @@ class Trader:
             await asyncio.wait_for(asyncio.shield(self._init_data_future), timeout=timeout)
             logger.info(f"Trader [{self.account_id}] 已收到 Manager 公共数据")
             return True
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(f"Trader [{self.account_id}] 等待公共数据超时，将自行从网关加载合约信息")
             return False
         finally:
@@ -350,7 +371,7 @@ class Trader:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"[Trader-{self.account_id}] 心跳发送失败: {e}")
+                logger.error("[Trader-{}] 心跳发送失败: {!r}", self.account_id, e)
                 break
 
     async def _run_standalone(self) -> None:
@@ -380,84 +401,71 @@ class Trader:
         except asyncio.CancelledError:
             logger.info(f"Trader [{self.account_id}] 服务器任务已取消")
 
-    async def _on_account_update(self, data):
+    @logger.catch(message="账户更新处理失败")
+    async def _on_account_update(self, data: dict[str, Any] | AccountData) -> None:
         """账户更新事件处理器"""
-        try:
-            # 缓存账户数据，等待批量写入
-            self._cache_account_data(data)
-            account_dict = data.model_dump() if hasattr(data, "model_dump") else data
+        # 缓存账户数据，等待批量写入
+        self._cache_account_data(data)
+        account_dict = data.model_dump() if hasattr(data, "model_dump") else data
+        if self.socket_server:
             await self.socket_server.send_push("account", account_dict)
             # 推送给manager
-        except Exception as e:
-            logger.exception(f"账户更新处理失败: {e}")
 
-    async def _on_account_ready(self, data):
+    @logger.catch(message="账户状态处理失败")
+    async def _on_account_ready(self, data: None) -> None:
         """发送账户就绪通知"""
-        try:
-            if self.socket_server:
-                await self.socket_server.send_push(
-                    "trader_ready",
-                    {
-                        "account_id": self.account_id,
-                        "timestamp": datetime.now().isoformat(),
-                    },
-                )
-                logger.info(f"Trader [{self.account_id}] 就绪通知已发送")
-        except Exception as e:
-            logger.exception(f"账户状态处理失败: {e}")
+        if self.socket_server:
+            await self.socket_server.send_push(
+                "trader_ready",
+                {
+                    "account_id": self.account_id,
+                    "timestamp": datetime.now().isoformat(),
+                },
+            )
+            logger.info(f"Trader [{self.account_id}] 就绪通知已发送")
 
-    async def _on_order_update(self, data):
+    @logger.catch(message="订单更新处理失败")
+    async def _on_order_update(self, data: OrderData) -> None:
         """订单更新事件处理器 - 写入PG后直接广播完整数据"""
-        try:
-            # 1. 先写入PG（异步写入不阻塞事件循环）
-            await self._order_dao.save(self.account_id, data)
+        # 1. 先写入PG（异步写入不阻塞事件循环）
+        await self._order_dao.save(self.account_id, data)
+        # 2. 广播完整订单数据给Manager
+        if self.socket_server:
+            order_dict = data.model_dump() if hasattr(data, "model_dump") else data
+            await self.socket_server.send_push("order", order_dict)
+            logger.debug(f"订单更新已广播: {data.order_id}")
 
-            # 2. 广播完整订单数据给Manager
-            if self.socket_server:
-                order_dict = data.model_dump() if hasattr(data, "model_dump") else data
-                await self.socket_server.send_push("order", order_dict)
-                logger.debug(f"订单更新已广播: {data.order_id}")
-        except Exception as e:
-            logger.exception(f"订单更新处理失败: {e}")
-
-    async def _on_trade_update(self, data):
+    @logger.catch(message="成交更新处理失败")
+    async def _on_trade_update(self, data: TradeData) -> None:
         """成交更新事件处理器 - 写入PG后直接广播完整数据"""
-        try:
-            # 1. 先写入PG（异步写入不阻塞事件循环）
-            await self._trade_dao.save(self.account_id, data)
+        # 1. 先写入PG（异步写入不阻塞事件循环）
+        await self._trade_dao.save(self.account_id, data)
+        # 2. 广播完整成交数据给Manager
+        if self.socket_server:
+            trade_dict = data.model_dump() if hasattr(data, "model_dump") else data
+            await self.socket_server.send_push("trade", trade_dict)
+            logger.debug(f"成交更新已广播: {data.trade_id}")
 
-            # 2. 广播完整成交数据给Manager
-            if self.socket_server:
-                trade_dict = data.model_dump() if hasattr(data, "model_dump") else data
-                await self.socket_server.send_push("trade", trade_dict)
-                logger.debug(f"成交更新已广播: {data.trade_id}")
-        except Exception as e:
-            logger.exception(f"成交更新处理失败: {e}")
-
-    async def _on_position_update(self, data):
+    @logger.catch(message="持仓更新处理失败")
+    async def _on_position_update(self, data: dict[str, Any] | PositionData) -> None:
         """持仓更新事件处理器 - 缓存并推送给Manager
 
         所有持仓变更都实时推送给Manager（增量推送）。
         全量快照在TD连接成功时由 _push_full_positions 发送。
         """
-        try:
-            # 移除内部source标记（不推给Manager）
-            if isinstance(data, dict):
-                data.pop("_source", None)
+        # 移除内部source标记（不推给Manager）
+        if isinstance(data, dict):
+            data.pop("_source", None)
+        # 缓存持仓数据，等待批量写入DB
+        self._cache_position_data(data)
+        # 增量推送给Manager
+        if self.socket_server:
+            pos_dict = data.model_dump() if hasattr(data, "model_dump") else data
+            await self.socket_server.send_push("position", pos_dict)
+            symbol = pos_dict.get("symbol", "")
+            logger.debug(f"持仓更新已广播: {symbol}")
 
-            # 缓存持仓数据，等待批量写入DB
-            self._cache_position_data(data)
-
-            # 增量推送给Manager
-            if self.socket_server:
-                pos_dict = data.model_dump() if hasattr(data, "model_dump") else data
-                await self.socket_server.send_push("position", pos_dict)
-                symbol = pos_dict.get("symbol", "")
-                logger.debug(f"持仓更新已广播: {symbol}")
-        except Exception as e:
-            logger.exception(f"持仓更新处理失败: {e}")
-
-    async def _on_tick_update(self, data):
+    async def _on_tick_update(self, data: dict[str, Any] | TickData) -> None:
         """行情更新事件处理器 - 缓存Tick等待批量推送"""
         tick_dict = data.model_dump() if hasattr(data, "model_dump") else data
         self._pending_ticks.append(tick_dict)
@@ -475,7 +483,7 @@ class Trader:
                 self._pending_ticks = []
 
                 # 获取当前账户数据
-                account_dict = None
+                account_dict: Any = None
                 if self.trading_engine and self.trading_engine.account:
                     account = self.trading_engine.account
                     account_dict = (
@@ -490,74 +498,62 @@ class Trader:
                 logger.debug(f"Tick批量推送: {len(ticks)} 条")
             except asyncio.CancelledError:
                 break
-            except Exception as e:
-                logger.exception(f"Tick批量推送失败: {e}")
+            except Exception:
+                logger.exception("Tick批量推送失败")
 
+    @logger.catch(message="推送全量持仓失败")
     async def _push_full_positions(self) -> None:
         """TD连接成功后，延迟推送全量持仓快照给Manager
 
         等待Gateway加载完持仓数据后，将所有持仓一次性推送给Manager。
         """
-        try:
-            # 等待持仓数据加载完成
-            await asyncio.sleep(3)
+        # 等待持仓数据加载完成
+        await asyncio.sleep(3)
+        if not self.trading_engine or not self.socket_server:
+            return
+        positions = self.trading_engine.positions
+        if not positions:
+            logger.info(f"Trader [{self.account_id}] 无持仓数据，跳过全量推送")
+            return
+        count = 0
+        for pos in positions.values():
+            pos_dict = pos.model_dump() if hasattr(pos, "model_dump") else pos
+            await self.socket_server.send_push("position", pos_dict)
+            count += 1
+        logger.info(f"Trader [{self.account_id}] 全量持仓已推送: {count} 个")
 
-            if not self.trading_engine or not self.socket_server:
-                return
-
-            positions = self.trading_engine.positions
-            if not positions:
-                logger.info(f"Trader [{self.account_id}] 无持仓数据，跳过全量推送")
-                return
-
-            count = 0
-            for symbol, pos in positions.items():
-                pos_dict = pos.model_dump() if hasattr(pos, "model_dump") else pos
-                await self.socket_server.send_push("position", pos_dict)
-                count += 1
-
-            logger.info(f"Trader [{self.account_id}] 全量持仓已推送: {count} 个")
-        except Exception as e:
-            logger.exception(f"推送全量持仓失败: {e}")
-
+    @logger.catch(message="发送就绪通知失败")
     async def _notify_ready(self) -> None:
         """Trader就绪后通知Manager进行全量同步
 
         等待持仓数据加载完成后发送就绪通知
         """
-        try:
-            await asyncio.sleep(5)  # 等待持仓数据加载完成
-            if self.socket_server:
-                await self.socket_server.send_push(
-                    "trader_ready",
-                    {
-                        "account_id": self.account_id,
-                        "timestamp": datetime.now().isoformat(),
-                    },
-                )
-                logger.info(f"Trader [{self.account_id}] 就绪通知已发送")
-        except Exception as e:
-            logger.exception(f"发送就绪通知失败: {e}")
+        await asyncio.sleep(5)  # 等待持仓数据加载完成
+        if self.socket_server:
+            await self.socket_server.send_push(
+                "trader_ready",
+                {
+                    "account_id": self.account_id,
+                    "timestamp": datetime.now().isoformat(),
+                },
+            )
+            logger.info(f"Trader [{self.account_id}] 就绪通知已发送")
 
-    def _cache_account_data(self, data) -> None:
+    @logger.catch(message="缓存账户数据失败")
+    def _cache_account_data(self, data: dict[str, Any] | AccountData) -> None:
         """缓存账户数据，等待批量写入"""
-        try:
-            account_data = data.model_dump() if hasattr(data, "model_dump") else data
-            self._cached_account = account_data
-            logger.debug(f"账户数据已缓存: {self.account_id}")
-        except Exception as e:
-            logger.exception(f"缓存账户数据失败: {e}")
+        account_data = data.model_dump() if hasattr(data, "model_dump") else data
+        self._cached_account = account_data
+        logger.debug(f"账户数据已缓存: {self.account_id}")
 
-    def _cache_position_data(self, data) -> None:
+    @logger.catch(message="缓存持仓数据失败")
+    def _cache_position_data(self, data: dict[str, Any] | PositionData) -> None:
         """缓存持仓数据，等待批量写入"""
-        try:
-            position_data = data.model_dump() if hasattr(data, "model_dump") else data
-            symbol = position_data.get("symbol")
-            if symbol:
-                self._pending_positions[symbol] = position_data
-                logger.debug(f"持仓数据已缓存: {symbol}")
-        except Exception as e:
-            logger.exception(f"缓存持仓数据失败: {e}")
+        position_data = data.model_dump() if hasattr(data, "model_dump") else data
+        symbol = position_data.get("symbol")
+        if symbol:
+            self._pending_positions[symbol] = position_data
+            logger.debug(f"持仓数据已缓存: {symbol}")
 
     async def _periodic_persist(self) -> None:
         """定时批量持久化任务"""
@@ -567,8 +563,8 @@ class Trader:
                 await self._batch_persist()
             except asyncio.CancelledError:
                 break
-            except Exception as e:
-                logger.exception(f"定时持久化任务出错: {e}")
+            except Exception:
+                logger.exception("定时持久化任务出错")
 
     async def _batch_persist(self) -> None:
         """批量持久化到PG（异步写入不阻塞事件循环）"""
@@ -590,7 +586,9 @@ class Trader:
             if self._pending_positions.get(symbol) is data:
                 del self._pending_positions[symbol]
 
-    async def _do_batch_persist(self, account_data: dict | None, positions: dict) -> bool:
+    async def _do_batch_persist(
+        self, account_data: dict[str, Any] | None, positions: dict[str, Any]
+    ) -> bool:
         """执行批量持久化，返回是否成功"""
         try:
             from qtrader.utils.async_database import get_async_session
@@ -606,8 +604,8 @@ class Trader:
 
             logger.debug(f"批量持久化完成: {1 if account_data else 0} 账户, {len(positions)} 持仓")
             return True
-        except Exception as e:
-            logger.exception(f"批量持久化失败: {e}")
+        except Exception:
+            logger.exception("批量持久化失败")
             return False
 
     def _register_event_handlers(self) -> None:
@@ -616,7 +614,9 @@ class Trader:
 
         """
         # 注册到 AsyncEventEngine
-        event_engine: AsyncEventEngine = ctx.get_event_engine()
+        event_engine = ctx.get_event_engine()
+        if event_engine is None:
+            raise RuntimeError("事件引擎未初始化（应由启动入口创建并注册）")
         event_engine.register(EventTypes.ACCOUNT_UPDATE, self._on_account_update)
         event_engine.register(EventTypes.ACCOUNT_READY, self._on_account_ready)
         event_engine.register(EventTypes.ORDER_UPDATE, self._on_order_update)
@@ -633,17 +633,15 @@ class Trader:
         # 停止Tick批量推送任务
         if self._tick_push_task:
             self._tick_push_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._tick_push_task
-            except asyncio.CancelledError:
-                pass
             logger.info(f"Trader [{self.account_id}] Tick批量推送任务已停止")
 
         # 推送剩余Tick
         if self._pending_ticks and self.socket_server:
             ticks = self._pending_ticks
             self._pending_ticks = []
-            account_dict = None
+            account_dict: Any = None
             if self.trading_engine and self.trading_engine.account:
                 account = self.trading_engine.account
                 account_dict = account.model_dump() if hasattr(account, "model_dump") else account
@@ -654,15 +652,13 @@ class Trader:
                 await self.socket_server.send_push("tick_batch", payload)
                 logger.info(f"Trader [{self.account_id}] 剩余Tick已推送: {len(ticks)} 条")
             except Exception as e:
-                logger.warning(f"推送剩余Tick失败: {e}")
+                logger.warning("推送剩余Tick失败: {!r}", e)
 
         # 停止批量持久化任务
         if self._persist_task:
             self._persist_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._persist_task
-            except asyncio.CancelledError:
-                pass
             logger.info(f"Trader [{self.account_id}] 批量持久化任务已停止")
 
         # 强制持久化剩余数据
@@ -679,7 +675,7 @@ class Trader:
             try:
                 await self.trading_engine.risk_control.flush_counters()
             except Exception as e:
-                logger.warning(f"风控计数器落库失败: {e}")
+                logger.warning("风控计数器落库失败: {!r}", e)
             await self.trading_engine.close()
 
         # 停止Socket服务器
@@ -702,6 +698,6 @@ class Trader:
                 socket_path.unlink(missing_ok=True)
                 logger.info(f"已清理Socket文件: {socket_path}")
             except Exception as e:
-                logger.warning(f"清理PID/Socket文件失败: {e}")
+                logger.warning("清理PID/Socket文件失败: {!r}", e)
 
         logger.info(f"Trader [{self.account_id}] 已停止")

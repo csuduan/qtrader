@@ -3,11 +3,10 @@
 负责策略实例化、启动/停止管理、事件路由、参数加载
 """
 
-import asyncio
 import csv
 import os
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any, Optional
+from typing import Any, Optional
 
 import pandas as pd
 from cachetools import TTLCache
@@ -15,7 +14,6 @@ from cachetools import TTLCache
 from qtrader.app_context import get_app_context
 from qtrader.models.object import (
     BarData,
-    Exchange,
     OrderData,
     OrderStatus,
     PositionData,
@@ -27,7 +25,7 @@ from qtrader.trader.order_cmd import OrderCmd
 from qtrader.trader.strategy.base_strategy import BaseStrategy
 from qtrader.trader.trading_engine import TradingEngine
 from qtrader.utils.async_event_engine import AsyncEventEngine, EventTypes
-from qtrader.utils.bar_generator import MultiSymbolBarGenerator, parse_interval
+from qtrader.utils.bar_generator import MultiSymbolBarGenerator
 from qtrader.utils.config_loader import StrategyConfig, get_config_loader
 from qtrader.utils.logger import get_logger
 
@@ -37,18 +35,18 @@ ctx = get_app_context()
 logger = get_logger(__name__)
 
 # 全局CSV缓存：TTLCache，默认1分钟过期，最多存储100个文件
-_csv_cache: TTLCache = TTLCache(maxsize=100, ttl=60)
+_csv_cache: TTLCache[str, dict[str, dict[str, str]]] = TTLCache(maxsize=100, ttl=60)
 
 
-def load_csv_file(csv_path: str) -> dict[str, dict]:
+def load_csv_file(csv_path: str) -> dict[str, dict[str, str]]:
     """加载CSV文件到缓存（使用TTLCache自动过期）"""
     if csv_path in _csv_cache:
-        cached: dict[str, dict] = _csv_cache[csv_path]
+        cached: dict[str, dict[str, str]] = _csv_cache[csv_path]
         return cached
 
     result = {}
     try:
-        with open(csv_path, "r", encoding="utf-8") as f:
+        with open(csv_path, encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
                 strategy_id = row.get("strategy_id", "")
@@ -60,12 +58,12 @@ def load_csv_file(csv_path: str) -> dict[str, dict]:
     except FileNotFoundError:
         logger.warning(f"参数文件不存在: {csv_path}")
         return {}
-    except Exception as e:
-        logger.error(f"加载CSV参数失败: {e}", exc_info=True)
+    except Exception:
+        logger.exception("加载CSV参数失败")
         return {}
 
 
-def load_strategy_params(config: StrategyConfig, strategy_id: str) -> dict:
+def load_strategy_params(config: StrategyConfig, strategy_id: str) -> dict[str, Any]:
     """
     加载策略参数
 
@@ -97,9 +95,7 @@ def load_strategy_params(config: StrategyConfig, strategy_id: str) -> dict:
         return {}
 
     # CSV参数直接覆盖
-    for key, value in csv_params.items():
-        if value:
-            params[key] = value
+    params.update({key: value for key, value in csv_params.items() if value})
     config.params = params
     return params
 
@@ -111,7 +107,7 @@ class StrategyManager:
         self.strategies_configs: dict[str, StrategyConfig] = strategies_config or {}
         self.strategies: dict[str, BaseStrategy] = {}
         self.trading_engine: TradingEngine = trading_engine
-        self.subscribed_symbols: set = set()
+        self.subscribed_symbols: set[str] = set()
         # 订单ID -> 策略ID 的映射关系
         self.order_strategy_map: dict[str, str] = {}
         # cmd_id -> 策略ID 的映射关系
@@ -144,8 +140,8 @@ class StrategyManager:
             logger.info("策略管理器初始化完成")
             return True
 
-        except Exception as e:
-            logger.exception(f"策略管理器初始化失败: {e}")
+        except Exception:
+            logger.exception("策略管理器初始化失败")
             return False
 
     async def _load_strategies(self) -> None:
@@ -187,8 +183,8 @@ class StrategyManager:
                 if symbol:
                     self.subscribe_symbol(symbol, config.bar)
                     strategy.bar_subscriptions.append(f"{symbol}-{config.bar}")
-            except Exception as e:
-                logger.exception(f"创建策略 {name} 失败: {e}", exc_info=True)
+            except Exception:
+                logger.exception("创建策略 {} 失败", name)
 
     async def init_strategy(self, strategy: BaseStrategy) -> None:
         """初始化策略"""
@@ -260,8 +256,8 @@ class StrategyManager:
                     if position:
                         position.update_position(tick)
                     await strategy.on_tick(tick)
-                except Exception as e:
-                    logger.exception(f"策略 {name} on_tick 失败: {e}")
+                except Exception:
+                    logger.exception("策略 {} on_tick 失败", name)
 
     async def _on_bar(self, data: BarData) -> None:
         """处理bar事件"""
@@ -270,8 +266,8 @@ class StrategyManager:
             if strategy.enabled and strategy.symbol == bar.symbol:
                 try:
                     await strategy.on_bar(bar)
-                except Exception as e:
-                    logger.exception(f"策略 {name} on_bar 失败: {e}")
+                except Exception:
+                    logger.exception("策略 {} on_bar 失败", name)
 
     async def _on_order(self, data: OrderData) -> None:
         """处理订单事件（按 order_strategy_map 分发，未映射订单不分发给策略）"""
@@ -283,8 +279,8 @@ class StrategyManager:
         if strategy and strategy.enabled:
             try:
                 await strategy.on_order(order)
-            except Exception as e:
-                logger.exception(f"策略 {strategy_id} on_order 失败: {e}")
+            except Exception:
+                logger.exception("策略 {} on_order 失败", strategy_id)
         # 订单终态后清理映射，避免字典无界增长
         if order.status in (OrderStatus.FINISHED, OrderStatus.REJECTED):
             self.order_strategy_map.pop(order.order_id, None)
@@ -299,8 +295,8 @@ class StrategyManager:
         if strategy and strategy.enabled:
             try:
                 await strategy.on_trade(trade)
-            except Exception as e:
-                logger.exception(f"策略 {strategy_id} on_trade 失败: {e}")
+            except Exception:
+                logger.exception("策略 {} on_trade 失败", strategy_id)
 
     def enable_strategy(self, name: str) -> bool:
         """启用策略"""
@@ -325,7 +321,7 @@ class StrategyManager:
 
     async def reset_strategies(self) -> None:
         """重置所有策略状态"""
-        trading_day = self.trading_engine.trading_day
+        _ = self.trading_engine.trading_day
         for strategy in self.strategies.values():
             await self.init_strategy(strategy)
 
@@ -333,7 +329,7 @@ class StrategyManager:
         """结算所有持仓"""
         for strategy in self.strategies.values():
             positions = strategy.get_all_positions()
-            for symbol, position in positions.items():
+            for position in positions.values():
                 if position.pos_long > 0:
                     position.hold_price_long = position.last_price or 0
                     position.pos_long_yd = position.pos_long
@@ -356,8 +352,8 @@ class StrategyManager:
         try:
             self.trading_engine.insert_order_cmd(order_cmd)
             logger.info(f"策略 [{strategy_id}] 发送订单指令: {order_cmd}")
-        except Exception as e:
-            logger.exception(f"策略 [{strategy_id}] 发送订单指令失败: {e}")
+        except Exception:
+            logger.exception("策略 [{}] 发送订单指令失败", strategy_id)
 
     async def cancel_order_cmd(self, strategy_id: str, order_cmd: OrderCmd) -> None:
         """
@@ -371,7 +367,7 @@ class StrategyManager:
             await self.trading_engine.cancel_order_cmd(order_cmd.cmd_id)
             logger.info(f"策略 [{strategy_id}] 取消订单指令: {order_cmd}")
         except Exception as e:
-            logger.error(f"策略 [{strategy_id}] 取消订单指令失败: {e}")
+            logger.error("策略 [{}] 取消订单指令失败: {!r}", strategy_id, e)
 
     def get_position(self, symbol: str) -> Optional["PositionData"]:
         """
@@ -383,7 +379,6 @@ class StrategyManager:
         Returns:
             PositionData: 持仓数据，如果不存在则返回None
         """
-        from qtrader.models.object import PositionData
 
         if self.trading_engine and self.trading_engine.positions:
             # 先直接用 symbol 查找
@@ -413,8 +408,8 @@ class StrategyManager:
             if account_id:
                 position.extras["account_id"] = account_id
             return await self._position_service.save_position(position)
-        except Exception as e:
-            logger.error(f"保存策略持仓失败: {e}")
+        except Exception:
+            logger.exception("保存策略持仓失败")
             return False
 
     async def cancel_order(self, strategy_id: str, order_id: str) -> bool:
@@ -429,7 +424,7 @@ class StrategyManager:
             是否成功
         """
         if not self.trading_engine:
-            logger.warning(f"TradingEngine 未设置，无法执行撤单")
+            logger.warning("TradingEngine 未设置，无法执行撤单")
             return False
 
         # 验证订单是否属于该策略
@@ -446,7 +441,7 @@ class StrategyManager:
                 logger.info(f"策略 [{strategy_id}] 撤单成功: {order_id}")
             return success
         except Exception as e:
-            logger.error(f"策略 [{strategy_id}] 撤单失败: {e}")
+            logger.error("策略 [{}] 撤单失败: {!r}", strategy_id, e)
             return False
 
     async def replay_strategy(self, strategy: BaseStrategy) -> bool:
@@ -466,7 +461,7 @@ class StrategyManager:
         Returns:
             bool: 回播是否成功
         """
-        from datetime import datetime, timedelta
+        from datetime import timedelta
 
         strategy_id = strategy.strategy_id
         # 获取当前交易日期
@@ -497,15 +492,15 @@ class StrategyManager:
 
             return True
 
-        except Exception as e:
-            logger.exception(f"策略 [{strategy_id}] 回播失败: {e}")
+        except Exception:
+            logger.exception("策略 [{}] 回播失败", strategy_id)
             return False
 
         finally:
             # 5. 恢复策略交易
             strategy.enable()
 
-    async def replay_all_strategies(self) -> dict:
+    async def replay_all_strategies(self) -> dict[str, Any]:
         """
         回播所有有效策略行情
 
@@ -515,7 +510,6 @@ class StrategyManager:
         Returns:
             dict: {"success": bool, "replayed_count": int, "message": str}
         """
-        from datetime import datetime, timedelta
 
         logger.info("开始回播所有有效策略")
 
@@ -532,7 +526,7 @@ class StrategyManager:
         try:
             replayed_count = 0
             # 2. 对每个策略执行回播
-            for _, strategy in self.strategies.items():
+            for strategy in self.strategies.values():
                 ret = await self.replay_strategy(strategy)
                 if ret:
                     replayed_count += 1
@@ -545,11 +539,11 @@ class StrategyManager:
             }
 
         except Exception as e:
-            logger.exception(f"回播所有策略失败: {e}")
-            return {"success": False, "message": f"回播失败: {str(e)}", "replayed_count": 0}
+            logger.exception("回播所有策略失败")
+            return {"success": False, "message": f"回播失败: {e}", "replayed_count": 0}
 
     async def load_hist_bars(
-        self, symbol, interval, start: datetime, end: datetime
+        self, symbol: str, interval: str, start: datetime, end: datetime
     ) -> list[BarData]:
         """
         加载历史K线数据（异步，DB查询在线程池执行避免阻塞事件循环）
@@ -576,7 +570,7 @@ class StrategyManager:
         try:
             history_pos = await BarDao().query_history_bars(symbol, interval, start, end)
             for po in history_pos:
-                bars[po.bar_time] = BarData(  # type: ignore[index]
+                bars[po.bar_time] = BarData(
                     symbol=symbol,
                     interval=interval,
                     datetime=po.bar_time,
@@ -588,8 +582,8 @@ class StrategyManager:
                     type="history",
                     update_time=po.bar_time + timedelta(minutes=1),
                 )
-        except Exception as e:
-            logger.exception(f"查询历史K线表失败: {symbol} {interval}: {e}")
+        except Exception:
+            logger.exception("查询历史K线表失败: {} {}", symbol, interval)
 
         # 2. 网关内存K线（覆盖写入，内存数据最新）
         kline_df = self.trading_engine.get_kline(symbol, interval)
@@ -617,8 +611,8 @@ class StrategyManager:
         try:
             today_pos = await BarDao().query_today_bars(symbol, interval, start, end)
             for today_po in today_pos:
-                if today_po.bar_time not in bars:  # type: ignore[index]
-                    bars[today_po.bar_time] = BarData(  # type: ignore[index]
+                if today_po.bar_time not in bars:
+                    bars[today_po.bar_time] = BarData(
                         symbol=symbol,
                         interval=interval,
                         datetime=today_po.bar_time,
@@ -630,8 +624,8 @@ class StrategyManager:
                         type="history",
                         update_time=today_po.bar_time + timedelta(minutes=1),
                     )
-        except Exception as e:
-            logger.exception(f"查询当日K线表失败: {symbol} {interval}: {e}")
+        except Exception:
+            logger.exception("查询当日K线表失败: {} {}", symbol, interval)
 
         if not bars:
             logger.warning(f"未找到 {symbol} {interval} 从 {start} 到 {end} 的K线数据")

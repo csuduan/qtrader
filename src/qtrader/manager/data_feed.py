@@ -10,8 +10,9 @@ asyncpg 连接池绑定事件循环，不能与主循环共享实例。
 import asyncio
 import threading
 import time
-from datetime import datetime, timedelta
-from typing import Callable
+from collections.abc import Callable
+from datetime import date, datetime, timedelta
+from typing import Any
 
 import pandas as pd
 from sqlalchemy import or_, select
@@ -25,7 +26,7 @@ from qtrader.utils.async_database import (
     get_async_session,
     init_async_database,
 )
-from qtrader.utils.config_loader import get_config_loader
+from qtrader.utils.config_loader import AccountConfig, AppConfig, get_config_loader
 from qtrader.utils.db_url import build_async_db_url
 from qtrader.utils.logger import get_logger
 
@@ -41,7 +42,9 @@ FEED_DB_NAME = "feed"
 AUTO_SYNC_INTERVAL = 300.0
 
 
-def collect_bar_subscriptions(app_config, account_configs) -> list[tuple[str, str]]:
+def collect_bar_subscriptions(
+    app_config: AppConfig | None, account_configs: list[AccountConfig] | None
+) -> list[tuple[str, str]]:
     """
     汇总所有启用账户的启用策略K线订阅（去重），加上全局subs配置
 
@@ -175,11 +178,11 @@ class ManagerDataFeed:
                     ):
                         self._resync_requested = False
                         await self._sync_all()
-                except Exception as e:
-                    logger.exception(f"ManagerDataFeed 轮询异常: {e}")
+                except Exception:
+                    logger.exception("ManagerDataFeed 轮询异常")
                     time.sleep(1)
-        except Exception as e:
-            logger.exception(f"ManagerDataFeed 致命错误: {e}")
+        except Exception:
+            logger.exception("ManagerDataFeed 致命错误")
         finally:
             if self.api:
                 self.api.close()
@@ -218,8 +221,8 @@ class ManagerDataFeed:
             self._klines[key] = kline
             logger.info(f"ManagerDataFeed 订阅K线: {tq_symbol} {interval}")
             return True
-        except Exception as e:
-            logger.exception(f"ManagerDataFeed 订阅K线失败: {tq_symbol} {interval}: {e}")
+        except Exception:
+            logger.exception("ManagerDataFeed 订阅K线失败: {} {}", tq_symbol, interval)
             return False
 
     async def _resolve_tq_symbol(self, symbol: str) -> str | None:
@@ -250,47 +253,44 @@ class ManagerDataFeed:
                 return None
             bare_symbol = row.symbol.split(".")[1] if "." in row.symbol else row.symbol
             return f"{row.exchange_id}.{bare_symbol}"
-        except Exception as e:
-            logger.exception(f"查询合约交易所失败: {symbol}: {e}")
+        except Exception:
+            logger.exception("查询合约交易所失败: {}", symbol)
             return None
 
+    @logger.catch(message="ManagerDataFeed 新bar落库失败")
     async def _push_new_bars(self) -> None:
         """检测新完成的bar并写入当日表（feed线程调用）"""
         if self.api is None:
             return
-        try:
-
-            trading_day = self._get_trading_day()
-            if trading_day is None:
-                return
-
-            new_bars: list[BarData] = []
-            for (symbol, interval), kline in self._klines.items():
-                if self.api.is_changing(kline.iloc[-1], "datetime"):
-                    # 新bar出现，iloc[-2]为刚完成的bar
-                    row = kline.iloc[-2]
-                    bar_time = datetime.fromtimestamp(row["datetime"] / 1e9)
-                    new_bars.append(
-                        BarData(
-                            symbol=symbol,
-                            interval=interval,
-                            datetime=bar_time,
-                            open_price=float(row["open"]),
-                            high_price=float(row["high"]),
-                            low_price=float(row["low"]),
-                            close_price=float(row["close"]),
-                            volume=float(row["volume"]),
-                            turnover=0,
-                            open_interest=float(row["close_oi"] or 0),
-                            update_time=bar_time + timedelta(minutes=1),
-                        )
+        trading_day = self._get_trading_day()
+        if trading_day is None:
+            return
+        new_bars: list[BarData] = []
+        for (symbol, interval), kline in self._klines.items():
+            if self.api.is_changing(kline.iloc[-1], "datetime"):
+                # 新bar出现，iloc[-2]为刚完成的bar
+                row = kline.iloc[-2]
+                bar_time = datetime.fromtimestamp(row["datetime"] / 1e9)
+                new_bars.append(
+                    BarData(
+                        symbol=symbol,
+                        interval=interval,
+                        datetime=bar_time,
+                        open_price=float(row["open"]),
+                        high_price=float(row["high"]),
+                        low_price=float(row["low"]),
+                        close_price=float(row["close"]),
+                        volume=float(row["volume"]),
+                        turnover=0,
+                        open_interest=float(row["close_oi"] or 0),
+                        update_time=bar_time + timedelta(minutes=1),
                     )
-            if new_bars:
-                await self._dao.upsert_today_bars(FEED_ACCOUNT_ID, new_bars, trading_day)
-                logger.debug(f"ManagerDataFeed 当日bar落库: {len(new_bars)}根")
-        except Exception as e:
-            logger.exception(f"ManagerDataFeed 新bar落库失败: {e}")
+                )
+        if new_bars:
+            await self._dao.upsert_today_bars(FEED_ACCOUNT_ID, new_bars, trading_day)
+            logger.debug(f"ManagerDataFeed 当日bar落库: {len(new_bars)}根")
 
+    @logger.catch(message="ManagerDataFeed 全量同步失败")
     async def _sync_all(self) -> None:
         """
         全量同步（feed线程调用）：补订阅新合约 + 全量K线落库
@@ -299,70 +299,62 @@ class ManagerDataFeed:
         过期数据由盘后任务清理，trading_day标记为当前交易日）。
         """
         self._last_sync_time = time.time()
-        try:
-            # 1. 补订阅（支持换月后的新合约）
-            for symbol, interval in self._subscriptions_getter():
-                await self._subscribe(symbol, interval)
-
-            if self.api is None or not self._klines:
-                return
-
-            trading_day = self._get_trading_day()
-            if trading_day is None:
-                logger.warning("ManagerDataFeed 未获取到交易日，跳过全量同步")
-                return
-
-            # 2. 全量落库
-            history_rows: list[dict] = []
-            today_bars = []
-
-            for (symbol, interval), kline in self._klines.items():
-                for _, row in kline.iterrows():
-                    if not row["volume"] or row["volume"] <= 0:
-                        continue
-                    bar_time = datetime.fromtimestamp(row["datetime"] / 1e9)
-                    history_rows.append(
-                        {
-                            "symbol": symbol,
-                            "interval": interval,
-                            "bar_time": bar_time,
-                            "trading_day": trading_day,  # 标记字段，历史段按bar_time查询
-                            "open": float(row["open"]),
-                            "high": float(row["high"]),
-                            "low": float(row["low"]),
-                            "close": float(row["close"]),
-                            "volume": float(row["volume"]),
-                            "turnover": 0,
-                            "open_interest": float(row["close_oi"] or 0),
-                        }
+        # 1. 补订阅（支持换月后的新合约）
+        for symbol, interval in self._subscriptions_getter():
+            await self._subscribe(symbol, interval)
+        if self.api is None or not self._klines:
+            return
+        trading_day = self._get_trading_day()
+        if trading_day is None:
+            logger.warning("ManagerDataFeed 未获取到交易日，跳过全量同步")
+            return
+        # 2. 全量落库
+        history_rows: list[dict[str, Any]] = []
+        today_bars = []
+        for (symbol, interval), kline in self._klines.items():
+            for _, row in kline.iterrows():
+                if not row["volume"] or row["volume"] <= 0:
+                    continue
+                bar_time = datetime.fromtimestamp(row["datetime"] / 1e9)
+                history_rows.append(
+                    {
+                        "symbol": symbol,
+                        "interval": interval,
+                        "bar_time": bar_time,
+                        "trading_day": trading_day,  # 标记字段，历史段按bar_time查询
+                        "open": float(row["open"]),
+                        "high": float(row["high"]),
+                        "low": float(row["low"]),
+                        "close": float(row["close"]),
+                        "volume": float(row["volume"]),
+                        "turnover": 0,
+                        "open_interest": float(row["close_oi"] or 0),
+                    }
+                )
+                today_bars.append(
+                    BarData(
+                        symbol=symbol,
+                        interval=interval,
+                        datetime=bar_time,
+                        open_price=float(row["open"]),
+                        high_price=float(row["high"]),
+                        low_price=float(row["low"]),
+                        close_price=float(row["close"]),
+                        volume=float(row["volume"]),
+                        turnover=0,
+                        open_interest=float(row["close_oi"] or 0),
+                        update_time=bar_time + timedelta(minutes=1),
                     )
-                    today_bars.append(
-                        BarData(
-                            symbol=symbol,
-                            interval=interval,
-                            datetime=bar_time,
-                            open_price=float(row["open"]),
-                            high_price=float(row["high"]),
-                            low_price=float(row["low"]),
-                            close_price=float(row["close"]),
-                            volume=float(row["volume"]),
-                            turnover=0,
-                            open_interest=float(row["close_oi"] or 0),
-                            update_time=bar_time + timedelta(minutes=1),
-                        )
-                    )
+                )
+        if history_rows:
+            await self._dao.upsert_history_bars(history_rows, "tq")
+        if today_bars:
+            await self._dao.upsert_today_bars(FEED_ACCOUNT_ID, today_bars, trading_day)
+        logger.info(
+            f"ManagerDataFeed 全量同步完成: {len(self._klines)}个订阅, {len(history_rows)}根"
+        )
 
-            if history_rows:
-                await self._dao.upsert_history_bars(history_rows, "tq")
-            if today_bars:
-                await self._dao.upsert_today_bars(FEED_ACCOUNT_ID, today_bars, trading_day)
-            logger.info(
-                f"ManagerDataFeed 全量同步完成: {len(self._klines)}个订阅, {len(history_rows)}根"
-            )
-        except Exception as e:
-            logger.exception(f"ManagerDataFeed 全量同步失败: {e}")
-
-    def _get_trading_day(self):
+    def _get_trading_day(self) -> date | None:
         """
         获取当前交易日（跟随TqGateway口径：20点后算下一交易日，用交易日历校正）
 
@@ -380,7 +372,7 @@ class ManagerDataFeed:
             ]:
                 trading_day += timedelta(days=1)
         except Exception as e:
-            logger.warning(f"查询交易日历失败，使用自然日作为交易日: {e}")
+            logger.warning("查询交易日历失败，使用自然日作为交易日: {!r}", e)
         return trading_day
 
     def sync_history(self) -> str:

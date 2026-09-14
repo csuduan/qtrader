@@ -101,14 +101,20 @@ def test_import_rotation_csv_replace_mode(api_client, cleanup_rotation):
     r1 = _import_ok(
         api_client,
         f"{trading_date}_a.csv",
-        [("ITEST_R1", "rb2705.SHFE", "Open", "Buy", 1), ("ITEST_R1", "rb2705.SHFE", "Open", "Buy", 2)],
+        [
+            ("ITEST_R1", "rb2705.SHFE", "Open", "Buy", 1),
+            ("ITEST_R1", "rb2705.SHFE", "Open", "Buy", 2),
+        ],
     )
     assert r1["imported"] == 2
 
     r2 = _import_ok(
         api_client,
         f"{trading_date}_b.csv",
-        [("ITEST_R2", "rb2705.SHFE", "Close", "Sell", 2), ("ITEST_R2", "rb2705.SHFE", "Close", "Sell", 3)],
+        [
+            ("ITEST_R2", "rb2705.SHFE", "Close", "Sell", 2),
+            ("ITEST_R2", "rb2705.SHFE", "Close", "Sell", 3),
+        ],
         mode="replace",
     )
     assert r2["imported"] == 2
@@ -124,7 +130,12 @@ def test_import_rotation_csv_bad_filename(api_client, cleanup_rotation):
     resp = _import_file(
         api_client,
         "badname.csv",
-        _csv_content([("ITEST_X1", "rb2705.SHFE", "Open", "Buy", 1), ("ITEST_X1", "rb2705.SHFE", "Open", "Buy", 1)]),
+        _csv_content(
+            [
+                ("ITEST_X1", "rb2705.SHFE", "Open", "Buy", 1),
+                ("ITEST_X1", "rb2705.SHFE", "Open", "Buy", 1),
+            ]
+        ),
     )
     body = resp.json()
     assert body["code"] != 0
@@ -176,7 +187,10 @@ def test_batch_delete_rotation(api_client, cleanup_rotation):
     data = _import_ok(
         api_client,
         f"{trading_date}_d.csv",
-        [("ITEST_D1", "rb2705.SHFE", "Open", "Buy", 1), ("ITEST_D1", "rb2705.SHFE", "Open", "Buy", 2)],
+        [
+            ("ITEST_D1", "rb2705.SHFE", "Open", "Buy", 1),
+            ("ITEST_D1", "rb2705.SHFE", "Open", "Buy", 2),
+        ],
     )
     assert data["imported"] == 2
 
@@ -221,9 +235,7 @@ def test_create_rotation_single_handler_missing(api_client):
 
 def test_get_rotation_not_found(api_client):
     """查询不存在的指令 → 路由层 404（HTTP 400 + body code=404 的项目约定）"""
-    resp = api_client.get(
-        "/api/rotation/99999999", params={"account_id": E2E_ACCOUNT_ID}
-    )
+    resp = api_client.get("/api/rotation/99999999", params={"account_id": E2E_ACCOUNT_ID})
     assert resp.status_code == 400
     body = resp.json()
     assert body["code"] == 404

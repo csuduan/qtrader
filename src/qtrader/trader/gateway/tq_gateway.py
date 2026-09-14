@@ -4,19 +4,18 @@ TqSdk Gateway适配器（异步版本）
 使用 TqSdk 异步 API 实现纯异步协程模式
 """
 
-import asyncio
 import math
 import queue
 import threading
 import time
+from collections.abc import Callable
 from concurrent.futures import Future
 from concurrent.futures import TimeoutError as FuturesTimeoutError
-from contextlib import closing
-from datetime import datetime, timedelta
-from typing import Any, Callable
+from datetime import date, datetime, timedelta
+from typing import Any
 
 from pandas import DataFrame
-from tqsdk import TqAccount, TqApi, TqAuth, TqCtp, TqJees, TqKq, TqRohon, TqSim, data_extension
+from tqsdk import TqAccount, TqApi, TqAuth, TqCtp, TqJees, TqKq, TqRohon, TqSim
 from tqsdk.objs import Account, Order, Position, Quote, Trade
 
 from qtrader.app_context import get_app_context
@@ -38,8 +37,7 @@ from qtrader.models.object import (
     TradeData,
 )
 from qtrader.trader.gateway.base_gateway import BaseGateway
-from qtrader.utils.async_event_engine import AsyncEventEngine
-from qtrader.utils.config_loader import GatewayConfig, TraderConfig
+from qtrader.utils.config_loader import TraderConfig
 from qtrader.utils.event import EventTypes
 from qtrader.utils.logger import get_logger
 
@@ -100,10 +98,10 @@ class TqGateway(BaseGateway):
 
         # tq 线程与指令队列（TqApi 非线程安全，跨线程调用经队列转交 tq 线程执行）
         self._tq_thead: threading.Thread | None = None
-        self._cmd_queue: queue.Queue = queue.Queue()
+        self._cmd_queue: queue.Queue[tuple[Future[Any], Callable[[], Any]]] = queue.Queue()
 
         # 交易日缓存刷新标记（(日期, 是否夜盘) 变化时在 tq 线程内重算）
-        self._td_check_key: tuple | None = None
+        self._td_check_key: tuple[date, bool] | None = None
 
         # 从全局订阅配置加载合约列表
         if self.subs_config.subscribe_symbols:
@@ -128,16 +126,14 @@ class TqGateway(BaseGateway):
 
             self._running = True
             # 启动tq主线程
-            self._tq_thead = threading.Thread(
-                target=self._tq_run, name=f"TqSdk_Thread", daemon=True
-            )
+            self._tq_thead = threading.Thread(target=self._tq_run, name="TqSdk_Thread", daemon=True)
             self._tq_thead.start()
 
             logger.info("TqSdk启动完成")
             return True
 
-        except Exception as e:
-            logger.exception(f"TqSdk连接失败: {e}")
+        except Exception:
+            logger.exception("TqSdk连接失败")
             self.md_connected = False
             self.td_connected = False
             return False
@@ -157,11 +153,11 @@ class TqGateway(BaseGateway):
             logger.info("TqSdk已断开连接")
             return True
 
-        except Exception as e:
-            logger.error(f"TqSdk断开连接失败: {e}", exc_info=True)
+        except Exception:
+            logger.exception("TqSdk断开连接失败")
             return False
 
-    def _submit_to_tq_thread(self, fn: Callable, timeout: float = 5.0) -> Any:
+    def _submit_to_tq_thread(self, fn: Callable[..., Any], timeout: float = 5.0) -> Any:
         """
         将 TqApi 调用提交到 tq 线程执行并阻塞等待结果
 
@@ -182,14 +178,14 @@ class TqGateway(BaseGateway):
         if not self._running or self.api is None:
             raise Exception("TqSdk未连接")
 
-        fut: Future = Future()
+        fut: Future[Any] = Future()
         self._cmd_queue.put((fut, fn))
         try:
             return fut.result(timeout=timeout)
-        except FuturesTimeoutError:
+        except FuturesTimeoutError as e:
             if fut.cancel():
                 logger.error(f"TqApi指令执行超时({timeout}秒)，已取消排队指令")
-            raise Exception(f"TqApi指令执行超时({timeout}秒)")
+            raise Exception(f"TqApi指令执行超时({timeout}秒)") from e
 
     def _drain_cmds(self) -> None:
         """在 tq 线程内排空指令队列"""
@@ -205,7 +201,7 @@ class TqGateway(BaseGateway):
             except Exception as e:
                 fut.set_exception(e)
 
-    def _tq_run(self):
+    def _tq_run(self) -> None:
         """
         TqSdk主线程（独立线程中运行）
 
@@ -215,9 +211,14 @@ class TqGateway(BaseGateway):
         3. 将变化数据推送到同步队列
         """
         try:
+            # 绑定局部变量供本函数使用（config 在 __init__ 赋值后不变）
+            config = self.config
+            if config is None:
+                raise RuntimeError("GatewayConfig 未初始化，无法启动TqSdk")
+            broker = config.broker
 
             # 创建认证
-            tianqin_config: Any = self.config.tianqin if self.config.tianqin else None
+            tianqin_config: Any = config.tianqin if config.tianqin else None
             username = getattr(tianqin_config, "username", "") if tianqin_config else ""
             password = getattr(tianqin_config, "password", "") if tianqin_config else ""
             if username and password:
@@ -226,48 +227,49 @@ class TqGateway(BaseGateway):
                 self.auth = None
 
             # 根据账户类型创建账户对象
-            broker_type = self.config.broker.type if self.config.broker else "sim"
+            broker_type = broker.type if broker else "sim"
             if broker_type == "kq":
                 account = TqKq()
             elif broker_type == "tq" or broker_type == "real":
                 account = TqAccount(
-                    broker_id=self.config.broker.broker_name if self.config.broker else "",
-                    account_id=self.config.broker.user_id if self.config.broker else "",
-                    password=self.config.broker.password if self.config.broker else "",
+                    broker_id=broker.broker_name if broker else "",
+                    account_id=broker.user_id if broker else "",
+                    password=broker.password if broker else "",
                 )
             elif broker_type == "ctp":
                 account = TqCtp(
-                    front_broker=self.config.broker.broker_id if self.config.broker else "",
-                    account_id=self.config.broker.user_id if self.config.broker else "",
-                    password=self.config.broker.password if self.config.broker else "",
-                    app_id=self.config.broker.app_id if self.config.broker else "",
-                    auth_code=self.config.broker.auth_code if self.config.broker else "",
-                    front_url=self.config.broker.url if self.config.broker else "",
+                    front_broker=broker.broker_id if broker else "",
+                    account_id=broker.user_id if broker else "",
+                    password=broker.password if broker else "",
+                    app_id=broker.app_id if broker else "",
+                    auth_code=broker.auth_code if broker else "",
+                    front_url=broker.url if broker else "",
                 )
             elif broker_type == "rohon":
                 account = TqRohon(
-                    front_broker=self.config.broker.broker_id if self.config.broker else "",
-                    account_id=self.config.broker.user_id if self.config.broker else "",
-                    password=self.config.broker.password if self.config.broker else "",
-                    app_id=self.config.broker.app_id if self.config.broker else "",
-                    auth_code=self.config.broker.auth_code if self.config.broker else "",
-                    front_url=self.config.broker.url if self.config.broker else "",
+                    front_broker=broker.broker_id if broker else "",
+                    account_id=broker.user_id if broker else "",
+                    password=broker.password if broker else "",
+                    app_id=broker.app_id if broker else "",
+                    auth_code=broker.auth_code if broker else "",
+                    front_url=broker.url if broker else "",
                 )
             elif broker_type == "jees":
                 account = TqJees(
-                    front_broker=self.config.broker.broker_id if self.config.broker else "",
-                    account_id=self.config.broker.user_id if self.config.broker else "",
-                    password=self.config.broker.password if self.config.broker else "",
-                    app_id=self.config.broker.app_id if self.config.broker else "",
-                    auth_code=self.config.broker.auth_code if self.config.broker else "",
-                    front_url=self.config.broker.url if self.config.broker else "",
+                    front_broker=broker.broker_id if broker else "",
+                    account_id=broker.user_id if broker else "",
+                    password=broker.password if broker else "",
+                    app_id=broker.app_id if broker else "",
+                    auth_code=broker.auth_code if broker else "",
+                    front_url=broker.url if broker else "",
                 )
             else:  # sim
                 account = TqSim()
 
             # 创建TqApi
             self.api = TqApi(account, auth=self.auth, web_gui=False, debug=False)
-            assert self.api is not None  # 确保类型检查器知道 api 不是 None
+            if self.api is None:  # 同时供类型检查器收窄，且 -O 下仍保持防御
+                raise RuntimeError("TqApi 初始化失败")
 
             # 获取账户和持仓、成交、委托单初始数据
             self._account = self.api.get_account()
@@ -326,16 +328,16 @@ class TqGateway(BaseGateway):
                     if has_data:
                         self._collect_and_push_updates()
 
-                except Exception as e:
-                    logger.error(f"轮询线程异常: {e}")
+                except Exception:
+                    logger.exception("轮询线程异常")
                     time.sleep(1)
             self.md_connected = False
             self.td_connected = False
             self._push_account(self._convert_account(self._account))
             logger.info("TqSdk轮询线程已退出")
 
-        except Exception as e:
-            logger.exception(f"轮询线程致命错误: {e}")
+        except Exception:
+            logger.exception("轮询线程致命错误")
         finally:
             if self.api:
                 self.api.close()
@@ -373,7 +375,7 @@ class TqGateway(BaseGateway):
             std_symbols = [self.std_symbol(s) for s in symbols]
             subscribe_symbols = [s for s in std_symbols if s and s not in self._quotes]
             if len(subscribe_symbols) == 0:
-                logger.info(f"无合约需要订阅")
+                logger.info("无合约需要订阅")
                 return True
 
             self._submit_to_tq_thread(
@@ -382,8 +384,8 @@ class TqGateway(BaseGateway):
             logger.info(f"订阅行情: {subscribe_symbols}")
 
             return True
-        except Exception as e:
-            logger.exception(f"订阅行情失败:{symbols} {e}")
+        except Exception:
+            logger.exception("订阅行情失败:{}", symbols)
             return False
 
     def _do_subscribe_quotes(self, subscribe_symbols: list[str]) -> list[str]:
@@ -391,7 +393,7 @@ class TqGateway(BaseGateway):
         for s in subscribe_symbols:
             contract = self.contracts.get(s)
             if not contract:
-                logger.error(f"未获取到合约信息: {s}")
+                logger.warning("未获取到合约信息: {}", s)
                 continue
             if self.api is None:
                 continue
@@ -425,14 +427,14 @@ class TqGateway(BaseGateway):
             return False
         contract = self.contracts.get(std_symbol)
         if not contract:
-            logger.error(f"未获取到合约信息: {std_symbol}")
+            logger.warning("未获取到合约信息: {}", std_symbol)
             return False
         kline = self.api.get_kline_serial(
             symbol=contract.exchange.value + "." + contract.symbol,
             duration_seconds=seconds,
             data_length=data_length,
         )
-        self._klines[(std_symbol, interval)] = kline  # type: ignore[assignment, index]
+        self._klines[(std_symbol, interval)] = kline  # type: ignore[index]
         logger.info(f"订阅K线数据: {std_symbol} {interval}")
         return True
 
@@ -457,9 +459,9 @@ class TqGateway(BaseGateway):
                 lambda: self._do_insert_order(req, contract, symbol, tick_price)
             )
             return order
-        except Exception as e:
-            logger.exception(f"下单失败: {e}")
-            raise e
+        except Exception:
+            logger.exception("下单失败")
+            raise
 
     def _do_insert_order(
         self, req: OrderRequest, contract: ContractData, symbol: str, tick_price: float
@@ -506,9 +508,9 @@ class TqGateway(BaseGateway):
                 return False
 
             return bool(self._submit_to_tq_thread(lambda: self._do_cancel_order(req)))
-        except Exception as e:
-            logger.exception(f"撤单失败: {e}")
-            raise e
+        except Exception:
+            logger.exception("撤单失败")
+            raise
 
     def _do_cancel_order(self, req: CancelRequest) -> bool:
         """在 tq 线程内执行撤单"""
@@ -522,6 +524,7 @@ class TqGateway(BaseGateway):
         logger.info(f"撤单成功: {req.order_id}")
         return True
 
+    @logger.catch(message="从API查询合约信息失败")
     def _query_and_save_contracts(self, update_date: str) -> None:
         """
         从API查询合约信息并加载到内存（不再保存到本地数据库，由Manager统一写入共享数据库）
@@ -529,45 +532,37 @@ class TqGateway(BaseGateway):
         Args:
             update_date: 更新日期 (YYYY-MM-DD)
         """
-        try:
-            if self.api is None:
-                logger.error("TqSdk未连接，无法查询合约信息")
-                return
+        if self.api is None:
+            logger.error("TqSdk未连接，无法查询合约信息")
+            return
+        # 查询合约列表
+        quotes = self.api.query_quotes(ins_class=["FUTURE"], expired=False)
+        quotes = [x for x in quotes if len(x) <= 12]
+        symbol_infos = self.api.query_symbol_info(quotes)
+        logger.info(f"从API查询到 {len(symbol_infos)} 个合约")
+        for _index, item in symbol_infos.iterrows():
+            symbol = (
+                item.instrument_id.split(".")[1]
+                if "." in item.instrument_id
+                else item.instrument_id
+            )
+            if item.exchange_id not in exchange_map:
+                continue
+            exchange = exchange_map[item.exchange_id]
+            contract = ContractData(
+                symbol=symbol,
+                exchange=exchange,
+                name=item.instrument_name,
+                product_type=ProductType.FUTURES,
+                multiple=item.volume_multiple,
+                pricetick=item.price_tick,
+                min_volume=1,
+            )
+            self.contracts[contract.symbol] = contract
+        logger.info(f"从API加载了 {len(self.contracts)} 个合约信息到内存")
 
-            # 查询合约列表
-            quotes = self.api.query_quotes(ins_class=["FUTURE"], expired=False)
-            quotes = [x for x in quotes if len(x) <= 12]
-            symbol_infos = self.api.query_symbol_info(quotes)
-            logger.info(f"从API查询到 {len(symbol_infos)} 个合约")
-
-            for index, item in symbol_infos.iterrows():
-                symbol = (
-                    item.instrument_id.split(".")[1]
-                    if "." in item.instrument_id
-                    else item.instrument_id
-                )
-                if item.exchange_id not in exchange_map:
-                    continue
-
-                exchange = exchange_map[item.exchange_id]
-                contract = ContractData(
-                    symbol=symbol,
-                    exchange=exchange,
-                    name=item.instrument_name,
-                    product_type=ProductType.FUTURES,
-                    multiple=item.volume_multiple,
-                    pricetick=item.price_tick,
-                    min_volume=1,
-                )  # type: ignore[call-arg]
-                self.contracts[contract.symbol] = contract
-
-            logger.info(f"从API加载了 {len(self.contracts)} 个合约信息到内存")
-
-            # 注意：合约不再保存到本地数据库，由Manager统一写入共享数据库
-            # Manager会通过 init_public_data 消息将合约数据推送给所有Trader
-
-        except Exception as e:
-            logger.error(f"从API查询合约信息失败: {e}", exc_info=True)
+        # 注意：合约不再保存到本地数据库，由Manager统一写入共享数据库
+        # Manager会通过 init_public_data 消息将合约数据推送给所有Trader
 
     def get_contracts(self) -> dict[str, ContractData]:
         """查询合约（兼容）"""
@@ -597,8 +592,8 @@ class TqGateway(BaseGateway):
 
             logger.info(f"强制刷新合约信息完成，共 {len(self.contracts)} 个合约")
             return True
-        except Exception as e:
-            logger.exception(f"强制刷新合约信息失败: {e}")
+        except Exception:
+            logger.exception("强制刷新合约信息失败")
             return False
 
     def get_account(self) -> AccountData | None:
@@ -645,9 +640,9 @@ class TqGateway(BaseGateway):
             kline = kline_data.copy()
             kline["datetime"] = kline["datetime"].apply(lambda x: datetime.fromtimestamp(x / 1e9))
             return kline
-        except Exception as e:
-            logger.exception(f"获取K线数据失败: {e}")
-            raise e
+        except Exception:
+            logger.exception("获取K线数据失败")
+            raise
 
     # ==================== 数据转换 ====================
     def _interval_to_seconds(self, interval: str) -> int:
@@ -680,7 +675,7 @@ class TqGateway(BaseGateway):
             md_connected=self.md_connected,
             td_connected=self.td_connected,
             status=None,
-        )  # type: ignore[call-arg]
+        )
 
     def _convert_position(self, pos: Position) -> PositionData:
         """转换持仓数据"""
@@ -813,9 +808,9 @@ class TqGateway(BaseGateway):
             limit_up=float(quote.get("upper_limit", 0)),
             limit_down=float(quote.get("lower_limit", 0)),
             trading_day=self.trading_day,
-        )  # type: ignore[call-arg]
+        )
 
-    def _convert_bar(self, symbol: str, interval: str, data, update: int | float) -> BarData:
+    def _convert_bar(self, symbol: str, interval: str, data: Any, update: int | float) -> BarData:
         """
         转换K线数据
 
@@ -838,68 +833,60 @@ class TqGateway(BaseGateway):
         # logger.info(f"收到新Bar: {data}")
         return bar
 
-    def _collect_and_push_updates(self):
+    @logger.catch(message="收集数据变化异常")
+    def _collect_and_push_updates(self) -> None:
         """收集数据变化并推送到同步队列（在轮询线程中调用）"""
-        try:
-            if self.api is None:
-                return
-            # 检查订单变化(只需检查挂单)
-            to_delete = []
-            for order in list(self._pending_orders.values()):
-                if self.api.is_changing(order):
-                    order_data = self._convert_order(order)
-                    self._push_order(order_data)
-                    if order.status == "FINISHED":
-                        to_delete.append(order.order_id)
-            for order_id in to_delete:
-                self._pending_orders.pop(order_id, None)
+        if self.api is None:
+            return
+        # 检查订单变化(只需检查挂单)
+        to_delete = []
+        for order in list(self._pending_orders.values()):
+            if self.api.is_changing(order):
+                order_data = self._convert_order(order)
+                self._push_order(order_data)
+                if order.status == "FINISHED":
+                    to_delete.append(order.order_id)
+        for order_id in to_delete:
+            self._pending_orders.pop(order_id, None)
+        # 检查成交变化
+        if self.api.is_changing(self._trades):
+            for trade in self._trades.values():
+                if self.api.is_changing(trade):
+                    trade_data = self._convert_trade(trade)
+                    self._push_trade(trade_data)
+        # 检查持仓变化（持仓数量变化，由交易引起）
+        if self.api.is_changing(self._positions):
+            for position in self._positions.values():
+                if self.api.is_changing(position, ["pos_long", "pos_short"]):
+                    position_data = self._convert_position(position)
+                    self._push_position(position_data, source="trade")
+        # 检查账户变化
+        # if self.api.is_changing(self._account):
+        #    account_data = self._convert_account(self._account)
+        #    self._push_account(account_data)
+        # 检查行情变化
+        for quote in self._quotes.values():
+            if self.api.is_changing(quote):
+                tick_data = self._convert_tick(quote)
+                self._push_tick(tick_data)
+        # 检查K线变化
+        for key, kline in self._klines.items():
+            symbol, interval = key[0], key[1]
+            if self.api.is_changing(kline.iloc[-1], "datetime"):
+                bar_data = self._convert_bar(
+                    symbol, interval, kline.iloc[-2], kline.iloc[-1]["datetime"]
+                )
+                self._push_bar(bar_data)
 
-            # 检查成交变化
-            if self.api.is_changing(self._trades):
-                for trade in self._trades.values():
-                    if self.api.is_changing(trade):
-                        trade_data = self._convert_trade(trade)
-                        self._push_trade(trade_data)
-
-            # 检查持仓变化（持仓数量变化，由交易引起）
-            if self.api.is_changing(self._positions):
-                for position in self._positions.values():
-                    if self.api.is_changing(position, ["pos_long", "pos_short"]):
-                        position_data = self._convert_position(position)
-                        self._push_position(position_data, source="trade")
-
-            # 检查账户变化
-            # if self.api.is_changing(self._account):
-            #    account_data = self._convert_account(self._account)
-            #    self._push_account(account_data)
-
-            # 检查行情变化
-            for quote in self._quotes.values():
-                if self.api.is_changing(quote):
-                    tick_data = self._convert_tick(quote)
-                    self._push_tick(tick_data)
-
-            # 检查K线变化
-            for key, kline in self._klines.items():
-                symbol, interval = key[0], key[1]
-                if self.api.is_changing(kline.iloc[-1], "datetime"):
-                    bar_data = self._convert_bar(
-                        symbol, interval, kline.iloc[-2], kline.iloc[-1]["datetime"]
-                    )
-                    self._push_bar(bar_data)
-
-        except Exception as e:
-            logger.exception(f"收集数据变化异常: {e}")
-
-    def _push_tick(self, tick_data: TickData):
+    def _push_tick(self, tick_data: TickData) -> None:
         """推送Tick数据到同步队列（非阻塞）"""
         self.emit_event(EventTypes.TICK_UPDATE, tick_data)
 
-    def _push_bar(self, bar_data: BarData):
+    def _push_bar(self, bar_data: BarData) -> None:
         """推送Bar数据到同步队列（非阻塞）"""
         self.emit_event(EventTypes.KLINE_UPDATE, bar_data)
 
-    def _push_trade(self, trade_data: TradeData):
+    def _push_trade(self, trade_data: TradeData) -> None:
         """推送Trade数据到同步队列（非阻塞）"""
         # 从挂单缓存中获取报单价格（用于计算滑点）
         order = self._pending_orders.get(trade_data.order_id)
@@ -909,7 +896,7 @@ class TqGateway(BaseGateway):
         self.emit_event(EventTypes.TRADE_UPDATE, trade_data)
         logger.info(f"成交回报: {trade_data}")
 
-    def _push_position(self, position_data: PositionData, source: str = "trade"):
+    def _push_position(self, position_data: PositionData, source: str = "trade") -> None:
         """推送Position数据到同步队列（非阻塞）
 
         Args:
@@ -921,21 +908,21 @@ class TqGateway(BaseGateway):
         data_dict["_source"] = source
         self.emit_event(EventTypes.POSITION_UPDATE, data_dict)
 
-    def _push_account(self, account_data: AccountData):
+    def _push_account(self, account_data: AccountData) -> None:
         """推送Account数据到同步队列（非阻塞）"""
         self.emit_event(EventTypes.ACCOUNT_UPDATE, account_data)
 
-    def _push_order(self, order_data: OrderData):
+    def _push_order(self, order_data: OrderData) -> None:
         """推送Order数据到同步队列（非阻塞）"""
         self.emit_event(EventTypes.ORDER_UPDATE, order_data)
         logger.info(f"报单回报: {order_data}")
 
-    def _push_ready(self):
+    def _push_ready(self) -> None:
         """推送就绪通知到同步队列（非阻塞）"""
         self.emit_event(EventTypes.ACCOUNT_READY, None)
         logger.info("TqSdk就绪通知已发送")
 
-    def _push_contract(self, contract_data: ContractData):
+    def _push_contract(self, contract_data: ContractData) -> None:
         """推送Contract数据到同步队列（非阻塞）"""
         self.emit_event(EventTypes.CONTRACT_UPDATE, contract_data)
 

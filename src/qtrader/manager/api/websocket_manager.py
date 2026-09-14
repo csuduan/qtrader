@@ -2,8 +2,8 @@
 WebSocket管理模块
 """
 
-import asyncio
 from datetime import datetime
+from typing import Any
 
 import orjson
 from fastapi import WebSocket
@@ -19,12 +19,12 @@ ctx: AppContext = get_app_context()
 class WebSocketManager:
     """WebSocket连接管理器"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.active_connections: set[WebSocket] = set()
         # 行情订阅状态: connection -> bool
         self.quote_subscriptions: dict[WebSocket, bool] = {}
 
-    def start(self):
+    def start(self) -> None:
         event_engine: AsyncEventEngine = ctx.get(AppContext.KEY_EVENT_ENGINE)
         event_engine.register(EventTypes.POSITION_UPDATE, self.broadcast_position)
         event_engine.register(EventTypes.ORDER_UPDATE, self.broadcast_order)
@@ -34,14 +34,14 @@ class WebSocketManager:
         event_engine.register(EventTypes.ACCOUNT_UPDATE, self.broadcast_account)
         logger.info("WEBSOCKET已注册事件引擎订阅")
 
-    async def connect(self, websocket: WebSocket):
+    async def connect(self, websocket: WebSocket) -> None:
         """接受WebSocket连接"""
         await websocket.accept()
         self.active_connections.add(websocket)
         self.quote_subscriptions[websocket] = False
         logger.info(f"WebSocket连接已建立，当前连接数: {len(self.active_connections)}")
 
-    async def disconnect(self, websocket: WebSocket):
+    async def disconnect(self, websocket: WebSocket) -> None:
         """断开WebSocket连接"""
         self.active_connections.discard(websocket)
         self.quote_subscriptions.pop(websocket, None)
@@ -53,15 +53,15 @@ class WebSocketManager:
             self.quote_subscriptions[websocket] = subscribed
             logger.info(f"WebSocket行情订阅状态更新: {subscribed}")
 
-    async def broadcast(self, message: dict):
+    async def broadcast(self, message: dict[str, Any]) -> None:
         """广播消息到所有连接"""
         if not self.active_connections:
             return
         try:
             # orjson 返回 bytes；datetime/Decimal 原生支持，NaN/Infinity 序列化为 null
             message_str = orjson.dumps(message).decode("utf-8")
-        except Exception as e:
-            logger.error(f"JSON序列化消息失败: {e} {message}")
+        except Exception:
+            logger.exception("JSON序列化消息失败: {}", message)
             return
 
         disconnected = set()
@@ -69,14 +69,16 @@ class WebSocketManager:
             try:
                 await connection.send_text(message_str)
             except Exception as e:
-                logger.error(f"发送消息失败: {e}")
+                logger.error("发送消息失败: {!r}", e)
                 disconnected.add(connection)
 
         # 清理断开的连接
         for connection in disconnected:
             await self.disconnect(connection)
 
-    async def broadcast_to_subscribers(self, message: dict, subscription_key: str):
+    async def broadcast_to_subscribers(
+        self, message: dict[str, Any], subscription_key: str
+    ) -> None:
         """按订阅状态广播消息"""
         if not self.active_connections:
             return
@@ -89,14 +91,14 @@ class WebSocketManager:
             try:
                 await connection.send_text(message_str)
             except Exception as e:
-                logger.error(f"发送消息失败: {e}")
+                logger.error("发送消息失败: {!r}", e)
                 disconnected.add(connection)
 
         # 清理断开的连接
         for connection in disconnected:
             await self.disconnect(connection)
 
-    async def broadcast_account(self, account_data: dict) -> None:
+    async def broadcast_account(self, account_data: dict[str, Any]) -> None:
         """广播账户信息更新"""
         logger.debug(f"广播账户信息更新: {account_data}")
         await self.broadcast(
@@ -107,7 +109,7 @@ class WebSocketManager:
             }
         )
 
-    async def broadcast_position(self, position_data: dict) -> None:
+    async def broadcast_position(self, position_data: dict[str, Any]) -> None:
         """广播持仓信息更新"""
         await self.broadcast(
             {
@@ -117,7 +119,7 @@ class WebSocketManager:
             }
         )
 
-    async def broadcast_trade(self, trade_data: dict) -> None:
+    async def broadcast_trade(self, trade_data: dict[str, Any]) -> None:
         """广播新成交记录"""
         await self.broadcast(
             {
@@ -127,7 +129,7 @@ class WebSocketManager:
             }
         )
 
-    async def broadcast_order(self, order_data: dict) -> None:
+    async def broadcast_order(self, order_data: dict[str, Any]) -> None:
         """广播委托单状态更新"""
         await self.broadcast(
             {
@@ -137,7 +139,7 @@ class WebSocketManager:
             }
         )
 
-    async def broadcast_quote(self, quote_data: dict) -> None:
+    async def broadcast_quote(self, quote_data: dict[str, Any]) -> None:
         """广播行情更新（仅推送给订阅了行情的连接）"""
         await self.broadcast_to_subscribers(
             {
@@ -148,7 +150,7 @@ class WebSocketManager:
             "quote",
         )
 
-    async def broadcast_quotes(self, quotes_data: dict) -> None:
+    async def broadcast_quotes(self, quotes_data: dict[str, Any]) -> None:
         """广播批量行情更新（仅推送给订阅了行情的连接）"""
         await self.broadcast_to_subscribers(
             {

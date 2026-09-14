@@ -3,10 +3,10 @@ Gateway适配器基类
 定义统一的接口契约，具体Gateway实现继承此类
 """
 
-import re
 from abc import ABC, abstractmethod
-from datetime import date, datetime
-from typing import Any
+from collections.abc import Sequence
+from datetime import datetime
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 
@@ -20,7 +20,6 @@ from qtrader.models.object import (
     CancelRequest,
     ContractData,
     Exchange,
-    Interval,
     OrderData,
     OrderRequest,
     PositionData,
@@ -29,6 +28,9 @@ from qtrader.models.object import (
     TradeData,
 )
 from qtrader.utils.logger import get_logger
+
+if TYPE_CHECKING:
+    from qtrader.models.po import ContractPo
 
 logger = get_logger(__name__)
 
@@ -53,7 +55,7 @@ class BaseGateway(ABC):
     # Gateway名称
     gateway_name: str = "BaseGateway"
 
-    def __init__(self):
+    def __init__(self) -> None:
         """初始化Gateway"""
         self.md_connected: bool = False  # 行情连接状态
         self.td_connected: bool = False  # 交易连接状态
@@ -63,7 +65,7 @@ class BaseGateway(ABC):
         self._event_engine: AsyncEventEngine | None = ctx.get_event_engine()
         logger.info(f"{self.gateway_name} Gateway 初始化完成")
 
-    async def close(self):
+    async def close(self) -> None:
         """关闭Gateway连接"""
         self.running = False
         await self.disconnect()
@@ -166,11 +168,11 @@ class BaseGateway(ABC):
                 self._contracts_update_date = update_date
                 logger.info(f"从数据库加载了 {loaded_count} 个合约信息 (更新日期: {update_date})")
                 return self.contracts
-        except Exception as e:
-            logger.error(f"从数据库加载合约信息失败: {e}")
+        except Exception:
+            logger.exception("从数据库加载合约信息失败")
             return None
 
-    def _parse_contract_pos(self, contract_pos: list) -> int:
+    def _parse_contract_pos(self, contract_pos: Sequence["ContractPo"]) -> int:
         """
         解析合约PO对象列表并写入内存缓存
 
@@ -182,28 +184,28 @@ class BaseGateway(ABC):
         """
         loaded_count = 0
         for po in contract_pos:
-            symbol = po.symbol.split(".")[1] if "." in po.symbol else po.symbol  # type: ignore[union-attr]
-            exchange = Exchange.from_str(po.exchange_id)  # type: ignore[arg-type]
+            symbol = po.symbol.split(".")[1] if "." in po.symbol else po.symbol
+            exchange = Exchange.from_str(po.exchange_id)
             if exchange == Exchange.NONE:
                 continue
             contract = ContractData(
-                symbol=symbol,  # type: ignore[arg-type]
+                symbol=symbol,
                 exchange=exchange,
-                name=po.instrument_name or po.symbol,  # type: ignore[arg-type]
+                name=po.instrument_name or po.symbol,
                 product_type=ProductType.FUTURES,
-                multiple=po.volume_multiple,  # type: ignore[arg-type]
+                multiple=po.volume_multiple,
                 pricetick=float(po.price_tick),
-                min_volume=po.min_volume,  # type: ignore[arg-type]
-                min_open_volume=po.min_open_volume,  # type: ignore[arg-type]
+                min_volume=po.min_volume,
+                min_open_volume=po.min_open_volume,
                 option_strike=float(po.option_strike) if po.option_strike else None,
-                option_underlying=po.option_underlying,  # type: ignore[arg-type]
-                option_type=po.option_type,  # type: ignore[arg-type]
-            )  # type: ignore[call-arg]
+                option_underlying=po.option_underlying,
+                option_type=po.option_type,
+            )
             self.contracts[contract.symbol] = contract
             loaded_count += 1
         return loaded_count
 
-    def load_contracts_from_init_data(self, contracts: list) -> int:
+    def load_contracts_from_init_data(self, contracts: list[dict[str, Any]]) -> int:
         """
         从 Manager 推送的公共数据中加载合约信息
 
@@ -233,25 +235,25 @@ class BaseGateway(ABC):
                     continue
 
                 contract = ContractData(
-                    symbol=symbol,  # type: ignore[arg-type]
+                    symbol=symbol,
                     exchange=exchange,
-                    name=contract_dict.get("instrument_name") or symbol,  # type: ignore[arg-type]
+                    name=contract_dict.get("instrument_name") or symbol,
                     product_type=ProductType.FUTURES,
-                    multiple=contract_dict.get("volume_multiple", 1),  # type: ignore[arg-type]
+                    multiple=contract_dict.get("volume_multiple", 1),
                     pricetick=float(contract_dict.get("price_tick", 0.01)),
-                    min_volume=contract_dict.get("min_volume", 1),  # type: ignore[arg-type]
+                    min_volume=contract_dict.get("min_volume", 1),
                     option_strike=(
                         float(contract_dict["option_strike"])
                         if contract_dict.get("option_strike")
                         else None
                     ),
-                    option_underlying=contract_dict.get("option_underlying"),  # type: ignore[arg-type]
-                    option_type=contract_dict.get("option_type"),  # type: ignore[arg-type]
-                )  # type: ignore[call-arg]
+                    option_underlying=contract_dict.get("option_underlying"),
+                    option_type=contract_dict.get("option_type"),
+                )
                 self.contracts[contract.symbol] = contract
                 loaded_count += 1
             except Exception as e:
-                logger.warning(f"解析合约数据失败 [{contract_dict.get('symbol')}]: {e}")
+                logger.warning("解析合约数据失败 [{}]: {!r}", contract_dict.get("symbol"), e)
 
         if loaded_count > 0:
             self._contracts_update_date = update_date

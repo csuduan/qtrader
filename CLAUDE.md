@@ -54,20 +54,20 @@
 ## 规范与约束
 ### 后端 (Python)
 - **Python版本**: 3.12+，使用 `typing` 模块的类型提示
-- **格式化**: Black 100字符行长度，isort (black profile)
+- **格式化**: Ruff 100字符行长度（format 接替 Black，lint I 规则接替 isort）
 - **导入顺序**: 标准库 → 第三方库 → 本地模块
 - **命名规范**: 函数/变量使用 snake_case，类使用 CamelCase
 - **文档字符串**: 中文，三引号，描述 Args/Returns
 - **日志记录**: 使用 `qtrader.utils.logger` 的 `get_logger(__name__)`
-- **错误处理**: Try/except 配合 logger.exception()
+- **错误处理**: 异常日志两种形态——需要堆栈 `logger.exception("动作失败")`（堆栈本身已含异常信息，消息不再重复插值异常，可保留普通上下文如 `logger.exception("策略 [{}] 失败", name)`），预期内失败无堆栈 `logger.error("动作失败: {!r}", e)`；方法整体"仅打日志"的兜底优先用 `@logger.catch(message="动作失败")`（总是带堆栈、吞异常返回 None，等价于 try 包裹全函数体；无堆栈场景不可用，仍用 try/except）；异常值用 `{!r}` 位置参数（loguru 延迟格式化），禁止 `exc_info=True`（loguru 不支持该参数）；except 块外记录异常对象用 `logger.opt(exception=exc).error("描述")`；全库统一 loguru（含合约 fetcher），无 stdlib logging
 - **数据模型**: SQLAlchemy ORM (`qtrader.models.po`) 使用 `__repr__`，API 模式使用 Pydantic (`qtrader.manager.api.schemas`)
 - **API开发**: FastAPI 异步端点，Config 中设置 `from_attributes = True`
 - **注释**: 中文，简洁（除非有特殊要求，否则不写行内注释）
 - **事件系统**: 使用事件引擎进行解耦通信，在 `EventTypes` 类中定义事件类型
 - **强类型约束**: 方法的输入及输出应当明确指明类型
-- **规范工具**: 使用 black 和 isort 格式化代码
+- **规范工具**: 使用 ruff 检查并格式化代码
 ```bash
-make format   # 或: black src/ --line-length 100 --target py312 && isort src/ --profile black
+make format   # 或: ruff check --fix src/ && ruff format src/
 ```
 
 ### 前端 (Vue + TypeScript)
@@ -191,6 +191,9 @@ make format
 
 # 代码检查
 make lint
+
+# 综合检查（先 mypy 静态检查，再 lint）
+make check
 
 # 单元测试
 make test-unit

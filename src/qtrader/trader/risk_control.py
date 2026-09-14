@@ -4,7 +4,8 @@
 """
 
 import asyncio
-from datetime import datetime, time
+from datetime import datetime
+from typing import Any
 
 from qtrader.utils.config_loader import RiskControlConfig
 from qtrader.utils.logger import get_logger
@@ -75,7 +76,7 @@ class RiskControl:
                     f"撤单={self.daily_cancel_count}"
                 )
         except Exception as e:
-            logger.warning(f"加载风控计数器失败: {e}")
+            logger.warning("加载风控计数器失败: {!r}", e)
             self.daily_order_count = 0
             self.daily_cancel_count = 0
             self._last_reset_date = None
@@ -134,8 +135,8 @@ class RiskControl:
                         )
                     )
                     if record:
-                        record.param_value = str(value)  # type: ignore[assignment]
-                        record.group = group  # type: ignore[assignment]
+                        record.param_value = str(value)
+                        record.group = group
                     else:
                         session.add(
                             SystemParamPo(
@@ -147,7 +148,7 @@ class RiskControl:
                             )
                         )
         except Exception as e:
-            logger.warning(f"保存风控计数器失败: {e}")
+            logger.warning("保存风控计数器失败: {!r}", e)
 
     def _reset_if_new_day(self) -> None:
         """如果是新的一天，重置计数器"""
@@ -214,7 +215,7 @@ class RiskControl:
         logger.debug(f"撤单计数更新: {self.daily_cancel_count}/{self.config.max_daily_cancels}")
         self._schedule_save_counters()
 
-    def get_status(self) -> dict:
+    def get_status(self) -> dict[str, Any]:
         """
         获取风控状态
 

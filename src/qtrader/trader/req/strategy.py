@@ -4,22 +4,22 @@
 
 from __future__ import annotations
 
-import asyncio
-from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from qtrader.trader.req.base import BaseReqHandler
 from qtrader.utils.ipc import request
 from qtrader.utils.logger import get_logger
 
 if TYPE_CHECKING:
-    from qtrader.models.po import RotationInstructionPo
+    from qtrader.trader.strategy.base_strategy import BaseStrategy
 
 logger = get_logger(__name__)
 
 
 class StrategyReqHandler(BaseReqHandler):
-    def _calc_position_profit(self, strategy, symbol: str, last_price: float) -> float:
+    def _calc_position_profit(
+        self, strategy: BaseStrategy, symbol: str, last_price: float
+    ) -> float:
         """计算策略持仓盈亏"""
         position = strategy.get_position(symbol)
         if not position or last_price <= 0:
@@ -29,18 +29,24 @@ class StrategyReqHandler(BaseReqHandler):
 
         # 计算多头持仓盈亏
         long_profit = 0.0
-        if position.pos_long > 0 and position.hold_price_long > 0:
-            long_profit = (last_price - position.hold_price_long) * position.pos_long * multiple
+        if position.pos_long > 0 and cast(float, position.hold_price_long) > 0:
+            long_profit = (
+                (last_price - cast(float, position.hold_price_long)) * position.pos_long * multiple
+            )
 
         # 计算空头持仓盈亏
         short_profit = 0.0
-        if position.pos_short > 0 and position.hold_price_short > 0:
-            short_profit = (position.hold_price_short - last_price) * position.pos_short * multiple
+        if position.pos_short > 0 and cast(float, position.hold_price_short) > 0:
+            short_profit = (
+                (cast(float, position.hold_price_short) - last_price)
+                * position.pos_short
+                * multiple
+            )
 
         return long_profit + short_profit
 
     @request("list_strategies")
-    async def _req_list_strategies(self, data: dict) -> list:
+    async def _req_list_strategies(self, data: dict[str, Any]) -> list[dict[str, Any]]:
         """处理获取策略列表请求"""
         if self.trader.strategy_manager is None:
             return []
@@ -104,7 +110,7 @@ class StrategyReqHandler(BaseReqHandler):
         return result
 
     @request("get_strategy")
-    async def _req_get_strategy(self, data: dict) -> dict | None:
+    async def _req_get_strategy(self, data: dict[str, Any]) -> dict[str, Any] | None:
         """处理获取指定策略状态请求"""
         if self.trader.strategy_manager is None:
             return None
@@ -169,7 +175,7 @@ class StrategyReqHandler(BaseReqHandler):
         return None
 
     @request("replay_all_strategies")
-    async def _req_replay_all_strategies(self, data: dict) -> dict:
+    async def _req_replay_all_strategies(self, data: dict[str, Any]) -> dict[str, Any]:
         """处理回播所有策略请求"""
         if self.trader.strategy_manager is None:
             return {"success": False, "message": "策略管理器未初始化"}
@@ -185,11 +191,11 @@ class StrategyReqHandler(BaseReqHandler):
             else:
                 return {"success": False, "message": result.get("message", "回播失败")}
         except Exception as e:
-            logger.exception(f"回播策略失败: {e}")
-            return {"success": False, "message": f"回播策略失败: {str(e)}"}
+            logger.exception("回播策略失败")
+            return {"success": False, "message": f"回播策略失败: {e}"}
 
     @request("update_strategy_params")
-    async def _req_update_strategy_params(self, data: dict) -> dict:
+    async def _req_update_strategy_params(self, data: dict[str, Any]) -> dict[str, Any]:
         """处理更新策略参数请求"""
         if self.trader.strategy_manager is None:
             return {"success": False, "message": "策略管理器未初始化"}
@@ -210,11 +216,11 @@ class StrategyReqHandler(BaseReqHandler):
             logger.info(f"策略 [{strategy_id}] 参数已更新: {params}")
             return {"success": True, "message": "参数更新成功"}
         except Exception as e:
-            logger.exception(f"更新策略参数失败: {e}")
-            return {"success": False, "message": f"更新失败: {str(e)}"}
+            logger.exception("更新策略参数失败")
+            return {"success": False, "message": f"更新失败: {e}"}
 
     @request("update_strategy_signal")
-    async def _req_update_strategy_signal(self, data: dict) -> dict:
+    async def _req_update_strategy_signal(self, data: dict[str, Any]) -> dict[str, Any]:
         """处理更新策略信号请求"""
         if self.trader.strategy_manager is None:
             return {"success": False, "message": "策略管理器未初始化"}
@@ -235,11 +241,11 @@ class StrategyReqHandler(BaseReqHandler):
             logger.info(f"策略 [{strategy_id}] 信号已更新: {signal}")
             return {"success": True, "message": "信号更新成功"}
         except Exception as e:
-            logger.exception(f"更新策略信号失败: {e}")
-            return {"success": False, "message": f"更新失败: {str(e)}"}
+            logger.exception("更新策略信号失败")
+            return {"success": False, "message": f"更新失败: {e}"}
 
     @request("clear_strategy_signal")
-    async def _req_clear_strategy_signal(self, data: dict) -> dict:
+    async def _req_clear_strategy_signal(self, data: dict[str, Any]) -> dict[str, Any]:
         """处理清除策略信号请求"""
         if self.trader.strategy_manager is None:
             return {"success": False, "message": "策略管理器未初始化"}
@@ -258,11 +264,11 @@ class StrategyReqHandler(BaseReqHandler):
             strategy.clear_signal()
             return {"success": True, "message": "信号已清除"}
         except Exception as e:
-            logger.exception(f"清除策略信号失败: {e}")
-            return {"success": False, "message": f"清除失败: {str(e)}"}
+            logger.exception("清除策略信号失败")
+            return {"success": False, "message": f"清除失败: {e}"}
 
     @request("update_strategy_position_detail")
-    async def _req_update_strategy_position_detail(self, data: dict) -> dict:
+    async def _req_update_strategy_position_detail(self, data: dict[str, Any]) -> dict[str, Any]:
         """处理更新策略持仓详情请求（单个合约）"""
         if self.trader.strategy_manager is None:
             return {"success": False, "message": "策略管理器未初始化"}
@@ -358,11 +364,11 @@ class StrategyReqHandler(BaseReqHandler):
             )
             return {"success": True, "message": "持仓更新成功"}
         except Exception as e:
-            logger.exception(f"更新策略持仓详情失败: {e}")
-            return {"success": False, "message": f"更新失败: {str(e)}"}
+            logger.exception("更新策略持仓详情失败")
+            return {"success": False, "message": f"更新失败: {e}"}
 
     @request("delete_strategy_position")
-    async def _req_delete_strategy_position(self, data: dict) -> dict:
+    async def _req_delete_strategy_position(self, data: dict[str, Any]) -> dict[str, Any]:
         """处理删除策略持仓请求（清空单个合约持仓）"""
         if self.trader.strategy_manager is None:
             return {"success": False, "message": "策略管理器未初始化"}
@@ -402,11 +408,11 @@ class StrategyReqHandler(BaseReqHandler):
             logger.info(f"策略 [{strategy_id}] {symbol} 持仓已删除")
             return {"success": True, "message": "持仓已删除"}
         except Exception as e:
-            logger.exception(f"删除策略持仓失败: {e}")
-            return {"success": False, "message": f"删除失败: {str(e)}"}
+            logger.exception("删除策略持仓失败")
+            return {"success": False, "message": f"删除失败: {e}"}
 
     @request("set_strategy_trading_status")
-    async def _req_set_strategy_trading_status(self, data: dict) -> dict:
+    async def _req_set_strategy_trading_status(self, data: dict[str, Any]) -> dict[str, Any]:
         """
         处理设置策略交易状态请求（统一接口）
 
@@ -438,11 +444,11 @@ class StrategyReqHandler(BaseReqHandler):
                 result_data["closing_paused"] = status["closing_paused"]
             return {"success": True, "message": "设置成功", "data": result_data}
         except Exception as e:
-            logger.exception(f"设置策略交易状态失败: {e}")
-            return {"success": False, "message": f"操作失败: {str(e)}"}
+            logger.exception("设置策略交易状态失败")
+            return {"success": False, "message": f"操作失败: {e}"}
 
     @request("enable_strategy")
-    async def _req_enable_strategy(self, data: dict) -> dict:
+    async def _req_enable_strategy(self, data: dict[str, Any]) -> dict[str, Any]:
         """处理启用策略请求"""
         if self.trader.strategy_manager is None:
             return {"success": False, "message": "策略管理器未初始化"}
@@ -461,11 +467,11 @@ class StrategyReqHandler(BaseReqHandler):
             strategy.enable()
             return {"success": True, "message": "启用策略成功"}
         except Exception as e:
-            logger.exception(f"启用策略失败: {e}")
-            return {"success": False, "message": f"操作失败: {str(e)}"}
+            logger.exception("启用策略失败")
+            return {"success": False, "message": f"操作失败: {e}"}
 
     @request("disable_strategy")
-    async def _req_disable_strategy(self, data: dict) -> dict:
+    async def _req_disable_strategy(self, data: dict[str, Any]) -> dict[str, Any]:
         """处理禁用策略请求"""
         if self.trader.strategy_manager is None:
             return {"success": False, "message": "策略管理器未初始化"}
@@ -484,11 +490,11 @@ class StrategyReqHandler(BaseReqHandler):
             strategy.enable(False)
             return {"success": True, "message": "禁用策略成功"}
         except Exception as e:
-            logger.exception(f"禁用策略失败: {e}")
-            return {"success": False, "message": f"操作失败: {str(e)}"}
+            logger.exception("禁用策略失败")
+            return {"success": False, "message": f"操作失败: {e}"}
 
     @request("init_strategy")
-    async def _req_init_strategy(self, data: dict) -> dict:
+    async def _req_init_strategy(self, data: dict[str, Any]) -> dict[str, Any]:
         """
         处理初始化策略请求
         调用策略的 init() 方法
@@ -510,11 +516,11 @@ class StrategyReqHandler(BaseReqHandler):
             logger.info(f"策略 [{strategy_id}] 初始化成功")
             return {"success": True, "message": "策略初始化成功"}
         except Exception as e:
-            logger.exception(f"初始化策略失败: {e}")
-            return {"success": False, "message": f"操作失败: {str(e)}"}
+            logger.exception("初始化策略失败")
+            return {"success": False, "message": f"操作失败: {e}"}
 
     @request("get_strategy_order_cmds")
-    async def _req_get_strategy_order_cmds(self, data: dict) -> list:
+    async def _req_get_strategy_order_cmds(self, data: dict[str, Any]) -> list[dict[str, Any]]:
         """处理获取策略报单指令历史请求"""
         if self.trader.trading_engine is None:
             logger.error(f"Trader [{self.account_id}] 交易引擎未初始化")
@@ -549,12 +555,12 @@ class StrategyReqHandler(BaseReqHandler):
                         filtered_cmds.append(cmd)
 
             return [cmd.to_dict() for cmd in filtered_cmds]
-        except Exception as e:
-            logger.exception(f"Trader [{self.account_id}] 获取策略报单指令失败: {e}")
+        except Exception:
+            logger.exception("Trader [{}] 获取策略报单指令失败", self.account_id)
             return []
 
     @request("send_strategy_order_cmd")
-    async def _req_send_strategy_order_cmd(self, data: dict) -> dict:
+    async def _req_send_strategy_order_cmd(self, data: dict[str, Any]) -> dict[str, Any]:
         """处理发送策略报单指令请求"""
         if self.trader.strategy_manager is None:
             return {"success": False, "message": "策略管理器未初始化"}
@@ -591,11 +597,11 @@ class StrategyReqHandler(BaseReqHandler):
             )
             return {"success": True, "cmd_id": order_cmd.cmd_id}
         except Exception as e:
-            logger.exception(f"发送策略报单指令失败: {e}")
-            return {"success": False, "message": f"发送失败: {str(e)}"}
+            logger.exception("发送策略报单指令失败")
+            return {"success": False, "message": f"发送失败: {e}"}
 
     @request("send_order_cmd")
-    async def _req_send_order_cmd(self, data: dict) -> dict:
+    async def _req_send_order_cmd(self, data: dict[str, Any]) -> dict[str, Any]:
         """处理发送账户级报单指令请求（手动报单/平仓等，不依赖策略）"""
         engine = self.trader.trading_engine
         if engine is None:
@@ -630,39 +636,5 @@ class StrategyReqHandler(BaseReqHandler):
             )
             return {"success": True, "cmd_id": order_cmd.cmd_id}
         except Exception as e:
-            logger.exception(f"发送报单指令失败: {e}")
-            return {"success": False, "message": f"发送失败: {str(e)}"}
-
-    def _build_strategy_config(self, strategy) -> dict:
-        """构建策略配置对象"""
-        from qtrader.trader.req.schemas import StrategyConfig
-
-        config = strategy.config
-        params = strategy.get_params()
-        strategy_config = StrategyConfig(
-            enabled=config.get("enabled", True),
-            strategy_type=config.get("type", "bar"),
-            symbol=config.get("symbol", ""),
-            exchange=config.get("exchange", ""),
-            volume_per_trade=config.get("volume_per_trade", config.get("volume", 1)),
-            max_position=config.get("max_position", 5),
-            bar=config.get("bar"),
-            params_file=config.get("params_file"),
-            take_profit_pct=config.get("take_profit_pct", config.get("TpRet")),
-            stop_loss_pct=config.get("stop_loss_pct", config.get("SlRet")),
-            fee_rate=config.get("fee_rate"),
-            trade_start_time=config.get("trade_start_time", config.get("StartTime")),
-            trade_end_time=config.get("trade_end_time", config.get("EndTime")),
-            force_exit_time=config.get("force_exit_time", config.get("ForceExitTime")),
-            one_trade_per_day=config.get("one_trade_per_day"),
-            rsi_period=config.get("rsi_period"),
-            rsi_long_threshold=config.get("rsi_long_threshold"),
-            rsi_short_threshold=config.get("rsi_short_threshold"),
-            short_kline_period=config.get("short_kline_period"),
-            long_kline_period=config.get("long_kline_period"),
-            dir_threshold=config.get("dir_threshold", config.get("DirThr")),
-            used_signal=config.get("used_signal", config.get("UsedSignal")),
-        )
-        return strategy_config.model_dump()
-
-    # ========== 换仓管理请求处理 ==========
+            logger.exception("发送报单指令失败")
+            return {"success": False, "message": f"发送失败: {e}"}

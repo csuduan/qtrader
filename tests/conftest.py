@@ -1,6 +1,6 @@
 import sys
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 from typing import Generator, Optional
 from unittest.mock import MagicMock
 
@@ -12,8 +12,8 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from qtrader.models.po import Base
 from qtrader.models.object import Direction, Exchange, Offset
+from qtrader.models.po import Base
 from qtrader.trader.order_cmd import OrderCmd
 from qtrader.utils.config_loader import StrategyConfig
 
@@ -97,9 +97,10 @@ def mock_strategy_manager():
 @pytest.fixture
 def mock_tq_api():
     """模拟 TqApi"""
-    from unittest.mock import MagicMock
-    import pandas as pd
     from datetime import datetime
+    from unittest.mock import MagicMock
+
+    import pandas as pd
 
     api = MagicMock()
 
@@ -145,27 +146,31 @@ def mock_tq_api():
     api.get_quote.return_value = mock_quote
 
     # 模拟 K 线数据
-    mock_kline = pd.DataFrame({
-        "datetime": [int(datetime.now().timestamp() * 1e9)],
-        "open": [3500.0],
-        "high": [3510.0],
-        "low": [3490.0],
-        "close": [3505.0],
-        "volume": [1000],
-        "turnover": [3505000],
-        "open_interest": [50000],
-    })
+    mock_kline = pd.DataFrame(
+        {
+            "datetime": [int(datetime.now().timestamp() * 1e9)],
+            "open": [3500.0],
+            "high": [3510.0],
+            "low": [3490.0],
+            "close": [3505.0],
+            "volume": [1000],
+            "turnover": [3505000],
+            "open_interest": [50000],
+        }
+    )
     api.get_kline_serial.return_value = mock_kline
 
     # 模拟合约查询
     api.query_quotes.return_value = ["SHFE.rb2505"]
-    api.query_symbol_info.return_value = pd.DataFrame({
-        "instrument_id": ["SHFE.rb2505"],
-        "exchange_id": ["SHFE"],
-        "instrument_name": ["螺纹钢2505"],
-        "volume_multiple": [10],
-        "price_tick": [1.0],
-    })
+    api.query_symbol_info.return_value = pd.DataFrame(
+        {
+            "instrument_id": ["SHFE.rb2505"],
+            "exchange_id": ["SHFE"],
+            "instrument_name": ["螺纹钢2505"],
+            "volume_multiple": [10],
+            "price_tick": [1.0],
+        }
+    )
 
     # 模拟 is_changing
     api.is_changing.return_value = False
@@ -191,10 +196,12 @@ def mock_tq_api():
     api.cancel_order.return_value = None
 
     # 模拟交易日历
-    trading_calendar = pd.DataFrame({
-        "date": ["2026-01-15"],
-        "trading": [True],
-    })
+    trading_calendar = pd.DataFrame(
+        {
+            "date": ["2026-01-15"],
+            "trading": [True],
+        }
+    )
     api.get_trading_calendar.return_value = trading_calendar
 
     return api
@@ -203,7 +210,7 @@ def mock_tq_api():
 @pytest.fixture
 def mock_tq_gateway_config():
     """模拟 TqGateway 配置"""
-    from qtrader.utils.config_loader import GatewayConfig, TianqinConfig, BrokerConfig
+    from qtrader.utils.config_loader import BrokerConfig, GatewayConfig, TianqinConfig
 
     return GatewayConfig(
         account_id="test_account_001",

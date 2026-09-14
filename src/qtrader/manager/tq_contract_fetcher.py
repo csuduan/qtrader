@@ -3,12 +3,14 @@ TqSdk 合约查询器
 用于 Manager 进程独立查询合约基础信息（不需要完整交易 Gateway）
 """
 
-import logging
+from typing import Any
 
 from tqsdk import TqApi, TqAuth, TqKq
 from tqsdk.exceptions import TqTimeoutError
 
-logger = logging.getLogger(__name__)
+from qtrader.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class TqContractFetcher:
@@ -24,7 +26,7 @@ class TqContractFetcher:
         """
         self.auth = TqAuth(username, password)
 
-    def fetch_contracts(self) -> list[dict] | None:
+    def fetch_contracts(self) -> list[dict[str, Any]] | None:
         """
         查询所有活跃期货合约基础信息（同步阻塞方法）
 
@@ -76,10 +78,10 @@ class TqContractFetcher:
             self._mark_dominant_contracts(api, contracts)
             return contracts
         except TqTimeoutError as e:
-            logger.error(f"TqSdk 连接超时: {e}")
+            logger.error("TqSdk 连接超时: {!r}", e)
             return None
-        except Exception as e:
-            logger.exception(f"TqSdk 获取合约失败: {e}")
+        except Exception:
+            logger.exception("TqSdk 获取合约失败")
             return None
         finally:
             if api:
@@ -87,10 +89,10 @@ class TqContractFetcher:
                     api.close()
                     logger.info("TqSdk API 已关闭")
                 except Exception as e:
-                    logger.warning(f"关闭 TqSdk API 失败: {e}")
+                    logger.warning("关闭 TqSdk API 失败: {!r}", e)
 
     @staticmethod
-    def _mark_dominant_contracts(api: TqApi, contracts: list[dict]) -> None:
+    def _mark_dominant_contracts(api: TqApi, contracts: list[dict[str, Any]]) -> None:
         """
         标记主力合约（打标失败不阻塞主流程，仅全部置 False）
 
@@ -116,7 +118,7 @@ class TqContractFetcher:
             dominant: set[str] = set()
             if kq_symbols:
                 quote_list = api.get_quote_list(kq_symbols)
-                for kq_symbol, quote in zip(kq_symbols, quote_list):
+                for kq_symbol, quote in zip(kq_symbols, quote_list, strict=True):
                     underlying = quote.underlying_symbol
                     if underlying:
                         dominant.add(underlying.split(".")[-1])
@@ -129,6 +131,6 @@ class TqContractFetcher:
                 marked += 1 if c["is_main"] else 0
             logger.info(f"主力合约打标完成: {marked}/{len(contracts)}")
         except Exception as e:
-            logger.warning(f"主力合约打标失败（不影响主流程）: {e}")
+            logger.warning("主力合约打标失败（不影响主流程）: {!r}", e)
             for c in contracts:
                 c["is_main"] = False

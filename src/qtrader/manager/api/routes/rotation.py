@@ -4,8 +4,18 @@
 """
 
 from datetime import datetime
+from typing import Any
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    Query,
+    Response,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel
 
 from qtrader.manager.api.dependencies import get_trading_manager
@@ -87,7 +97,7 @@ async def _query_rotation_from_db(
     status: str | None,
     enabled: bool | None,
     trading_date: str | None,
-):
+) -> dict[str, Any] | Response:
     """从数据库查询换仓指令列表"""
     from sqlalchemy import func, select
 
@@ -180,7 +190,7 @@ async def get_rotation_instructions(
     enabled: bool | None = Query(None, description="是否启用筛选"),
     trading_date: str | None = Query(None, description="交易日筛选"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     获取换仓指令列表
 
@@ -205,7 +215,7 @@ async def get_rotation_instructions(
                     account_id, limit, offset, status, enabled
                 )
             except Exception as e:
-                logger.warning(f"从Trader查询换仓指令失败，将回退到数据库: {e}")
+                logger.warning("从Trader查询换仓指令失败，将回退到数据库: {!r}", e)
 
         if trader_result is not None:
             instructions = trader_result.get("instructions", [])
@@ -225,7 +235,7 @@ async def get_rotation_instructions(
                 item["exchange_id"] = symbol.split(".")[-1] if "." in symbol else None
                 item["is_deleted"] = False
 
-            result = {
+            result: dict[str, Any] | Response = {
                 "instructions": paginated,
                 "rotation_status": trader_result.get(
                     "rotation_status", {"working": False, "is_manual": False}
@@ -244,8 +254,8 @@ async def get_rotation_instructions(
             return success_response(data=result, message="获取成功")
         return result
     except Exception as e:
-        logger.error(f"获取换仓指令列表失败: {e}")
-        return error_response(message=f"获取换仓指令列表失败: {str(e)}")
+        logger.exception("获取换仓指令列表失败")
+        return error_response(message=f"获取换仓指令列表失败: {e}")
 
 
 @router.get("/{instruction_id}")
@@ -253,7 +263,7 @@ async def get_rotation_instruction(
     instruction_id: int,
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     获取指定换仓指令
 
@@ -313,15 +323,15 @@ async def get_rotation_instruction(
 
             return success_response(data=result.model_dump(), message="获取成功")
     except Exception as e:
-        logger.error(f"获取换仓指令失败: {e}")
-        return error_response(message=f"获取换仓指令失败: {str(e)}")
+        logger.exception("获取换仓指令失败")
+        return error_response(message=f"获取换仓指令失败: {e}")
 
 
 @router.post("")
 async def create_rotation_instruction(
     request: RotationInstructionCreate,
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     创建换仓指令
     """
@@ -334,8 +344,8 @@ async def create_rotation_instruction(
             return error_response(message="创建换仓指令失败")
         return success_response(data=result, message="创建成功")
     except Exception as e:
-        logger.error(f"创建换仓指令失败: {e}")
-        return error_response(message=f"创建换仓指令失败: {str(e)}")
+        logger.exception("创建换仓指令失败")
+        return error_response(message=f"创建换仓指令失败: {e}")
 
 
 @router.put("/{instruction_id}")
@@ -344,7 +354,7 @@ async def update_rotation_instruction(
     request: RotationInstructionUpdate,
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     更新换仓指令
 
@@ -358,8 +368,8 @@ async def update_rotation_instruction(
         )
         return success_response(data=result, message="更新成功")
     except Exception as e:
-        logger.error(f"更新换仓指令失败: {e}")
-        return error_response(message=f"更新换仓指令失败: {str(e)}")
+        logger.exception("更新换仓指令失败")
+        return error_response(message=f"更新换仓指令失败: {e}")
 
 
 @router.delete("/{instruction_id}")
@@ -367,7 +377,7 @@ async def delete_rotation_instruction(
     instruction_id: int,
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     删除换仓指令（软删除）
 
@@ -380,28 +390,28 @@ async def delete_rotation_instruction(
             return error_response(code=404, message="换仓指令不存在")
         return success_response(message="删除成功")
     except Exception as e:
-        logger.error(f"删除换仓指令失败: {e}")
-        return error_response(message=f"删除换仓指令失败: {str(e)}")
+        logger.exception("删除换仓指令失败")
+        return error_response(message=f"删除换仓指令失败: {e}")
 
 
 @router.post("/clear")
 async def clear_rotation_instructions(
     account_id: str | None = Query(None, description="账户ID（多账号模式）"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     清除已完成换仓指令（软删除）
 
     - **account_id**: 账户ID
     """
     try:
-        success = await trading_manager.clear_rotation_instructions(account_id)
+        success = await trading_manager.clear_rotation_instructions(account_id or "")
         if not success:
             return error_response(message="清除失败")
         return success_response(message="清除成功")
     except Exception as e:
-        logger.error(f"清除换仓指令失败: {e}")
-        return error_response(message=f"清除换仓指令失败: {str(e)}")
+        logger.exception("清除换仓指令失败")
+        return error_response(message=f"清除换仓指令失败: {e}")
 
 
 @router.post("/import", status_code=status.HTTP_201_CREATED)
@@ -410,7 +420,7 @@ async def import_rotation_instructions(
     mode: str = Form("append"),
     account_id: str = Form(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     批量导入换仓指令
 
@@ -428,14 +438,14 @@ async def import_rotation_instructions(
         content = await file.read()
         csv_text = content.decode("gbk")
         result = await trading_manager.import_rotation_instructions(
-            account_id, csv_text, file.filename, mode
+            account_id, csv_text, file.filename or "upload.csv", mode
         )
         if result is None:
             return error_response(message="导入失败")
         return success_response(data=result, message="导入完成")
     except Exception as e:
-        logger.error(f"导入换仓指令失败: {e}")
-        return error_response(message=f"导入换仓指令失败: {str(e)}")
+        logger.exception("导入换仓指令失败")
+        return error_response(message=f"导入换仓指令失败: {e}")
 
 
 class BatchRequest(BaseModel):
@@ -449,7 +459,7 @@ async def batch_execute_instructions(
     request: BatchRequest,
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     批量执行换仓指令
 
@@ -465,8 +475,8 @@ async def batch_execute_instructions(
             message=f"执行完成：成功 {result['success']} 条，失败 {result['failed']} 条",
         )
     except Exception as e:
-        logger.error(f"批量执行换仓指令失败: {e}")
-        return error_response(message=f"批量执行换仓指令失败: {str(e)}")
+        logger.exception("批量执行换仓指令失败")
+        return error_response(message=f"批量执行换仓指令失败: {e}")
 
 
 @router.post("/batch/delete")
@@ -474,7 +484,7 @@ async def batch_delete_instructions(
     request: BatchRequest,
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     批量删除换仓指令（软删除）
 
@@ -487,15 +497,15 @@ async def batch_delete_instructions(
             return error_response(message="删除失败")
         return success_response(data=result, message="删除成功")
     except Exception as e:
-        logger.error(f"批量删除换仓指令失败: {e}")
-        return error_response(message=f"批量删除换仓指令失败: {str(e)}")
+        logger.exception("批量删除换仓指令失败")
+        return error_response(message=f"批量删除换仓指令失败: {e}")
 
 
 @router.post("/start")
 async def start_rotation(
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     启动换仓流程（异步执行）
 
@@ -507,15 +517,15 @@ async def start_rotation(
             return error_response(code=500, message="启动换仓流程失败")
         return success_response(data={}, message="换仓流程已在后台启动")
     except Exception as e:
-        logger.error(f"启动换仓流程失败: {e}")
-        return error_response(code=500, message=f"启动换仓流程失败: {str(e)}")
+        logger.exception("启动换仓流程失败")
+        return error_response(code=500, message=f"启动换仓流程失败: {e}")
 
 
 @router.post("/stop")
 async def stop_rotation(
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     停止换仓流程
 
@@ -527,15 +537,15 @@ async def stop_rotation(
             return error_response(code=500, message="停止换仓流程失败")
         return success_response(data={}, message="换仓流程已停止")
     except Exception as e:
-        logger.error(f"停止换仓流程失败: {e}")
-        return error_response(code=500, message=f"停止换仓流程失败: {str(e)}")
+        logger.exception("停止换仓流程失败")
+        return error_response(code=500, message=f"停止换仓流程失败: {e}")
 
 
 @router.post("/close-all")
 async def close_all_positions(
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     一键平仓所有持仓
 
@@ -547,5 +557,5 @@ async def close_all_positions(
             return error_response(code=500, message="一键平仓失败")
         return success_response(data={}, message="一键平仓已在后台启动")
     except Exception as e:
-        logger.error(f"一键平仓失败: {e}")
-        return error_response(code=500, message=f"一键平仓失败: {str(e)}")
+        logger.exception("一键平仓失败")
+        return error_response(code=500, message=f"一键平仓失败: {e}")

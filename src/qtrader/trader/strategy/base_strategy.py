@@ -4,10 +4,10 @@
 """
 
 import asyncio
+import contextlib
 from datetime import datetime, time
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
-import pandas as pd
 from pydantic import BaseModel, Field
 
 from qtrader.models.object import (
@@ -55,11 +55,11 @@ class BaseParam(BaseModel):
             # 获取Field元数据
             title = field_info.title or field_name
             # 推断类型
-            if field_info.annotation == int:
+            if field_info.annotation is int:
                 param_type = "int"
-            elif field_info.annotation == float:
+            elif field_info.annotation is float:
                 param_type = "float"
-            elif field_info.annotation == bool:
+            elif field_info.annotation is bool:
                 param_type = "bool"
             elif field_info.annotation == time:
                 param_type = "time"
@@ -117,9 +117,9 @@ class BaseStrategy:
         self.bar_subscriptions: list[str] = []
         self.trading_day: datetime | None = None
         # 策略管理器引用
-        self.strategy_manager: Optional["StrategyManager"] = None
+        self.strategy_manager: StrategyManager | None = None
         # 交易引擎引用
-        self.trading_engine: Optional["TradingEngine"] = None
+        self.trading_engine: TradingEngine | None = None
         # 参数模型（子类覆盖）
         self.param: BaseParam | None = None
 
@@ -136,6 +136,9 @@ class BaseStrategy:
         # 运行中信息
         self._pending_cmds: list[OrderCmd] = []
         self._hist_cmds: dict[str, OrderCmd] = {}
+
+        # 后台任务引用（防止fire-and-forget任务被GC回收）
+        self._bg_tasks: set[asyncio.Task[None]] = set()
 
     async def init(self, trading_day: datetime) -> bool:
         """策略初始化"""
@@ -237,10 +240,8 @@ class BaseStrategy:
             if hasattr(self.signal, key):
                 # 处理datetime类型的参数
                 if key in ["entry_time", "exit_time"] and isinstance(value, str):
-                    try:
+                    with contextlib.suppress(ValueError):
                         value = datetime.fromisoformat(value)
-                    except ValueError:
-                        pass
                 setattr(self.signal, key, value)
 
         logger.info(f"策略 [{self.strategy_id}] 信号已更新: side={self.signal.side}")
@@ -266,8 +267,6 @@ class BaseStrategy:
             PositionData: 持仓对象
         """
         if symbol not in self._positions:
-            from qtrader.models.object import Exchange
-
             if self.trading_engine is None:
                 raise Exception(f"策略 [{self.strategy_id}] 交易引擎未初始化")
             contract = self.trading_engine.get_contract(symbol)
@@ -314,12 +313,14 @@ class BaseStrategy:
             return
         try:
             loop = asyncio.get_running_loop()
-            loop.create_task(self._save_positions_async(positions))
+            task = loop.create_task(self._save_positions_async(positions))
+            self._bg_tasks.add(task)
+            task.add_done_callback(self._bg_tasks.discard)
         except RuntimeError:
             # 无事件循环（如脚本直接调用），跳过并提示
             logger.warning(f"策略 [{self.strategy_id}] 无事件循环，跳过持仓保存")
 
-    async def _save_positions_async(self, positions: list) -> None:
+    async def _save_positions_async(self, positions: list[PositionData]) -> None:
         if self.strategy_manager is None:
             return
         for position in positions:
@@ -582,7 +583,7 @@ class BaseStrategy:
         if cmds and len(cmds) > 0:
             await self.send_order_cmds(cmds)
 
-    def _on_cmd_change(self, cmd: OrderCmd):
+    def _on_cmd_change(self, cmd: OrderCmd) -> None:
         """处理订单状态变化（支持多指令和多合约持仓）"""
         if not cmd.is_finished:
             return
@@ -682,24 +683,24 @@ class BaseStrategy:
         return long_profit + short_profit
 
     # ==================== 事件回调（异步版本）====================
-    async def on_tick(self, tick: TickData):
+    async def on_tick(self, tick: TickData) -> None:
         """Tick行情回调（异步版本）"""
         pass
 
-    async def on_bar(self, bar: BarData):
+    async def on_bar(self, bar: BarData) -> None:
         """Bar行情回调（异步版本）"""
         pass
 
-    async def on_order(self, order: OrderData):
+    async def on_order(self, order: OrderData) -> None:
         """订单状态回调（异步版本）"""
         pass
 
-    async def on_trade(self, trade: TradeData):
+    async def on_trade(self, trade: TradeData) -> None:
         """成交回调（异步版本）"""
         pass
 
     # ==================== 交易接口 ====================
-    async def send_order_cmds(self, cmds: list[OrderCmd]):
+    async def send_order_cmds(self, cmds: list[OrderCmd]) -> None:
         """发送报单指令（支持多指令）"""
         if self.param is None:
             logger.error(f"策略 [{self.strategy_id}] 的参数未初始化")
@@ -749,7 +750,7 @@ class BaseStrategy:
         """是否有进行中的平仓指令"""
         return any(not cmd.is_finished and cmd.offset == Offset.CLOSE for cmd in self._pending_cmds)
 
-    async def cancel_order_cmd(self, order_cmd: OrderCmd):
+    async def cancel_order_cmd(self, order_cmd: OrderCmd) -> None:
         """取消报单指令"""
         if self.strategy_manager is None:
             logger.error(f"策略 [{self.strategy_id}] 的 strategy_manager 未初始化")

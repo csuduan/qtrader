@@ -10,36 +10,30 @@ Socket服务器 - V2版本，使用标准协议
 """
 
 import asyncio
+import contextlib
 import os
 import time
 import uuid
 from collections import deque
+from collections.abc import Callable
 from functools import wraps
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from qtrader.utils.ipc.protocol import (
     MessageBody,
     MessageProtocol,
     MessageType,
-    create_error,
     create_heartbeat,
     create_push,
-    create_request,
     create_response,
-)
-from qtrader.utils.ipc.utils import (
-    BackoffStrategy,
-    HealthChecker,
-    RequestHandlerRegistry,
-    generate_request_id,
 )
 from qtrader.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
-def request(message_type: str) -> Callable:
+def request(message_type: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     请求处理器装饰器
 
@@ -54,16 +48,16 @@ def request(message_type: str) -> Callable:
             return True
     """
 
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(func)
-        async def wrapper(*args, **kwargs) -> Any:
+        async def wrapper(*args: Any, **kwargs: Any) -> Any:
             try:
                 if asyncio.iscoroutinefunction(func):
                     return await func(*args, **kwargs)
                 else:
                     return func(*args, **kwargs)
-            except Exception as e:
-                logger.exception(f"处理请求 [{message_type}] 时出错: {e}")
+            except Exception:
+                logger.exception("处理请求 [{}] 时出错", message_type)
                 raise
 
         # 保存元数据，供注册时使用
@@ -100,10 +94,8 @@ class SocketClientConnection:
         try:
             if self.writer:
                 self.writer.close()
-                try:
+                with contextlib.suppress(Exception):
                     await self.writer.wait_closed()
-                except Exception:
-                    pass
         except Exception:
             pass
 
@@ -111,9 +103,7 @@ class SocketClientConnection:
         """检查连接是否有效"""
         if not self.connected or not self.writer:
             return False
-        if self.writer.is_closing():
-            return False
-        return True
+        return not self.writer.is_closing()
 
     def get_uptime(self) -> float:
         """获取连接存活时间（秒）"""
@@ -146,8 +136,8 @@ class SocketClientConnection:
                 self.writer.write(data)
                 await self.writer.drain()
             return True
-        except Exception as e:
-            logger.exception(f"发送消息失败: {e}")
+        except Exception:
+            logger.exception("发送消息失败")
             self.connected = False
             return False
 
@@ -203,13 +193,13 @@ class SocketServer:
         self.server: asyncio.Server | None = None
         self._clients: dict[str, SocketClientConnection] = {}
         self._clients_lock = asyncio.Lock()
-        self._req_handlers: dict[str, Callable] = {}
+        self._req_handlers: dict[str, Callable[..., Any]] = {}
         self._running = False
 
         # 健康检查
         self._enable_health_check = enable_health_check
         self._health_check_interval = health_check_interval
-        self._health_check_task: asyncio.Task | None = None
+        self._health_check_task: asyncio.Task[None] | None = None
 
         # 推送缓冲队列：Manager 断开时缓存推送消息，重连后自动发送
         self._push_queue: deque[MessageBody] = deque(maxlen=self.PUSH_QUEUE_MAX_SIZE)
@@ -224,7 +214,7 @@ class SocketServer:
 
         logger.info(f"SocketServer V2 初始化: {socket_path}")
 
-    def register_handler(self, message_type: str, handler: Callable) -> None:
+    def register_handler(self, message_type: str, handler: Callable[..., Any]) -> None:
         """
         手动注册消息处理器
 
@@ -269,7 +259,7 @@ class SocketServer:
             if Path(self.socket_path).exists():
                 Path(self.socket_path).unlink()
         except (PermissionError, OSError) as e:
-            logger.warning(f"无法删除socket文件: {e}")
+            logger.warning("无法删除socket文件: {!r}", e)
 
         # 创建socket目录
         Path(self.socket_path).parent.mkdir(parents=True, exist_ok=True)
@@ -281,7 +271,7 @@ class SocketServer:
         try:
             os.chmod(self.socket_path, 0o600)
         except OSError as e:
-            logger.warning(f"无法设置socket文件权限: {e}")
+            logger.warning("无法设置socket文件权限: {!r}", e)
 
         # 启动健康检查任务
         if self._enable_health_check:
@@ -298,10 +288,8 @@ class SocketServer:
         # 停止健康检查任务
         if self._health_check_task:
             self._health_check_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._health_check_task
-            except asyncio.CancelledError:
-                pass
             self._health_check_task = None
             logger.info("健康检查任务已停止")
 
@@ -311,7 +299,7 @@ class SocketServer:
                 try:
                     await conn.close()
                 except Exception as e:
-                    logger.warning(f"关闭连接失败: {conn_id}, {e}")
+                    logger.warning("关闭连接失败: {}, {!r}", conn_id, e)
             self._clients.clear()
 
         # 关闭服务器
@@ -319,16 +307,16 @@ class SocketServer:
             self.server.close()
             try:
                 await asyncio.wait_for(self.server.wait_closed(), timeout=2.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.warning("SocketServer 等待连接关闭超时，强制停止")
-            logger.info(f"SocketServer V2 已停止")
+            logger.info("SocketServer V2 已停止")
 
         # 删除socket文件
         try:
             if Path(self.socket_path).exists():
                 Path(self.socket_path).unlink()
         except (PermissionError, OSError) as e:
-            logger.warning(f"无法删除socket文件: {e}")
+            logger.warning("无法删除socket文件: {!r}", e)
 
     async def _handle_client(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
@@ -363,14 +351,14 @@ class SocketServer:
 
                     self._stats["messages_received"] += 1
                     await self._process_message(conn, message)
-                except Exception as e:
-                    logger.exception(f"连接[{conn_id}] 处理消息时出错: {e}")
+                except Exception:
+                    logger.exception("连接[{}] 处理消息时出错", conn_id)
                     self._stats["errors"] += 1
 
             logger.info(f"连接[{conn_id}] 消息处理循环结束，连接状态：{conn.is_connected()}")
 
-        except Exception as e:
-            logger.exception(f"连接[{conn_id}] 处理异常: {e}")
+        except Exception:
+            logger.exception("连接[{}] 处理异常", conn_id)
             self._stats["errors"] += 1
         finally:
             await self._remove_client_connection(conn_id)
@@ -409,7 +397,10 @@ class SocketServer:
                         logger.debug(f"连接[{conn_id}] 响应请求: {request_type} {request_id}")
                     except Exception as e:
                         logger.exception(
-                            f"连接[{conn_id}] 处理请求:{request_type} {request_id}时出错: {e}"
+                            "连接[{}] 处理请求:{} {}时出错",
+                            conn_id,
+                            request_type,
+                            request_id,
                         )
                         # IPC 为 Manager↔Trader 内部信任通道，回传真实异常信息
                         # （含异常类型），由 Manager API 层决定对前端的错误展示
@@ -428,8 +419,8 @@ class SocketServer:
                 # 推送消息，暂不支持处理
                 logger.debug(f"连接[{conn_id}] 收到推送消息，暂不支持处理: {message}")
 
-        except Exception as e:
-            logger.exception(f"连接[{conn_id}] 处理消息时出错: {e}")
+        except Exception:
+            logger.exception("连接[{}] 处理消息时出错", conn_id)
             self._stats["errors"] += 1
 
     async def _remove_client_connection(self, conn_id: str) -> None:
@@ -440,7 +431,7 @@ class SocketServer:
                 try:
                     await conn.close()
                 except Exception as e:
-                    logger.warning(f"关闭连接 {conn_id} 时出错: {e}")
+                    logger.warning("关闭连接 {} 时出错: {!r}", conn_id, e)
 
     async def _health_check_loop(self) -> None:
         """健康检查循环
@@ -464,7 +455,6 @@ class SocketServer:
 
                 # 检查所有连接的心跳状态
                 dead_connections: list[str] = []
-                current_time = time.monotonic()
 
                 async with self._clients_lock:
                     for conn_id, conn in list(self._clients.items()):
@@ -494,8 +484,8 @@ class SocketServer:
             except asyncio.CancelledError:
                 logger.info("健康检查任务已取消")
                 break
-            except Exception as e:
-                logger.exception(f"健康检查任务出错: {e}")
+            except Exception:
+                logger.exception("健康检查任务出错")
 
         logger.info("健康检查任务已停止")
 
@@ -517,10 +507,9 @@ class SocketServer:
 
         success = False
         for conn in clients:
-            if conn.is_connected():
-                if await conn.send_message(message):
-                    success = True
-                    self._stats["messages_sent"] += 1
+            if conn.is_connected() and await conn.send_message(message):
+                success = True
+                self._stats["messages_sent"] += 1
 
         return success
 
@@ -546,10 +535,9 @@ class SocketServer:
         if clients:
             success = False
             for conn in clients:
-                if conn.is_connected():
-                    if await conn.send_message(message):
-                        success = True
-                        self._stats["messages_sent"] += 1
+                if conn.is_connected() and await conn.send_message(message):
+                    success = True
+                    self._stats["messages_sent"] += 1
             if success:
                 return True
 
@@ -583,10 +571,9 @@ class SocketServer:
                 logger.warning(f"发送缓冲队列时客户端断开，剩余 {len(self._push_queue)} 条")
                 break
             for conn in clients:
-                if conn.is_connected():
-                    if await conn.send_message(message):
-                        sent += 1
-                        self._stats["messages_sent"] += 1
+                if conn.is_connected() and await conn.send_message(message):
+                    sent += 1
+                    self._stats["messages_sent"] += 1
 
         logger.info(f"推送缓冲队列发送完成：已发送 {sent}/{queue_size} 条")
 

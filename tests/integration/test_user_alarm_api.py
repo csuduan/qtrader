@@ -152,7 +152,7 @@ def user_db(client):
     """将 user 路由的 get_async_database() 替换为 FakeDb，返回可检视的 db/session"""
     session = _FakeAsyncSession()
     db = _FakeDb(session)
-    with patch("qtrader.manager.api.routes.user.get_async_database", return_value=db):
+    with patch("qtrader.manager.api.routes.user.require_async_database", return_value=db):
         yield SimpleNamespace(db=db, session=session)
 
 

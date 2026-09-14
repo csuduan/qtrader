@@ -6,6 +6,7 @@ Trader 侧 IPC 响应模型
 """
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -36,10 +37,10 @@ class StrategyRes(BaseModel):
     closing_paused: bool = False
     inited: bool = False
     symbol: str = ""
-    config: dict | None = None
-    base_params: list = []
-    ext_params: list = []
-    signal: dict | None = None
+    config: dict[str, Any] | None = None
+    base_params: list[dict[str, Any]] = []
+    ext_params: list[dict[str, Any]] = []
+    signal: dict[str, Any] | None = None
     pos_long: int = 0
     pos_short: int = 0
     positions: list[StrategyPositionRes] = []

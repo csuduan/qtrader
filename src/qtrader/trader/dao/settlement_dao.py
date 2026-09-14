@@ -51,16 +51,16 @@ class SettlementDao:
             if not po:
                 po = AccountHistoryPo(account_id=account_id, settle_date=settle_date)
 
-            po.balance = Decimal(str(account.balance))  # type: ignore[assignment]
-            po.available = Decimal(str(account.available))  # type: ignore[assignment]
-            po.pre_balance = _to_decimal(account.pre_balance)  # type: ignore[assignment]
-            po.static_balance = _to_decimal(account.static_balance)  # type: ignore[assignment]
-            po.deposit = _to_decimal(account.deposit)  # type: ignore[assignment]
-            po.withdraw = _to_decimal(account.withdraw)  # type: ignore[assignment]
-            po.close_profit = _to_decimal(account.close_profit)  # type: ignore[assignment]
-            po.hold_profit = _to_decimal(account.hold_profit)  # type: ignore[assignment]
-            po.margin = _to_decimal(account.margin)  # type: ignore[assignment]
-            po.risk_ratio = _to_decimal(account.risk_ratio)  # type: ignore[assignment]
+            po.balance = Decimal(str(account.balance))
+            po.available = Decimal(str(account.available))
+            po.pre_balance = _to_decimal(account.pre_balance)
+            po.static_balance = _to_decimal(account.static_balance)
+            po.deposit = _to_decimal(account.deposit)
+            po.withdraw = _to_decimal(account.withdraw)
+            po.close_profit = _to_decimal(account.close_profit)
+            po.hold_profit = _to_decimal(account.hold_profit)
+            po.margin = _to_decimal(account.margin)
+            po.risk_ratio = _to_decimal(account.risk_ratio)
 
             session.add(po)
 
@@ -97,7 +97,7 @@ class SettlementDao:
                 count += 1
 
         logger.info(
-            f"结算快照已保存: {account_id} {settle_date} " f"权益={account.balance} 持仓{count}条"
+            f"结算快照已保存: {account_id} {settle_date} 权益={account.balance} 持仓{count}条"
         )
 
     async def query_settlements(

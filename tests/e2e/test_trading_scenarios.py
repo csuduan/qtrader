@@ -189,7 +189,11 @@ class TestRotationImport:
                         {
                             "code": 0,
                             "message": "ok",
-                            "data": {"instructions": [], "rotation_status": {"working": False}, "total": 0},
+                            "data": {
+                                "instructions": [],
+                                "rotation_status": {"working": False},
+                                "total": 0,
+                            },
                         }
                     ),
                 )
@@ -217,12 +221,14 @@ class TestRotationImport:
 
         # 确认导入 → mock 后端收到 multipart/form-data
         dialog.get_by_role("button", name="确认导入").click()
-        expect(page.locator(".el-message--success").last).to_contain_text("导入完成", timeout=10_000)
+        expect(page.locator(".el-message--success").last).to_contain_text(
+            "导入完成", timeout=10_000
+        )
 
         deadline = time.time() + 5
         while time.time() < deadline and "content_type" not in received:
             page.wait_for_timeout(200)
-        assert "multipart/form-data" in received.get("content_type", ""), (
-            f"后端未收到 multipart 导入请求: {received.get('content_type')}"
-        )
+        assert "multipart/form-data" in received.get(
+            "content_type", ""
+        ), f"后端未收到 multipart 导入请求: {received.get('content_type')}"
         assert b"mode" in received.get("body", b"") or received.get("body"), "导入请求体不应为空"

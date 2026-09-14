@@ -130,9 +130,7 @@ def test_direct_order_over_risk_limit_rejected(require_dq_connected):
 )
 def test_order_cmd_invalid_params_rejected(api_client, bad_body, expect_msg):
     """指令下单无效参数 → 400 + 错误信息"""
-    resp = api_client.post(
-        "/api/order-cmd", params={"account_id": E2E_ACCOUNT_ID}, json=bad_body
-    )
+    resp = api_client.post("/api/order-cmd", params={"account_id": E2E_ACCOUNT_ID}, json=bad_body)
     body = resp.json()
     assert resp.status_code == 400
     assert body["code"] != 0
@@ -249,9 +247,7 @@ def test_get_trades_by_date(api_client):
     import datetime as dt
 
     today = dt.date.today().isoformat()
-    resp = api_client.get(
-        "/api/trade", params={"account_id": E2E_ACCOUNT_ID, "date": today}
-    )
+    resp = api_client.get("/api/trade", params={"account_id": E2E_ACCOUNT_ID, "date": today})
     assert resp.status_code == 200
     body = resp.json()
     assert body["code"] == 0

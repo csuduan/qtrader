@@ -124,8 +124,8 @@ class TestGetMaxRowSize:
         assert ind.get_max_row_size(0.9) == 308
 
     def test_alpha_out_of_range_raises(self):
-        """测试 alpha=1 越界触发断言"""
-        with pytest.raises(AssertionError):
+        """测试 alpha=1 越界抛出 ValueError"""
+        with pytest.raises(ValueError):
             ind.get_max_row_size(1.0)
 
 

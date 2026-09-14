@@ -8,8 +8,12 @@
 
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from loguru import logger
+
+if TYPE_CHECKING:
+    from loguru import Logger
 
 
 def setup_logger(
@@ -75,11 +79,10 @@ def setup_logger(
         encoding="utf-8",
     )
 
-    logger.opt(exception=True)
     logger.info(f"日志系统初始化完成，日志目录: {log_dir}")
 
 
-def enable_alarm_handler():
+def enable_alarm_handler() -> None:
     """
     启用告警日志处理器
     监听ERROR级别日志并自动创建告警
@@ -90,7 +93,7 @@ def enable_alarm_handler():
     logger.info("告警日志处理器已启用")
 
 
-def get_logger(name: str | None = None):
+def get_logger(name: str | None = None) -> "Logger":
     """
     获取logger实例
 

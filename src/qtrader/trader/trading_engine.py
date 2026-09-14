@@ -4,9 +4,7 @@
 """
 
 import asyncio
-import math
 import time
-import uuid
 from datetime import datetime
 from typing import Any
 
@@ -16,22 +14,21 @@ from qtrader.app_context import get_app_context
 from qtrader.models.object import (
     AccountData,
     CancelRequest,
+    ContractData,
     Direction,
-    Exchange,
     Offset,
     OrderData,
     OrderRequest,
-    OrderStatus,
     PositionData,
     TickData,
     TradeData,
 )
 from qtrader.models.po import SystemParamPo
-from qtrader.trader.order_cmd import OrderCmd, OrderCmdStatus, SplitStrategyType
+from qtrader.trader.order_cmd import OrderCmd
 from qtrader.trader.order_executor import OrderCmdExecutor
 from qtrader.trader.risk_control import RiskControl
 from qtrader.utils.async_event_engine import AsyncEventEngine, EventTypes
-from qtrader.utils.config_loader import AccountConfig, AppConfig, RiskControlConfig
+from qtrader.utils.config_loader import RiskControlConfig, TraderConfig
 from qtrader.utils.helpers import _get_int_param
 from qtrader.utils.logger import get_logger
 from qtrader.utils.trading_session import is_symbol_trading_time
@@ -45,17 +42,17 @@ class TradingEngine:
 
     def __init__(
         self,
-        config: AccountConfig,  # config 可以是 AppConfig 或 AccountConfig
+        config: TraderConfig,
     ):
         """
         初始化交易引擎
 
         Args:
-            config: 配置对象（AppConfig 或 AccountConfig）
+            config: 交易器配置对象
             event_engine: 事件引擎实例（可选，如果不提供则创建新的）
         """
-        self.config: AccountConfig = config
-        self.account_id = config.account_id  # type: ignore[attr-defined]
+        self.config: TraderConfig = config
+        self.account_id = config.account_id
         logger.info(
             f"TradingEngine __init__, account_id: {self.account_id}, config_id: {id(config)}"
         )
@@ -83,12 +80,12 @@ class TradingEngine:
         # 报单指令执行器
         self._order_cmd_executor: OrderCmdExecutor | None = None
 
-        logger.info(f"交易引擎初始化完成")  # type: ignore[attr-defined]
+        logger.info("交易引擎初始化完成")
 
         # Gateway初始化
         self._init_gateway()
 
-    async def start(self):
+    async def start(self) -> None:
         """
         启动交易引擎（异步版本）
         """
@@ -100,13 +97,15 @@ class TradingEngine:
         try:
             await self.risk_control.load()
             await self.reload_risk_control_config()
-        except Exception as e:
-            logger.error(f"启动时加载风控数据失败: {e}", exc_info=True)
+        except Exception:
+            logger.exception("启动时加载风控数据失败")
 
         # 启动执行器
         from qtrader.trader.order_executor import OrderCmdExecutor
 
         if self._order_cmd_executor is None:
+            if self.event_engine is None:
+                raise RuntimeError("事件引擎未初始化")
             self._order_cmd_executor = OrderCmdExecutor(self.event_engine, self)
             self._order_cmd_executor.start()
             logger.info("报单指令执行器已启动")
@@ -145,7 +144,7 @@ class TradingEngine:
         broke_type = (broker.type if broker else "").upper()
         gateway_type = self.config.gateway.type if self.config.gateway else ""
         if "TQSDK" in gateway_type:
-            account.broker_type = f"TQ"
+            account.broker_type = "TQ"
         else:
             account.broker_type = broke_type
         account.currency = "CNY"
@@ -179,23 +178,21 @@ class TradingEngine:
             return {}
         return self.gateway.get_quotes()
 
-    def get_contract(self, symbol: str):
+    def get_contract(self, symbol: str) -> ContractData | None:
         if self.gateway is None:
             return None
         return self.gateway.get_contracts().get(symbol, None)
 
-    async def reload_risk_control_config(self):
+    @logger.catch(message="重新加载风控配置失败")
+    async def reload_risk_control_config(self) -> None:
         """
         从数据库重新加载风控配置
         """
-        try:
-            new_config = await self._load_risk_control_config()
-            self.risk_control.config = new_config
-            logger.info("风控配置已从数据库重新加载")
-        except Exception as e:
-            logger.error(f"重新加载风控配置失败: {e}", exc_info=True)
+        new_config = await self._load_risk_control_config()
+        self.risk_control.config = new_config
+        logger.info("风控配置已从数据库重新加载")
 
-    def _init_gateway(self):
+    def _init_gateway(self) -> None:
         """
         初始化Gateway（根据配置类型）
 
@@ -205,6 +202,8 @@ class TradingEngine:
         """
         # 获取Gateway类型配置（新增到config_loader.py）
         gateway_config = self.config.gateway
+        if gateway_config is None:
+            raise ValueError(f"账户 [{self.account_id}] 缺少 gateway 配置")
         gateway_config.account_id = self.account_id
         gateway_type = gateway_config.type
         logger.info(f"创建Gateway，类型: {gateway_type}")
@@ -227,7 +226,7 @@ class TradingEngine:
             self.event_engine.start()
             ctx.set(ctx.KEY_EVENT_ENGINE, self.event_engine)
 
-    async def _load_risk_control_config(self):
+    async def _load_risk_control_config(self) -> RiskControlConfig:
         """
         加载风控配置
 
@@ -272,15 +271,19 @@ class TradingEngine:
 
                 return RiskControlConfig(**risk_control_params)
 
-        except Exception as e:
-            logger.error(f"加载风控配置失败: {e}", exc_info=True)
-            return self.config.risk_control
+        except Exception:
+            logger.exception("加载风控配置失败")
+            # 兜底：账户配置 trading.risk_control，未配置则用默认参数
+            if self.config.trading and self.config.trading.risk_control:
+                return self.config.trading.risk_control
+            return RiskControlConfig()
 
-    async def close(self):
+    async def close(self) -> None:
         """
         关闭交易引擎（通过Gateway）
         """
-        await self.gateway.close()
+        if self.gateway:
+            await self.gateway.close()
 
     async def connect(self) -> bool:
         """
@@ -309,8 +312,8 @@ class TradingEngine:
             await self.disconnect()
             return False
 
-        except Exception as e:
-            logger.exception(f"连接失败: {e}")
+        except Exception:
+            logger.exception("连接失败")
             return False
 
     async def disconnect(self) -> bool:
@@ -326,8 +329,8 @@ class TradingEngine:
                 return False
             return await self.gateway.disconnect()
 
-        except Exception as e:
-            logger.exception(f"断开连接失败: {e}")
+        except Exception:
+            logger.exception("断开连接失败")
             return False
 
     def insert_order(
@@ -545,16 +548,14 @@ class TradingEngine:
         try:
             if self.event_engine:
                 self.event_engine.put(event_type, data)
-        except Exception as e:
-            logger.error(f"推送事件失败 [{event_type}]: {e}")
+        except Exception:
+            logger.exception("推送事件失败 [{}]", event_type)
 
+    @logger.catch(message="发送报单指令更新事件失败")
     def _emit_cmd_update_event(self, cmd: OrderCmd) -> None:
         """发送报单指令更新事件"""
-        try:
-            if self.event_engine:
-                self.event_engine.put(EventTypes.ORDER_CMD_UPDATE, cmd)
-        except Exception as e:
-            logger.error(f"发送报单指令更新事件失败: {e}")
+        if self.event_engine:
+            self.event_engine.put(EventTypes.ORDER_CMD_UPDATE, cmd)
 
     def insert_order_cmd(self, cmd: OrderCmd) -> str | None:
         """
@@ -602,7 +603,7 @@ class TradingEngine:
             return self._order_cmd_executor.close(cmd_id)
         return False
 
-    def get_order_cmd(self, cmd_id: str) -> dict | None:
+    def get_order_cmd(self, cmd_id: str) -> dict[str, Any] | None:
         """
         获取报单指令状态
 
@@ -618,7 +619,7 @@ class TradingEngine:
 
         return cmd.to_dict()
 
-    def get_all_order_cmds(self) -> list[dict]:
+    def get_all_order_cmds(self) -> list[dict[str, Any]]:
         """
         获取所有报单指令状态
 
@@ -627,7 +628,7 @@ class TradingEngine:
         """
         return [cmd.to_dict() for cmd in self._order_cmds.values()]
 
-    def cleanup_finished_order_cmds(self):
+    def cleanup_finished_order_cmds(self) -> None:
         """
         清理已完成的报单指令
         """
@@ -667,6 +668,6 @@ class TradingEngine:
                 logger.error("Gateway未初始化，无法刷新合约信息")
                 return False
             return self.gateway.refresh_contracts()
-        except Exception as e:
-            logger.exception(f"刷新合约信息失败: {e}")
+        except Exception:
+            logger.exception("刷新合约信息失败")
             return False

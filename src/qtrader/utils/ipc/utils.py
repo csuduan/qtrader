@@ -11,8 +11,9 @@ import asyncio
 import hashlib
 import time
 import uuid
+from collections.abc import Callable
 from functools import wraps
-from typing import Any, Callable
+from typing import Any
 
 from qtrader.utils.logger import get_logger
 
@@ -90,11 +91,11 @@ class HealthChecker:
             # 发送心跳包，设置超时
             await asyncio.wait_for(heartbeat_func(), timeout=self.timeout)
             self._healthy = True
-        except (asyncio.TimeoutError, ConnectionError) as e:
-            logger.warning(f"健康检查失败: {e}")
+        except (TimeoutError, ConnectionError) as e:
+            logger.warning("健康检查失败: {!r}", e)
             self._healthy = False
         except Exception as e:
-            logger.warning(f"健康检查时出错: {e}")
+            logger.warning("健康检查时出错: {!r}", e)
             self._healthy = False
 
         self._last_check = time.time()
@@ -121,10 +122,10 @@ class RequestHandlerRegistry:
         handler = registry.get_handler("echo")
     """
 
-    def __init__(self):
-        self._handlers: dict[str, Callable] = {}
+    def __init__(self) -> None:
+        self._handlers: dict[str, Callable[..., Any]] = {}
 
-    def register(self, request_type: str) -> Callable:
+    def register(self, request_type: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """
         注册请求处理器的装饰器
 
@@ -135,9 +136,9 @@ class RequestHandlerRegistry:
             装饰器函数
         """
 
-        def decorator(func: Callable) -> Callable:
+        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             @wraps(func)
-            async def wrapper(*args, **kwargs):
+            async def wrapper(*args: Any, **kwargs: Any) -> Any:
                 if asyncio.iscoroutinefunction(func):
                     return await func(*args, **kwargs)
                 else:
@@ -148,7 +149,7 @@ class RequestHandlerRegistry:
 
         return decorator
 
-    def get_handler(self, request_type: str) -> Callable | None:
+    def get_handler(self, request_type: str) -> Callable[..., Any] | None:
         """获取处理器"""
         return self._handlers.get(request_type)
 
@@ -163,7 +164,7 @@ class RequestHandlerRegistry:
             return True
         return False
 
-    def list_handlers(self) -> list:
+    def list_handlers(self) -> list[str]:
         """列出所有已注册的处理器类型"""
         return list(self._handlers.keys())
 

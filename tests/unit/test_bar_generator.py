@@ -97,9 +97,7 @@ class TestIncrement:
 
     def test_first_tick_delta_is_zero(self):
         gen = BarGenerator("rb2505")
-        delta_v, delta_t = gen._calc_increment(
-            make_tick(datetime(2024, 1, 1, 9, 0, 0), volume=100)
-        )
+        delta_v, delta_t = gen._calc_increment(make_tick(datetime(2024, 1, 1, 9, 0, 0), volume=100))
         assert delta_v == 0
         assert delta_t == 0
 

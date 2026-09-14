@@ -4,10 +4,11 @@ K线生成器
 """
 
 from collections import defaultdict, deque
-from datetime import datetime, timedelta
-from typing import Any, Callable
+from collections.abc import Callable
+from datetime import datetime
+from typing import Any
 
-from qtrader.models.object import BarData, Exchange, Interval, TickData
+from qtrader.models.object import BarData, Interval, TickData
 from qtrader.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -23,7 +24,7 @@ INTERVAL_MAP = {
 }
 
 
-def parse_interval(interval_str: str) -> tuple | None:
+def parse_interval(interval_str: str) -> tuple[Interval, int] | None:
     """
     解析周期字符串
 
@@ -227,7 +228,7 @@ class BarGenerator:
 
         return None
 
-    def _notify_bar_completed(self, interval_value: str, bar: BarData):
+    def _notify_bar_completed(self, interval_value: str, bar: BarData) -> None:
         """
         通知bar完成
 
@@ -239,8 +240,8 @@ class BarGenerator:
         for callback in callbacks:
             try:
                 callback(bar)
-            except Exception as e:
-                logger.exception(f"Bar回调执行失败: {e}")
+            except Exception:
+                logger.exception("Bar回调执行失败")
 
     def _get_bar_start_time(self, tick: TickData, minutes: int) -> datetime:
         """
@@ -282,18 +283,14 @@ class BarGenerator:
         Returns:
             Interval枚举值
         """
-        if minutes == 1:
-            return Interval.MINUTE
-        elif minutes == 5:
-            return Interval.MINUTE_5
-        elif minutes == 15:
-            return Interval.MINUTE_15
-        elif minutes == 30:
-            return Interval.MINUTE_30
-        elif minutes == 60:
-            return Interval.HOUR
-        else:
-            return Interval.DAILY
+        interval_map = {
+            1: Interval.MINUTE,
+            5: Interval.MINUTE_5,
+            15: Interval.MINUTE_15,
+            30: Interval.MINUTE_30,
+            60: Interval.HOUR,
+        }
+        return interval_map.get(minutes, Interval.DAILY)
 
     def get_bar(self, interval_str: str, n: int = 1) -> BarData | None:
         """
@@ -343,7 +340,7 @@ class BarGenerator:
 class MultiSymbolBarGenerator:
     """多合约Bar生成器管理器"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         # 每个合约一个BarGenerator: {std_symbol -> BarGenerator}
         self._generators: dict[str, BarGenerator] = {}
 

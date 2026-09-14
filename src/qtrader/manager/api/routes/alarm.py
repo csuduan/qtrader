@@ -3,10 +3,11 @@
 """
 
 from datetime import datetime, timedelta
+from typing import Any
 
-from fastapi import APIRouter, Body, Depends, Query, Request
+from fastapi import APIRouter, Query, Request, Response
 from pydantic import BaseModel
-from sqlalchemy import and_, func, select, update
+from sqlalchemy import Select, and_, func, select, update
 
 from qtrader.manager.api.responses import error_response, success_response
 from qtrader.manager.api.schemas import AlarmRes, AlarmStatsRes
@@ -32,7 +33,7 @@ async def get_today_alarms(
     status_filter: str | None = Query(
         None, description="状态筛选: UNCONFIRMED未处理/CONFIRMED已处理，不传则返回全部"
     ),
-):
+) -> Response:
     """
     获取当日告警列表
 
@@ -62,15 +63,15 @@ async def get_today_alarms(
 
         return success_response(data=data, message="获取成功")
     except Exception as e:
-        logger.error(f"获取告警列表失败: {e}", exc_info=True)
-        return error_response(code=500, message=f"获取告警列表失败: {str(e)}")
+        logger.exception("获取告警列表失败")
+        return error_response(code=500, message=f"获取告警列表失败: {e}")
 
 
 @router.get("/stats")
 async def get_alarm_stats(
     request: Request,
     account_id: str | None = Query(None, description="账户ID，不传则统计所有账户"),
-):
+) -> Response:
     """
     获取告警统计信息
 
@@ -89,7 +90,7 @@ async def get_alarm_stats(
             five_minutes_ago = now - timedelta(minutes=5)
 
             # 构建基础查询
-            def build_base_stmt():
+            def build_base_stmt() -> Select[Any]:
                 stmt = select(func.count(AlarmPo.id))
                 if account_id:
                     stmt = stmt.filter(AlarmPo.account_id == account_id)
@@ -133,16 +134,15 @@ async def get_alarm_stats(
 
         return success_response(data=data, message="获取成功")
     except Exception as e:
-        logger.exception(f"获取告警统计失败: {e}")
-        return error_response(code=500, message=f"获取告警统计失败: {str(e)}")
+        logger.exception("获取告警统计失败")
+        return error_response(code=500, message=f"获取告警统计失败: {e}")
 
 
 @router.post("/confirm/{alarm_id}")
 async def confirm_alarm(
     alarm_id: int,
     req: AlarmConfirmReq | None = None,
-    request: Request = None,
-):
+) -> Response:
     """
     确认告警
 
@@ -165,15 +165,14 @@ async def confirm_alarm(
         data = AlarmRes.model_validate(alarm)
         return success_response(data=data, message="确认成功")
     except Exception as e:
-        logger.exception(f"确认告警失败: {e}")
-        return error_response(code=500, message=f"确认告警失败: {str(e)}")
+        logger.exception("确认告警失败")
+        return error_response(code=500, message=f"确认告警失败: {e}")
 
 
 @router.post("/confirm_all")
 async def confirm_all_alarms(
     req: AlarmConfirmReq | None = None,
-    request: Request = None,
-):
+) -> Response:
     """
     批量确认所有未处理的告警
 
@@ -202,21 +201,22 @@ async def confirm_all_alarms(
             result = await session.execute(
                 update(AlarmPo).where(*conditions).values(status="CONFIRMED")
             )
-            confirmed_count = result.rowcount or 0
+            # sqlalchemy Result 存根未声明 rowcount（运行时为 CursorResult 属性）
+            confirmed_count = result.rowcount or 0  # type: ignore[attr-defined]
 
         return success_response(
             data={"confirmed_count": confirmed_count}, message=f"已确认 {confirmed_count} 条告警"
         )
     except Exception as e:
-        logger.exception(f"批量确认告警失败: {e}")
-        return error_response(code=500, message=f"批量确认告警失败: {str(e)}")
+        logger.exception("批量确认告警失败")
+        return error_response(code=500, message=f"批量确认告警失败: {e}")
 
 
 @router.get("/suppression")
 async def get_suppression_status(
     request: Request,
     account_id: str | None = Query(None, description="账户ID，不传则返回所有账户"),
-):
+) -> Response:
     """
     获取异常告警压制状态
 
@@ -234,8 +234,8 @@ async def get_suppression_status(
         status = alarm_service.get_suppression_status(account_id)
         return success_response(data=status, message="获取成功")
     except Exception as e:
-        logger.exception(f"获取压制状态失败: {e}")
-        return error_response(code=500, message=f"获取压制状态失败: {str(e)}")
+        logger.exception("获取压制状态失败")
+        return error_response(code=500, message=f"获取压制状态失败: {e}")
 
 
 @router.post("/suppression/clear/{account_id}")
@@ -244,7 +244,7 @@ async def clear_suppression(
     indicator: str | None = Query(
         None, description="指标类型(1min/5min/1hour)，不传则清除该账户所有压制"
     ),
-):
+) -> Response:
     """
     清除指定账户的异常告警压制状态
 
@@ -268,12 +268,12 @@ async def clear_suppression(
         else:
             return success_response(message=f"已清除 [{account_id}] 所有压制状态")
     except Exception as e:
-        logger.exception(f"清除压制状态失败: {e}")
-        return error_response(code=500, message=f"清除压制状态失败: {str(e)}")
+        logger.exception("清除压制状态失败")
+        return error_response(code=500, message=f"清除压制状态失败: {e}")
 
 
 @router.post("/suppression/clear_all")
-async def clear_all_suppression():
+async def clear_all_suppression() -> Response:
     """清除所有异常告警压制状态（管理员用）"""
     try:
         from qtrader.app_context import get_app_context
@@ -287,5 +287,5 @@ async def clear_all_suppression():
         alarm_service.clear_all_suppression()
         return success_response(message="已清除所有压制状态")
     except Exception as e:
-        logger.exception(f"清除所有压制状态失败: {e}")
-        return error_response(code=500, message=f"清除所有压制状态失败: {str(e)}")
+        logger.exception("清除所有压制状态失败")
+        return error_response(code=500, message=f"清除所有压制状态失败: {e}")

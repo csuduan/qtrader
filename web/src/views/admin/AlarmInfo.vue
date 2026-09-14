@@ -37,8 +37,6 @@
           </div>
         </el-col>
       </el-row>
-
-      <div ref="chartRef" class="resource-chart" />
     </el-card>
 
     <!-- 告警信息 -->
@@ -160,133 +158,30 @@ import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { alarmApi, resourceApi } from '@/api'
 import { useStore } from '@/stores'
-import type { Alarm, AlarmStats, AlarmStatus, ResourceSnapshot, ResourcePoint } from '@/types'
-import * as echarts from 'echarts'
+import type { Alarm, AlarmStats, AlarmStatus, ResourceSnapshot } from '@/types'
 
 const store = useStore()
 
 // ==================== 资源监控 ====================
 const monitorLoading = ref(false)
 const currentSnapshot = ref<ResourceSnapshot | null>(null)
-const historyPoints = ref<ResourcePoint[]>([])
-const chartRef = ref<HTMLDivElement | null>(null)
-let chartInstance: echarts.ECharts | null = null
 let monitorTimer: number | null = null
 
 async function loadResourceCurrent() {
   try {
-    const res = await resourceApi.getResourceCurrent()
-    currentSnapshot.value = res
-    if (res) {
-      const point: ResourcePoint = {
-        timestamp: res.timestamp,
-        cpu_percent: res.cpu_percent,
-        memory_percent: res.memory_percent,
-        memory_used_gb: res.memory_used_gb,
-        memory_total_gb: res.memory_total_gb,
-        disk_percent: res.disk_percent,
-        disk_used_gb: res.disk_used_gb,
-        disk_total_gb: res.disk_total_gb
-      }
-      historyPoints.value.push(point)
-      if (historyPoints.value.length > 120) {
-        historyPoints.value.shift()
-      }
-      updateChart()
-    }
+    currentSnapshot.value = await resourceApi.getResourceCurrent()
   } catch (error: any) {
     console.error(`加载资源监控失败: ${error.message}`)
   }
 }
 
-async function loadResourceHistory() {
+async function refreshMonitor() {
   monitorLoading.value = true
   try {
-    const res = await resourceApi.getResourceHistory(60)
-    historyPoints.value = res.points || []
-    updateChart()
-  } catch (error: any) {
-    ElMessage.error(`加载资源历史数据失败: ${error.message}`)
+    await loadResourceCurrent()
   } finally {
     monitorLoading.value = false
   }
-}
-
-function initChart() {
-  if (!chartRef.value) return
-  chartInstance = echarts.init(chartRef.value)
-  const option: echarts.EChartsOption = {
-    tooltip: {
-      trigger: 'axis'
-    },
-    legend: {
-      data: ['CPU (%)', '内存 (%)'],
-      bottom: 0
-    },
-    grid: {
-      left: '3%',
-      right: '4%',
-      bottom: '15%',
-      top: '10%',
-      containLabel: true
-    },
-    xAxis: {
-      type: 'category',
-      boundaryGap: false,
-      data: []
-    },
-    yAxis: {
-      type: 'value',
-      name: '使用率 (%)',
-      max: 100,
-      axisLabel: { formatter: '{value} %' }
-    },
-    series: [
-      {
-        name: 'CPU (%)',
-        type: 'line',
-        smooth: true,
-        data: [],
-        itemStyle: { color: '#409eff' }
-      },
-      {
-        name: '内存 (%)',
-        type: 'line',
-        smooth: true,
-        data: [],
-        itemStyle: { color: '#67c23a' }
-      }
-    ]
-  }
-  chartInstance.setOption(option)
-  window.addEventListener('resize', handleResize)
-}
-
-function updateChart() {
-  if (!chartInstance || historyPoints.value.length === 0) return
-  const labels = historyPoints.value.map(p => {
-    const d = new Date(p.timestamp)
-    return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`
-  })
-  const cpuData = historyPoints.value.map(p => p.cpu_percent)
-  const memData = historyPoints.value.map(p => p.memory_percent)
-
-  chartInstance.setOption({
-    xAxis: { data: labels },
-    series: [
-      { data: cpuData },
-      { data: memData }
-    ]
-  })
-}
-
-function handleResize() {
-  chartInstance?.resize()
-}
-
-async function refreshMonitor() {
-  await loadResourceHistory()
-  await loadResourceCurrent()
 }
 
 // ==================== 告警信息（原有逻辑） ====================
@@ -389,9 +284,7 @@ onMounted(async () => {
   updateIsMobile()
   window.addEventListener('resize', updateIsMobile)
   // 监控
-  await loadResourceHistory()
   await loadResourceCurrent()
-  initChart()
   monitorTimer = window.setInterval(() => {
     loadResourceCurrent()
   }, 5000)
@@ -413,10 +306,7 @@ onUnmounted(() => {
     clearInterval(statsTimer.value)
     statsTimer.value = null
   }
-  window.removeEventListener('resize', handleResize)
   window.removeEventListener('resize', updateIsMobile)
-  chartInstance?.dispose()
-  chartInstance = null
 })
 </script>
 
@@ -427,17 +317,6 @@ onUnmounted(() => {
 
 .monitor-card {
   margin-bottom: 16px;
-}
-
-.resource-chart {
-  width: 100%;
-  height: 280px;
-}
-
-@media (max-width: 768px) {
-  .resource-chart {
-    height: 220px;
-  }
 }
 
 .card-header {

@@ -11,8 +11,9 @@
 client / mock_trading_manager 夹具来自 conftest.py（空 lifespan + 注入 mock + admin JWT）
 """
 
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock
 
 
 class TestAccountTraderControl:

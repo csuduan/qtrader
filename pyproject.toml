@@ -40,11 +40,10 @@ dev = [
     "pytest-asyncio>=0.23",
     "pytest-cov>=4.1",
     "mypy>=1.8",
-    "black>=24.1",
-    "isort>=5.13",
     "httpx>=0.26",
     "playwright>=1.41",
     "pytest-playwright>=0.5",
+    "ruff>=0.16.7",
 ]
 
 [build-system]
@@ -54,20 +53,56 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/qtrader"]
 
-[tool.black]
+[tool.ruff]
 line-length = 100
-target-version = ['py312']
+target-version = "py312"
 
-[tool.isort]
-profile = "black"
-line_length = 100
+[tool.ruff.lint]
+select = [
+    "E4", "E7", "E9",  # pycodestyle 错误级（语法/语句/运行时）
+    "F",               # pyflakes：未用导入/变量、f-string 占位符缺失
+    "I",               # 导入排序
+    "UP",              # py312 现代化（旧 typing 写法、冗余模式等）
+    "B",               # bugbear：常见缺陷（可变默认参、raise-from、zip strict）
+    "SIM",             # 可简化写法
+    "C4",              # 推导式
+    "PERF",            # 循环性能反模式
+    "T20",             # 禁 print（统一走 logger）
+    "RUF006",          # 裸 asyncio.create_task（后台任务防 GC 丢失）
+    "TRY201",          # except 内 raise e → 裸 raise（保留原始 traceback）
+    "TRY401",          # exception() 日志不重复插值异常（堆栈已含）
+]
+
+ignore = [
+    "B008",   # FastAPI Depends()/Query() 默认参数是框架惯用法
+    "UP042",  # (str, Enum) → StrEnum 会改变 f-string 的 str() 输出，影响序列化
+    "SIM108", # 不强制三元表达式（可读性优先）
+    "E402",   # 入口文件 sys.path.insert 后再导入（启动装配代码）
+]
 
 [tool.mypy]
+# 显式固定目标版本（默认跟随运行 mypy 的解释器）
 python_version = "3.12"
-warn_return_any = false
+# Pydantic 模型插件
+plugins = ["pydantic.mypy"]
+
+# 严格度（均高于默认值；2026-09 全仓 1100+ 函数补全后开启全量标注检查）
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+warn_return_any = true
+# 泛型与一致性（2026-09 开启，修复全量 dict/list 裸泛型后启用）
+disallow_any_generics = true
+disallow_untyped_decorators = true
+disallow_subclassing_any = true
+strict_equality = true
+extra_checks = true
+warn_unused_ignores = true
+warn_redundant_casts = true
 warn_unused_configs = true
-disallow_untyped_defs = false
-files = [
-    "src/qtrader/",
-    "!src/qtrader/__pycache__/",
-]
+
+# 宽容项（均低于默认值）
+# 第三方库缺类型存根时静默（tqsdk 等）
+ignore_missing_imports = true
+# 允许 x: str = None 写法，兼容 SQLAlchemy 动态赋值场景
+no_implicit_optional = false

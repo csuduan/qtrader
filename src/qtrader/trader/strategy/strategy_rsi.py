@@ -15,9 +15,9 @@ from datetime import datetime, time, timedelta
 from typing import Any
 
 import numpy as np
-from pydantic import BaseModel, Field
+from pydantic import Field
 
-from qtrader.models.object import BarData
+from qtrader.models.object import BarData, TickData
 from qtrader.trader.strategy.base_strategy import BaseParam, BaseStrategy, Signal
 from qtrader.utils.config_loader import StrategyConfig
 from qtrader.utils.helpers import (
@@ -99,7 +99,7 @@ class RsiStrategy(BaseStrategy):
         logger.info(f"策略 [{self.strategy_id}] 初始化完成")
         return True
 
-    def update_params(self, params: dict) -> None:
+    def update_params(self, params: dict[str, Any]) -> None:
         """
         更新策略参数（只更新内存，不写入文件）
         Args:
@@ -121,14 +121,14 @@ class RsiStrategy(BaseStrategy):
 
         logger.info(f"策略 [{self.strategy_id}] 参数已更新: {params}")
 
-    async def on_tick(self, tick):
+    async def on_tick(self, tick: TickData) -> None:
         """Tick行情回调"""
         if tick.symbol != self.symbol:
             return
         await self.execute_signal()
         pass
 
-    async def on_bar(self, bar: BarData):
+    async def on_bar(self, bar: BarData) -> None:
         """K线行情回调"""
         try:
             # 只处理指定合约的K线
@@ -191,8 +191,8 @@ class RsiStrategy(BaseStrategy):
                 entry_volume=self.volume,
             )
             logger.info(f"策略 [{self.strategy_id}] 信号开始: {self.signal}")
-        except Exception as e:
-            logger.exception(f"策略 [{self.strategy_id}] on_bar 异常: {e}")
+        except Exception:
+            logger.exception("策略 [{}] on_bar 异常", self.strategy_id)
 
     def _resample_kline(self, bar: BarData) -> tuple[BarData | None, BarData | None]:
         """
@@ -378,12 +378,12 @@ class RsiStrategy(BaseStrategy):
         return None
 
 
-def roll_mean_right(values: list, n: int) -> float:
+def roll_mean_right(values: list[float], n: int) -> float:
     """右对齐滚动均值（忽略非有限值）"""
     a = np.array(values, dtype=float)
     L = a.shape[0]
 
-    if n <= 0 or L < n:
+    if n <= 0 or n > L:
         return np.nan
     if n == 1:
         return float(a[-1])
@@ -405,7 +405,7 @@ def roll_mean_right(values: list, n: int) -> float:
     return float(s / k)
 
 
-def calc_rsi_sma(values: list, n: int) -> float:
+def calc_rsi_sma(values: list[float], n: int) -> float:
     """使用 SMA 口径的 RSI"""
 
     c = np.array(values, dtype=float)

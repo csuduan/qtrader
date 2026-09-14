@@ -5,9 +5,13 @@
 
 import re
 from datetime import datetime
+from typing import TYPE_CHECKING, Any
 
 from qtrader.models.po import AlarmPo
 from qtrader.utils.logger import get_logger
+
+if TYPE_CHECKING:
+    from loguru import Message
 
 logger = get_logger(__name__)
 
@@ -44,7 +48,7 @@ async def create_alarm_from_log(
     log_message: str,
     module: str | None = None,
     function: str | None = None,
-    extra: dict | None = None,
+    extra: dict[str, Any] | None = None,
 ) -> bool:
     """
     从日志记录创建告警（异步落库）
@@ -92,8 +96,8 @@ async def create_alarm_from_log(
             logger.info(f"告警已创建: {alarm.title}")
 
             return True
-    except Exception as e:
-        logger.error(f"创建告警失败: {e}", exc_info=True)
+    except Exception:
+        logger.exception("创建告警失败")
         return False
 
 
@@ -103,10 +107,10 @@ class AlarmHandler:
     用于捕获ERROR级别日志并创建告警记录
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.alarm_interval = 300
 
-    def __call__(self, message):
+    def __call__(self, message: "Message") -> None:
         """
         处理日志记录
 
@@ -122,7 +126,7 @@ class AlarmHandler:
                 record = message
 
             # 获取模块名
-            module = ""
+            module: str | None = ""
             try:
                 if isinstance(record, dict):
                     module = record.get("name", "")
@@ -143,7 +147,7 @@ class AlarmHandler:
             level = None
             try:
                 if isinstance(record, dict):
-                    level_obj = record.get("level")
+                    level_obj: Any = record.get("level")
                 else:
                     level_obj = getattr(record, "level", None)
 
@@ -200,11 +204,11 @@ class AlarmHandler:
             if future is None:
                 logger.warning(f"事件循环未运行，告警仅记录日志: {log_message}")
 
-        except Exception as e:
+        except Exception:
             # 避免告警处理器自身出错导致日志系统异常
             import traceback
 
-            logger.error(f"告警处理器异常: {e}")
+            logger.exception("告警处理器异常")
             traceback.print_exc()
 
 

@@ -50,9 +50,7 @@ class TestMarkDominantContracts:
     def test_single_batch_query_per_product(self):
         """全部品种合并为一次批量订阅，同品种不重复"""
         api = MagicMock()
-        api.get_quote_list.return_value = [
-            MagicMock(underlying_symbol="") for _ in range(3)
-        ]
+        api.get_quote_list.return_value = [MagicMock(underlying_symbol="") for _ in range(3)]
         contracts = _contracts()
         TqContractFetcher._mark_dominant_contracts(api, contracts)
 

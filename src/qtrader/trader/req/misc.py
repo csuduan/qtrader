@@ -4,8 +4,6 @@
 
 from __future__ import annotations
 
-import asyncio
-from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from qtrader.trader.req.base import BaseReqHandler
@@ -13,14 +11,14 @@ from qtrader.utils.ipc import request
 from qtrader.utils.logger import get_logger
 
 if TYPE_CHECKING:
-    from qtrader.models.po import RotationInstructionPo
+    pass
 
 logger = get_logger(__name__)
 
 
 class MiscReqHandler(BaseReqHandler):
     @request("export_positions")
-    async def _req_export_positions(self, data: dict) -> dict:
+    async def _req_export_positions(self, data: dict[str, Any]) -> dict[str, Any]:
         """
         处理导出持仓请求
 
@@ -34,11 +32,11 @@ class MiscReqHandler(BaseReqHandler):
             await self.trader.job_manager.post_market_export()
             return {"success": True, "message": "持仓导出成功"}
         except Exception as e:
-            logger.exception(f"Trader [{self.account_id}] 导出持仓失败: {e}")
-            return {"success": False, "message": f"导出失败: {str(e)}"}
+            logger.exception("Trader [{}] 导出持仓失败", self.account_id)
+            return {"success": False, "message": f"导出失败: {e}"}
 
     @request("refresh_contracts")
-    async def _req_refresh_contracts(self, data: dict) -> dict:
+    async def _req_refresh_contracts(self, data: dict[str, Any]) -> dict[str, Any]:
         """
         处理强制刷新合约信息请求
 
@@ -58,11 +56,11 @@ class MiscReqHandler(BaseReqHandler):
                 logger.warning(f"Trader [{self.account_id}] 合约信息刷新失败")
                 return {"success": False, "message": "合约信息刷新失败，请检查网关连接状态"}
         except Exception as e:
-            logger.exception(f"Trader [{self.account_id}] 刷新合约信息失败: {e}")
-            return {"success": False, "message": f"刷新失败: {str(e)}"}
+            logger.exception("Trader [{}] 刷新合约信息失败", self.account_id)
+            return {"success": False, "message": f"刷新失败: {e}"}
 
     @request("init_public_data")
-    async def _req_init_public_data(self, data: dict) -> dict:
+    async def _req_init_public_data(self, data: dict[str, Any]) -> dict[str, Any]:
         """
         接收 Manager 推送的公共数据（合约信息）
 
@@ -99,5 +97,5 @@ class MiscReqHandler(BaseReqHandler):
                 )
                 return {"success": False, "message": "交易引擎未初始化", "count": 0}
         except Exception as e:
-            logger.exception(f"Trader [{self.account_id}] 加载公共数据失败: {e}")
-            return {"success": False, "message": f"加载失败: {str(e)}", "count": 0}
+            logger.exception("Trader [{}] 加载公共数据失败", self.account_id)
+            return {"success": False, "message": f"加载失败: {e}", "count": 0}

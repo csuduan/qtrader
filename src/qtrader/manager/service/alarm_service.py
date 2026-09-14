@@ -35,6 +35,7 @@ class AlarmService:
         # 压制状态缓存（仅存内存）: {account_id: {indicator: SuppressionStatus}}
         self._suppression_cache: dict[str, dict[str, SuppressionStatus]] = {}
 
+    @logger.catch(message="检查异常阈值失败")
     async def check_exception_thresholds(self) -> None:
         """
         定时检查异常阈值（每分钟执行）
@@ -50,52 +51,46 @@ class AlarmService:
         if not app_config or not app_config.alert.exception.enabled:
             return
 
-        try:
-            async with get_async_session() as session:
-                now = datetime.now()
-                for account_id in self.trading_manager.account_configs_map.keys():
-                    for indicator_config in app_config.alert.exception.indicators:
-                        indicator = indicator_config.name
-                        threshold = indicator_config.threshold
-                        window = indicator_config.window
-
-                        # 查询数据库统计窗口内异常数
-                        window_start = now - timedelta(seconds=window)
-                        base_filter = (
-                            AlarmPo.account_id == account_id,
-                            AlarmPo.created_at >= window_start,
-                            AlarmPo.alarm_type == AlarmType.EXCEPTION,
-                            AlarmPo.source != "EXCEPTION_MONITOR",  # 排除阈值告警本身
+        async with get_async_session() as session:
+            now = datetime.now()
+            for account_id in self.trading_manager.account_configs_map:
+                for indicator_config in app_config.alert.exception.indicators:
+                    indicator = indicator_config.name
+                    threshold = indicator_config.threshold
+                    window = indicator_config.window
+                    # 查询数据库统计窗口内异常数
+                    window_start = now - timedelta(seconds=window)
+                    base_filter = (
+                        AlarmPo.account_id == account_id,
+                        AlarmPo.created_at >= window_start,
+                        AlarmPo.alarm_type == AlarmType.EXCEPTION,
+                        AlarmPo.source != "EXCEPTION_MONITOR",  # 排除阈值告警本身
+                    )
+                    count = (
+                        await session.execute(
+                            select(func.count()).select_from(AlarmPo).filter(*base_filter)
                         )
-                        count = (
-                            await session.execute(
-                                select(func.count()).select_from(AlarmPo).filter(*base_filter)
-                            )
-                        ).scalar_one()
-
-                        if count >= threshold:
-                            if self._is_suppressed(account_id, indicator):
-                                logger.debug(f"[{account_id}] {indicator} 异常告警已压制")
-                                continue
-
-                            # 查询最近一次异常作为详情
-                            last_alarm = await session.scalar(
-                                select(AlarmPo)
-                                .filter(*base_filter)
-                                .order_by(AlarmPo.created_at.desc())
-                            )
-
-                            source_data = {"title": last_alarm.title if last_alarm else "未知异常"}
-
-                            await self._trigger_exception_alarm(
-                                account_id, indicator, count, threshold, source_data
-                            )
-
-        except Exception as e:
-            logger.exception(f"检查异常阈值失败: {e}")
+                    ).scalar_one()
+                    if count >= threshold:
+                        if self._is_suppressed(account_id, indicator):
+                            logger.debug(f"[{account_id}] {indicator} 异常告警已压制")
+                            continue
+                        # 查询最近一次异常作为详情
+                        last_alarm = await session.scalar(
+                            select(AlarmPo).filter(*base_filter).order_by(AlarmPo.created_at.desc())
+                        )
+                        source_data = {"title": last_alarm.title if last_alarm else "未知异常"}
+                        await self._trigger_exception_alarm(
+                            account_id, indicator, count, threshold, source_data
+                        )
 
     async def _trigger_exception_alarm(
-        self, account_id: str, indicator: str, count: int, threshold: int, source_data: dict
+        self,
+        account_id: str,
+        indicator: str,
+        count: int,
+        threshold: int,
+        source_data: dict[str, Any],
     ) -> None:
         """触发异常告警并设置压制"""
         app_config = self.trading_manager.app_config
@@ -113,7 +108,7 @@ class AlarmService:
             try:
                 send_wechat(f"{title}\n{detail}")
             except Exception as e:
-                logger.error(f"发送异常告警通知失败: {e}")
+                logger.error("发送异常告警通知失败: {!r}", e)
 
         # 设置压制状态（仅内存，不推送给前端）
         self._set_suppression(account_id, indicator)
@@ -227,4 +222,4 @@ class AlarmService:
             if config.enabled and not self._is_dnd(config.dnd_start, config.dnd_end):
                 send_wechat(f"{full_title}\n{detail}")
         except Exception as e:
-            logger.error(f"发送告警通知失败: {e}")
+            logger.error("发送告警通知失败: {!r}", e)

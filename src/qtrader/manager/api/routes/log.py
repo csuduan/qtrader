@@ -4,12 +4,11 @@
 提供日志文件读取和列表功能，支持类似 tail -f 的实时查看效果
 """
 
-import os
 import re
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Response
 
 from qtrader.manager.api.responses import error_response, success_response
 from qtrader.utils.config_loader import get_config_loader
@@ -51,7 +50,7 @@ async def get_log(
     filename: str = Query("app", description="日志文件名（app 或 error）"),
     offset: int = Query(0, description="文件字节偏移量"),
     limit: int = Query(1000, description="最大行数"),
-):
+) -> Response:
     """
     获取日志内容
 
@@ -96,7 +95,7 @@ async def get_log(
 
         lines: list[str] = []
 
-        with open(log_file, "r", encoding="utf-8", errors="replace") as f:
+        with open(log_file, encoding="utf-8", errors="replace") as f:
             # 如果 offset 为 0 且文件较大，从文件末尾读取最近的内容
             if offset == 0 and file_size > 0:
                 # 估算：平均每行约200字节，读取最近 limit 行的内容
@@ -144,14 +143,14 @@ async def get_log(
         )
 
     except Exception as e:
-        logger.exception(f"获取日志失败: {e}")
-        return error_response(code=500, message=f"获取日志失败: {str(e)}")
+        logger.exception("获取日志失败")
+        return error_response(code=500, message=f"获取日志失败: {e}")
 
 
 @router.get("/files")
 async def get_log_files(
     account_id: str = Query(..., description="账户ID"),
-):
+) -> Response:
     """
     获取账户的日志文件列表
 
@@ -181,20 +180,20 @@ async def get_log_files(
                     }
                 )
             except Exception as e:
-                logger.warning(f"获取文件信息失败 {log_file}: {e}")
+                logger.warning("获取文件信息失败 {}: {!r}", log_file, e)
 
         return success_response(data={"files": files}, message="获取成功")
 
     except Exception as e:
-        logger.exception(f"获取日志文件列表失败: {e}")
-        return error_response(code=500, message=f"获取日志文件列表失败: {str(e)}")
+        logger.exception("获取日志文件列表失败")
+        return error_response(code=500, message=f"获取日志文件列表失败: {e}")
 
 
 @router.get("/download")
 async def download_log(
     account_id: str = Query(..., description="账户ID"),
     filename: str = Query("app", description="日志文件名（app 或 error）"),
-):
+) -> Response:
     """
     下载完整日志文件
 
@@ -228,13 +227,13 @@ async def download_log(
 
         if file_size > max_size:
             # 大文件只读取最后 10MB
-            with open(log_file, "r", encoding="utf-8", errors="replace") as f:
+            with open(log_file, encoding="utf-8", errors="replace") as f:
                 f.seek(file_size - max_size)
                 # 跳过第一行（可能不完整）
                 f.readline()
                 content = f.read()
         else:
-            with open(log_file, "r", encoding="utf-8", errors="replace") as f:
+            with open(log_file, encoding="utf-8", errors="replace") as f:
                 content = f.read()
 
         return success_response(
@@ -247,5 +246,5 @@ async def download_log(
         )
 
     except Exception as e:
-        logger.exception(f"下载日志失败: {e}")
-        return error_response(code=500, message=f"下载日志失败: {str(e)}")
+        logger.exception("下载日志失败")
+        return error_response(code=500, message=f"下载日志失败: {e}")

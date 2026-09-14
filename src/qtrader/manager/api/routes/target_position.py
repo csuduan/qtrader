@@ -3,7 +3,7 @@
 所有操作通过 TradingManager 路由到 Trader
 """
 
-from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
 from pydantic import BaseModel
 
 from qtrader.manager.api.dependencies import get_trading_manager
@@ -28,7 +28,7 @@ class UpdateTargetVolumeRequest(BaseModel):
 async def get_target_comparison(
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     获取目标仓位与当前账户持仓的比对结果
 
@@ -43,8 +43,8 @@ async def get_target_comparison(
             return error_response(message="未连接到Trader，无法比对当前持仓")
         return success_response(data=result, message="获取成功")
     except Exception as e:
-        logger.error(f"获取目标仓位比对失败: {e}")
-        return error_response(message=f"获取目标仓位比对失败: {str(e)}")
+        logger.exception("获取目标仓位比对失败")
+        return error_response(message=f"获取目标仓位比对失败: {e}")
 
 
 @router.post("/import")
@@ -52,7 +52,7 @@ async def import_target_file(
     file: UploadFile = File(...),
     account_id: str = Form(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     导入目标仓位文件（保存到目标仓位目录，供比对扫描读取）
 
@@ -70,7 +70,7 @@ async def import_target_file(
         except UnicodeDecodeError:
             csv_text = content.decode("gbk")
         result = await trading_manager.import_target_instructions(
-            account_id, csv_text, file.filename
+            account_id, csv_text, file.filename or "upload.csv"
         )
         if result is None:
             return error_response(message="未连接到Trader，无法导入目标仓位文件")
@@ -78,15 +78,15 @@ async def import_target_file(
             return error_response(message=str(result["error"]))
         return success_response(data=result, message="导入完成")
     except Exception as e:
-        logger.error(f"导入目标仓位文件失败: {e}")
-        return error_response(message=f"导入目标仓位文件失败: {str(e)}")
+        logger.exception("导入目标仓位文件失败")
+        return error_response(message=f"导入目标仓位文件失败: {e}")
 
 
 @router.post("/export")
 async def export_target_instructions(
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     按目标仓位与当前持仓的偏差导出换仓指令文件
 
@@ -107,8 +107,8 @@ async def export_target_instructions(
             data=result, message=f"已导出 {result['exported']} 条换仓指令：{result['file_name']}"
         )
     except Exception as e:
-        logger.error(f"导出换仓指令文件失败: {e}")
-        return error_response(message=f"导出换仓指令文件失败: {str(e)}")
+        logger.exception("导出换仓指令文件失败")
+        return error_response(message=f"导出换仓指令文件失败: {e}")
 
 
 @router.post("/export-positions")
@@ -116,7 +116,7 @@ async def export_target_positions(
     account_id: str = Query(..., description="账户ID"),
     strategy_id: str | None = Query(default="manual", description="策略ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     导出当前账户持仓为目标仓位文件
 
@@ -138,8 +138,8 @@ async def export_target_positions(
             data=result, message=f"已导出 {result['exported']} 条目标仓位：{result['file_name']}"
         )
     except Exception as e:
-        logger.error(f"导出目标仓位文件失败: {e}")
-        return error_response(message=f"导出目标仓位文件失败: {str(e)}")
+        logger.exception("导出目标仓位文件失败")
+        return error_response(message=f"导出目标仓位文件失败: {e}")
 
 
 @router.post("/update")
@@ -147,7 +147,7 @@ async def update_target_volume(
     request: UpdateTargetVolumeRequest,
     account_id: str = Query(..., description="账户ID"),
     trading_manager: TradingManager = Depends(get_trading_manager),
-):
+) -> Response:
     """
     手动修改某合约某侧的目标手数
 
@@ -169,5 +169,5 @@ async def update_target_volume(
             return error_response(message=str(result["error"]))
         return success_response(data=result, message="目标手数已更新")
     except Exception as e:
-        logger.error(f"更新目标手数失败: {e}")
-        return error_response(message=f"更新目标手数失败: {str(e)}")
+        logger.exception("更新目标手数失败")
+        return error_response(message=f"更新目标手数失败: {e}")

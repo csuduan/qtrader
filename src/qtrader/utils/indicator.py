@@ -4,23 +4,27 @@
 注:大部分来自于网上
 """
 
+from collections.abc import Sequence
+from typing import Any, Literal, cast
+
 import numpy as np
+from numpy.typing import ArrayLike, DTypeLike
 
 
-def rolling(data, window):
+def rolling(data: np.ndarray, window: int) -> np.ndarray:
     shape = data.shape[:-1] + (data.shape[-1] - window + 1, window)
     strides = data.strides + (data.strides[-1],)
     return np.lib.stride_tricks.as_strided(data, shape=shape, strides=strides)
 
 
-def std(data):
+def std(data: list[float] | np.ndarray) -> np.floating[Any]:
     """
     计算方差
     """
     return np.std(data, ddof=1)
 
 
-def ma(data, n):
+def ma(data: ArrayLike, n: int) -> np.ndarray:
     """移动平均线：窗口大于序列长度时返回全 NaN（长度 n）"""
     data = np.asarray(data, dtype=np.float64)
     if n > len(data):
@@ -29,7 +33,14 @@ def ma(data, n):
     return np.concatenate(([np.nan for _ in range(n - 1)], mv))
 
 
-def ewma(data, period, row_size=None, dtype=None, order="C", out=None):
+def ewma(
+    data: ArrayLike,
+    period: float,
+    row_size: int | None = None,
+    dtype: DTypeLike | None = None,
+    order: Literal["A", "C", "F"] = "C",
+    out: np.ndarray | None = None,
+) -> np.ndarray:
     """
     copy from https://blog.csdn.net/Shepherdppz/article/details/104120689
 
@@ -81,8 +92,10 @@ def ewma(data, period, row_size=None, dtype=None, order="C", out=None):
     if out is None:
         out = np.empty_like(data, dtype=dtype)
     else:
-        assert out.shape == data.shape
-        assert out.dtype == dtype
+        if out.shape != data.shape or out.dtype != dtype:
+            raise ValueError(
+                f"out 参数与 data 不匹配: shape {out.shape} vs {data.shape}, dtype {out.dtype} vs {dtype}"
+            )
 
     row_n = int(data.size // row_size)  # the number of rows to use
     trailing_n = int(data.size % row_size)  # the amount of data leftover
@@ -90,8 +103,8 @@ def ewma(data, period, row_size=None, dtype=None, order="C", out=None):
 
     if trailing_n > 0:
         # set temporary results to slice view of out parameter
-        out_main_view = np.reshape(out[:-trailing_n], (row_n, row_size))
-        data_main_view = np.reshape(data[:-trailing_n], (row_n, row_size))
+        out_main_view: np.ndarray = np.reshape(out[:-trailing_n], (row_n, row_size))
+        data_main_view: np.ndarray = np.reshape(data[:-trailing_n], (row_n, row_size))
     else:
         out_main_view = out
         data_main_view = data
@@ -127,8 +140,9 @@ def ewma(data, period, row_size=None, dtype=None, order="C", out=None):
     return out
 
 
-def get_max_row_size(alpha, dtype=float):
-    assert 0.0 <= alpha < 1.0
+def get_max_row_size(alpha: float, dtype: DTypeLike = float) -> int:
+    if not 0.0 <= alpha < 1.0:
+        raise ValueError(f"alpha 必须在 [0, 1) 范围内: {alpha}")
     # This will return the maximum row size possible on
     # your platform for the given dtype. I can find no impact on accuracy
     # at this value on my machine.
@@ -141,7 +155,14 @@ def get_max_row_size(alpha, dtype=float):
     return int(np.log(epsilon) / np.log(1 - alpha)) + 1
 
 
-def ewma_vectorized(data, alpha, offset=None, dtype=None, order="C", out=None):
+def ewma_vectorized(
+    data: ArrayLike,
+    alpha: float | np.ndarray,
+    offset: float | np.ndarray | None = None,
+    dtype: DTypeLike | None = None,
+    order: Literal["A", "C", "F"] = "C",
+    out: np.ndarray | None = None,
+) -> np.ndarray:
     """
     Calculates the exponential moving average over a vector.
     Will fail for large inputs.
@@ -177,8 +198,10 @@ def ewma_vectorized(data, alpha, offset=None, dtype=None, order="C", out=None):
     if out is None:
         out = np.empty_like(data, dtype=dtype)
     else:
-        assert out.shape == data.shape
-        assert out.dtype == dtype
+        if out.shape != data.shape or out.dtype != dtype:
+            raise ValueError(
+                f"out 参数与 data 不匹配: shape {out.shape} vs {data.shape}, dtype {out.dtype} vs {dtype}"
+            )
 
     if data.size < 1:
         # empty input, return empty array
@@ -207,7 +230,15 @@ def ewma_vectorized(data, alpha, offset=None, dtype=None, order="C", out=None):
     return out
 
 
-def ewma_vectorized_2d(data, alpha, axis=None, offset=None, dtype=None, order="C", out=None):
+def ewma_vectorized_2d(
+    data: ArrayLike,
+    alpha: float | np.ndarray,
+    axis: int | None = None,
+    offset: float | np.ndarray | None = None,
+    dtype: DTypeLike | None = None,
+    order: Literal["A", "C", "F"] = "C",
+    out: np.ndarray | None = None,
+) -> np.ndarray:
     """
     Calculates the exponential moving average over a given axis.
     :param data: Input data, must be 1D or 2D array.
@@ -231,7 +262,8 @@ def ewma_vectorized_2d(data, alpha, axis=None, offset=None, dtype=None, order="C
     """
     data = np.asarray(data, dtype=np.float64)
 
-    assert data.ndim <= 2
+    if data.ndim > 2:
+        raise ValueError(f"仅支持一维或二维数据: ndim={data.ndim}")
 
     if dtype is None:
         if data.dtype == np.float32:
@@ -244,8 +276,10 @@ def ewma_vectorized_2d(data, alpha, axis=None, offset=None, dtype=None, order="C
     if out is None:
         out = np.empty_like(data, dtype=dtype)
     else:
-        assert out.shape == data.shape
-        assert out.dtype == dtype
+        if out.shape != data.shape or out.dtype != dtype:
+            raise ValueError(
+                f"out 参数与 data 不匹配: shape {out.shape} vs {data.shape}, dtype {out.dtype} vs {dtype}"
+            )
 
     if data.size < 1:
         # empty input, return empty array
@@ -257,7 +291,8 @@ def ewma_vectorized_2d(data, alpha, axis=None, offset=None, dtype=None, order="C
             offset = offset[0]
         return ewma_vectorized(data, alpha, offset, dtype=dtype, order=order, out=out)
 
-    assert -data.ndim <= axis < data.ndim
+    if not -data.ndim <= axis < data.ndim:
+        raise ValueError(f"axis 超出范围 [{-data.ndim}, {data.ndim}): {axis}")
 
     # create reshaped data views
     out_view = out
@@ -293,14 +328,14 @@ def ewma_vectorized_2d(data, alpha, axis=None, offset=None, dtype=None, order="C
     out_view /= scaling_factors[np.newaxis, -2::-1]
 
     if not (np.size(offset) == 1 and offset == 0):
-        offset = offset.astype(dtype, copy=False)
+        offset = cast(np.ndarray, offset).astype(dtype, copy=False)
         # add the offsets to the scaled cumulative sums
         out_view += offset[:, np.newaxis] * scaling_factors[np.newaxis, 1:]
 
     return out
 
 
-def wma(values, window):
+def wma(values: Sequence[float] | np.ndarray, window: int) -> np.ndarray:
     """加权移动平均：最近数据权重最大（np.convolve 会翻转核，故权重升序）"""
     weights = np.arange(1.0, window + 1.0)
     weights /= window * (window + 1) / 2
@@ -312,14 +347,19 @@ def wma(values, window):
     return weighted_moving_averages
 
 
-def std_dev(data, period):
+def std_dev(data: ArrayLike, period: int) -> np.ndarray:
     mean_squared = ma(pow(np.array(data), 2), period)
     mead_data = ma(data, period)
     squared_mean = pow(mead_data, 2)
-    return pow(np.array(mean_squared) - np.array(squared_mean), 0.5)
+    return cast(np.ndarray, pow(np.array(mean_squared) - np.array(squared_mean), 0.5))
 
 
-def macd(data, period_me1=12, period_me2=26, period_signal=9):
+def macd(
+    data: ArrayLike,
+    period_me1: float = 12,
+    period_me2: float = 26,
+    period_signal: float = 9,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     移动平均趋同/偏离(异同移动平均线) MACDHisto
     Formula:
@@ -335,7 +375,7 @@ def macd(data, period_me1=12, period_me2=26, period_signal=9):
     return macd, signal, histo
 
 
-def rsi(data, period=5):
+def rsi(data: ArrayLike, period: float = 5) -> np.ndarray:
     """相对强弱指标：上涨均值 / (上涨均值 + 下跌均值) * 100"""
     diff = np.diff(data)
     up = np.where(diff > 0.0, diff, 0.0)
@@ -343,10 +383,10 @@ def rsi(data, period=5):
     ma_up = ewma(up, period=period)
     ma_down = ewma(down, period=period)
     rs = np.array(ma_up) / np.array(ma_down)
-    return 100.0 - 100.0 / (1.0 + rs)
+    return cast(np.ndarray, 100.0 - 100.0 / (1.0 + rs))
 
 
-def kd(data: np.ndarray, period: int, period_df_ast: int = 3):
+def kd(data: np.ndarray, period: int, period_df_ast: int = 3) -> tuple[np.ndarray, np.ndarray]:
     """随机指标 KD：K = 100*(当前收盘 - 窗口最低价)/(窗口最高价 - 窗口最低价)"""
     data = np.asarray(data, dtype=np.float64)
     rolling_array = rolling(data, period)
@@ -360,7 +400,14 @@ def kd(data: np.ndarray, period: int, period_df_ast: int = 3):
     return k, perc
 
 
-def kdj(close, high, low, n=9, m1=3, m2=3):
+def kdj(
+    close: np.ndarray,
+    high: np.ndarray,
+    low: np.ndarray,
+    n: int = 9,
+    m1: int = 3,
+    m2: int = 3,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     :param close: ndarray, close price
     :param high: ndarray, high price
@@ -384,7 +431,9 @@ def kdj(close, high, low, n=9, m1=3, m2=3):
     return K, D, J
 
 
-def bollinger_bands(close, window_size, num_of_std):
+def bollinger_bands(
+    close: list[float] | np.ndarray, window_size: int, num_of_std: float
+) -> tuple[float, float]:
     rolling_mean = np.mean(close[-window_size:])
     rolling_std = np.std(close[-window_size:])
     upper_band = rolling_mean + (rolling_std * num_of_std)
@@ -392,7 +441,7 @@ def bollinger_bands(close, window_size, num_of_std):
     return upper_band, lower_band
 
 
-def sma(data, window):
+def sma(data: Sequence[float] | np.ndarray, window: int) -> np.ndarray:
     weights = np.repeat(1.0, window) / window
     sma = np.convolve(data, weights, "valid")
     return sma

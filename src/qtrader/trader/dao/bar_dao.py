@@ -5,9 +5,11 @@ K线数据DAO
 """
 
 from datetime import date, datetime
+from typing import Any, cast
 
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.engine import CursorResult
 
 from qtrader.models.object import BarData
 from qtrader.models.po import BarHistoryPo, BarTodayPo
@@ -44,7 +46,7 @@ class BarDao:
         """
         self._db_name = db_name
 
-    async def upsert_history_bars(self, bars: list[dict], source: str) -> int:
+    async def upsert_history_bars(self, bars: list[dict[str, Any]], source: str) -> int:
         """
         批量写入历史K线（官方数据覆盖旧值）
 
@@ -205,7 +207,7 @@ class BarDao:
 
     async def query_bars(
         self, symbol: str, interval: str, start: datetime, end: datetime, limit: int = 500
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """
         合并查询K线（bars_history + bars_today，按时间去重，当日表优先）
 
@@ -219,7 +221,7 @@ class BarDao:
         Returns:
             按时间升序的bar字典列表
         """
-        bars: dict[datetime, dict] = {}
+        bars: dict[datetime, dict[str, Any]] = {}
         for hpo in await self.query_history_bars(symbol, interval, start, end):
             bar_time = hpo.bar_time
             if not isinstance(bar_time, datetime):
@@ -265,7 +267,7 @@ class BarDao:
             result = await session.execute(
                 delete(BarTodayPo).where(BarTodayPo.trading_day < keep_date)
             )
-            deleted = int(result.rowcount or 0)
+            deleted = int(cast(CursorResult[Any], result).rowcount or 0)
         if deleted > 0:
             logger.info(f"已清理 {deleted} 条过期当日K线数据")
         return deleted

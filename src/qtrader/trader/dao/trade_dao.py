@@ -19,13 +19,11 @@ logger = get_logger(__name__)
 class TradeDao:
     """成交数据访问对象"""
 
+    @logger.catch(message="持久化成交数据失败")
     async def save(self, account_id: str, data: TradeData) -> None:
         """持久化成交数据"""
-        try:
-            async with get_async_session() as session:
-                await self._save_with_session(session, account_id, data)
-        except Exception as e:
-            logger.exception(f"持久化成交数据失败: {e}")
+        async with get_async_session() as session:
+            await self._save_with_session(session, account_id, data)
 
     async def _save_with_session(
         self, session: AsyncSession, account_id: str, data: TradeData

@@ -5,15 +5,15 @@
 
 import asyncio
 import inspect
+from collections.abc import Callable, Coroutine
 from datetime import datetime
-from typing import Callable
+from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from pydantic import BaseModel
 
 from qtrader.trader.job_mgr import JobManager
-from qtrader.trader.switch_mgr import SwitchPosManager
 from qtrader.utils.config_loader import SchedulerConfig
 from qtrader.utils.executors import submit_task
 from qtrader.utils.logger import get_logger
@@ -98,8 +98,10 @@ class TaskScheduler:
             return
 
         # 包装任务函数，在执行后更新触发时间
-        def wrap_job_func(func: Callable, job: Job) -> Callable:
-            async def wrapped():
+        def wrap_job_func(
+            func: Callable[..., Any], job: Job
+        ) -> Callable[[], Coroutine[Any, Any, None]]:
+            async def wrapped() -> None:
                 try:
                     # 检测是否为协程函数
                     if inspect.iscoroutinefunction(func):
@@ -108,10 +110,10 @@ class TaskScheduler:
                     else:
                         # 同步函数：投递到默认线程池执行
                         await submit_task(func)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     logger.error(f"异步任务执行超时（300秒）: {job.job_name}")
-                except Exception as e:
-                    logger.error(f"任务执行失败: {job.job_name}, {e}")
+                except Exception:
+                    logger.exception("任务执行失败: {},", job.job_name)
                 finally:
                     job.last_trigger_time = datetime.now()
 
@@ -143,9 +145,9 @@ class TaskScheduler:
                 f"已添加任务: {job.job_name}, 方法: {job_method}, CRON: {job.cron_expression}, 状态: {'暂停' if not job.enabled else '运行'}"
             )
         except Exception as e:
-            logger.error(f"添加任务 {job.job_name} 失败: {e}")
+            logger.error("添加任务 {} 失败: {!r}", job.job_name, e)
 
-    def _get_job_function(self, job_method: str) -> Callable | None:
+    def _get_job_function(self, job_method: str) -> Callable[..., Any] | None:
         """
         获取任务执行函数
 
@@ -167,7 +169,7 @@ class TaskScheduler:
         logger.warning(f"未找到任务方法: {job_method}")
         return None
 
-    def _parse_cron_expression(self, cron_expression: str):
+    def _parse_cron_expression(self, cron_expression: str) -> CronTrigger | None:
         """
         解析CRON表达式
 
@@ -194,7 +196,7 @@ class TaskScheduler:
                 # 5字段格式：分 时 日 月 周
                 return CronTrigger.from_crontab(cron_expression, timezone="Asia/Shanghai")
         except Exception as e:
-            logger.error(f"解析CRON表达式失败: {cron_expression}, {e}")
+            logger.error("解析CRON表达式失败: {}, {!r}", cron_expression, e)
             return None
 
     def _reset_strategies(self) -> None:
@@ -206,25 +208,21 @@ class TaskScheduler:
         if strategy_manager:
             strategy_manager.reset_all_for_new_day()
 
+    @logger.catch(message="启动任务调度器失败")
     def start(self) -> None:
         """启动调度器"""
-        try:
-            self.scheduler.start()
-            logger.info("任务调度器已启动")
-        except Exception as e:
-            logger.error(f"启动任务调度器失败: {e}")
+        self.scheduler.start()
+        logger.info("任务调度器已启动")
 
+    @logger.catch(message="关闭任务调度器时出错")
     def shutdown(self) -> None:
         """关闭调度器"""
-        try:
-            # 检查调度器是否正在运行（state=1 表示运行中）
-            if self.scheduler.state != 0:  # 不是停止状态才关闭
-                self.scheduler.shutdown(wait=False)
-                logger.info("任务调度器已关闭")
-            else:
-                logger.debug("任务调度器未运行，跳过关闭")
-        except Exception as e:
-            logger.error(f"关闭任务调度器时出错: {e}")
+        # 检查调度器是否正在运行（state=1 表示运行中）
+        if self.scheduler.state != 0:  # 不是停止状态才关闭
+            self.scheduler.shutdown(wait=False)
+            logger.info("任务调度器已关闭")
+        else:
+            logger.debug("任务调度器未运行，跳过关闭")
 
     def get_jobs(self) -> dict[str, Job]:
         """
@@ -261,8 +259,8 @@ class TaskScheduler:
 
             logger.info(f"已手动触发任务: {job.name} ({job_id})")
             return True
-        except Exception as e:
-            logger.exception(f"触发任务失败: {job_id}, 错误: {e}")
+        except Exception:
+            logger.exception("触发任务失败: {}, 错误", job_id)
             return False
 
     def operate_job(self, job_id: str, action: str) -> bool:
@@ -303,7 +301,7 @@ class TaskScheduler:
                 logger.error(f"未知操作: {action}")
                 return False
         except Exception as e:
-            logger.error(f"操作任务失败: {job_id}, 错误: {e}")
+            logger.error("操作任务失败: {}, 错误: {!r}", job_id, e)
             return False
 
     def update_job_status(self, job_id: str, enabled: bool) -> bool:

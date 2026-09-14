@@ -128,5 +128,12 @@ class TestSymbolLevel:
         assert is_trading_time(Exchange.SSE, _dt(6, 10, 0)) is True
 
     def test_session_table_covers_all_futures_exchanges(self):
-        for exchange in (Exchange.CFFEX, Exchange.SHFE, Exchange.CZCE, Exchange.DCE, Exchange.INE, Exchange.GFEX):
+        for exchange in (
+            Exchange.CFFEX,
+            Exchange.SHFE,
+            Exchange.CZCE,
+            Exchange.DCE,
+            Exchange.INE,
+            Exchange.GFEX,
+        ):
             assert exchange in SESSIONS
