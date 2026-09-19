@@ -321,6 +321,25 @@ class TestBaseStrategyUpdateParams:
         # 验证不会报错，参数未初始化时应该优雅处理
         strategy.update_params({"volume": 10})
 
+    def test_update_params_symbol_change_syncs_and_resubscribes(self, strategy: BaseStrategy):
+        """测试换月时 symbol 参数更新会同步 self.symbol 并触发重新订阅"""
+        asyncio.run(strategy.init(datetime.now()))
+        assert strategy.symbol == "SHFE.rb2505"
+
+        strategy.update_params({"symbol": "SHFE.rb2510"})
+
+        assert strategy.symbol == "SHFE.rb2510"
+        strategy.strategy_manager.ensure_symbol_subscription.assert_called_once_with(strategy)
+
+    def test_update_params_symbol_unchanged_no_resubscribe(self, strategy: BaseStrategy):
+        """测试 symbol 未变化时不触发重新订阅"""
+        asyncio.run(strategy.init(datetime.now()))
+
+        strategy.update_params({"volume": 10})
+
+        assert strategy.symbol == "SHFE.rb2505"
+        strategy.strategy_manager.ensure_symbol_subscription.assert_not_called()
+
 
 # ==================== TestBaseStrategyUpdateSignal ====================
 

@@ -107,6 +107,28 @@ def _mock_session_scope():
     return MagicMock(return_value=cm)
 
 
+def _mock_session_scope_pair():
+    """模拟 session_scope，返回 (工厂, session) 以便断言导入记录写入"""
+    session = MagicMock()
+    session.query.return_value.filter_by.return_value.first.return_value = None
+    cm = MagicMock()
+    cm.__enter__.return_value = session
+    cm.__exit__.return_value = False
+    return MagicMock(return_value=cm), session
+
+
+def _make_scan_env(mgr: SwitchPosManager, tmp_path, name: str):
+    """创建扫描目录和过mtime守卫的文件（时间戳设为60秒前），返回 (文件路径, session)"""
+    today_str = datetime.now().strftime("%Y%m%d")
+    today_dir = tmp_path / today_str
+    today_dir.mkdir(exist_ok=True)
+    mgr.switchPos_files_dir = str(tmp_path)
+
+    csv_file = today_dir / f"{today_str}_DQ_{name}.csv"
+    old_ts = time.time() - 60
+    return csv_file, old_ts, _mock_session_scope_pair()
+
+
 def test_scan_skips_fresh_files(tmp_path):
     """扫描时只导入时间戳与系统时间偏差绝对值大于10秒的文件"""
     mgr = build_manager()
@@ -130,10 +152,83 @@ def test_scan_skips_fresh_files(tmp_path):
     imported = []
     mgr.import_csv = lambda content, filename, mode="replace": imported.append(filename)
 
-    with patch("qtrader.trader.switch_mgr.session_scope", _mock_session_scope()):
+    with (
+        patch("qtrader.trader.switch_mgr.session_scope", _mock_session_scope()),
+        patch("qtrader.trader.switch_mgr.time.sleep"),
+    ):
         mgr.scan_and_process_orders()
 
     assert sorted(imported) == [
         f"{today_str}_DQ_future.csv",
         f"{today_str}_DQ_stable.csv",
     ]
+
+
+def test_scan_skips_empty_file(tmp_path):
+    """空文件不导入也不写导入记录，等待写入方写完后再扫描导入"""
+    mgr = build_manager()
+    csv_file, old_ts, (session_factory, session) = _make_scan_env(mgr, tmp_path, "empty")
+    csv_file.write_text("", encoding="gbk")
+    os.utime(csv_file, (old_ts, old_ts))
+
+    imported = []
+    mgr.import_csv = lambda content, filename, mode="replace": imported.append(filename)
+
+    with (
+        patch("qtrader.trader.switch_mgr.session_scope", session_factory),
+        patch("qtrader.trader.switch_mgr.time.sleep"),
+    ):
+        mgr.scan_and_process_orders()
+
+    assert imported == []
+    session.add.assert_not_called()
+
+
+def test_scan_no_record_when_import_fails(tmp_path):
+    """导入失败时不写导入记录，等待下轮扫描重试"""
+    mgr = build_manager()
+    csv_file, old_ts, (session_factory, session) = _make_scan_env(mgr, tmp_path, "bad")
+    csv_file.write_text(
+        "account,strategy,symbol,offset,direction,volume\nDQ,S1,a2611,Open,Buy,1\n",
+        encoding="gbk",
+    )
+    os.utime(csv_file, (old_ts, old_ts))
+
+    mgr.import_csv = MagicMock(side_effect=ValueError("CSV文件为空或格式错误"))
+
+    with (
+        patch("qtrader.trader.switch_mgr.session_scope", session_factory),
+        patch("qtrader.trader.switch_mgr.time.sleep"),
+    ):
+        mgr.scan_and_process_orders()
+
+    mgr.import_csv.assert_called_once()
+    session.add.assert_not_called()
+
+
+def test_scan_skips_file_growing_during_check(tmp_path):
+    """两次大小检查之间文件仍在增长（写入方未写完），跳过本轮"""
+    mgr = build_manager()
+    csv_file, old_ts, (session_factory, session) = _make_scan_env(mgr, tmp_path, "growing")
+    csv_file.write_text(
+        "account,strategy,symbol,offset,direction,volume\nDQ,S1,a2611,Open,Buy,1\n",
+        encoding="gbk",
+    )
+    os.utime(csv_file, (old_ts, old_ts))
+
+    # 模拟写入方：在两次大小检查之间（sleep期间）追加数据
+    def fake_sleep(_):
+        with open(csv_file, "a", encoding="gbk") as fh:
+            fh.write("DQ,S2,a2611,Open,Buy,2\n")
+
+    imported = []
+    mgr.import_csv = lambda content, filename, mode="replace": imported.append(filename)
+
+    with (
+        patch("qtrader.trader.switch_mgr.session_scope", session_factory),
+        patch("qtrader.trader.switch_mgr.time.sleep", fake_sleep),
+    ):
+        mgr.scan_and_process_orders()
+
+    assert imported == []
+    session.add.assert_not_called()

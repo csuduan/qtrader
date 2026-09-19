@@ -339,6 +339,18 @@ class SwitchPosManager:
                     if existing:
                         continue
 
+                    # 前后两次检查文件大小，仍在变化说明写入方未写完，跳过本轮
+                    # （mtime守卫依赖系统时钟，共享目录时钟偏差时会漏判，这里用大小变化兜底）
+                    try:
+                        size_before = csv_file.stat().st_size
+                        time.sleep(1)
+                        if size_before != csv_file.stat().st_size:
+                            logger.warning(f"文件 {csv_file.name} 正在写入，跳过本次扫描")
+                            continue
+                    except OSError as e:
+                        logger.warning(f"获取文件 {csv_file.name} 状态失败: {e}")
+                        continue
+
                     # 读取一次内容，用于导入与计算文件指纹
                     try:
                         content = csv_file.read_text(encoding="gbk")
@@ -346,11 +358,17 @@ class SwitchPosManager:
                         logger.error(f"读取文件 {csv_file.name} 失败: {e}")
                         continue
 
-                    # 导入文件
+                    # 内容为空说明写入方尚未写入，跳过本轮，下轮扫描重试
+                    if not content.strip():
+                        logger.warning(f"文件 {csv_file.name} 内容为空，可能正在写入，跳过本次扫描")
+                        continue
+
+                    # 导入文件；失败时不写导入记录，等待下轮扫描重试
                     try:
                         self.import_csv(content, csv_file.name, mode="replace")
                     except Exception as e:
                         logger.error(f"导入文件 {csv_file.name} 时出错: {e}")
+                        continue
 
                     # 记录导入成功，写入导入记录
                     record = OrderFile(

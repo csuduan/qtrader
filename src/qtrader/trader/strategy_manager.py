@@ -180,12 +180,6 @@ class StrategyManager:
                     logger.info(f"策略 {name} 加载了 {len(positions)} 个合约的持仓")
 
                 logger.info(f"添加策略: {name}")
-
-                # 按需订阅合约行情
-                symbol = strategy.symbol
-                if symbol:
-                    self.subscribe_symbol(symbol, config.bar)
-                    strategy.bar_subscriptions.append(f"{symbol}-{config.bar}")
             except Exception as e:
                 logger.exception(f"创建策略 {name} 失败: {e}", exc_info=True)
 
@@ -195,6 +189,34 @@ class StrategyManager:
             # 重新加载参数
             load_strategy_params(strategy.config, strategy.strategy_id)
             await strategy.init(self.trading_engine.trading_day)
+            # 换月后合约可能已切换，确保新合约行情已订阅
+            self.ensure_symbol_subscription(strategy)
+
+    def ensure_symbol_subscription(self, strategy: BaseStrategy) -> None:
+        """
+        确保策略当前合约的行情已订阅
+
+        换月后策略合约切换时，重新订阅新合约的 tick 和 K 线，
+        并更新策略的 bar 订阅记录（供回播使用）。
+
+        Args:
+            strategy: 策略实例
+        """
+        symbol = strategy.symbol
+        if not symbol:
+            return
+        interval = strategy.config.bar
+        subscription = f"{symbol}-{interval}"
+        if subscription in strategy.bar_subscriptions:
+            return
+        old_subscriptions = list(strategy.bar_subscriptions)
+        self.subscribe_symbol(symbol, interval)
+        strategy.bar_subscriptions.clear()
+        strategy.bar_subscriptions.append(subscription)
+        if old_subscriptions:
+            logger.info(
+                f"策略 [{strategy.strategy_id}] 合约切换: {old_subscriptions} -> {subscription}，已重新订阅行情"
+            )
 
     def _get_account_id(self) -> str | None:
         """获取当前账户ID"""

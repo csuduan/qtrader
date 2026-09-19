@@ -833,3 +833,57 @@ class TestStrategyManagerEdgeCases:
 
         # Should not crash
         strategy_manager._dispatch_event("on_order", order_data)
+
+
+# ==================== Test Ensure Symbol Subscription ====================
+
+
+class TestEnsureSymbolSubscription:
+    """测试 ensure_symbol_subscription 换月重订阅"""
+
+    def _make_strategy(self, symbol="SHFE.rb2510", bar="M1", subs=None):
+        strategy = MagicMock()
+        strategy.strategy_id = "test_strategy"
+        strategy.symbol = symbol
+        strategy.config.bar = bar
+        strategy.bar_subscriptions = subs if subs is not None else []
+        return strategy
+
+    def test_subscribe_new_symbol(self, strategy_manager, mock_trading_engine):
+        """首次订阅：订阅 tick 和 K 线并记录 bar 订阅"""
+        strategy = self._make_strategy()
+
+        strategy_manager.ensure_symbol_subscription(strategy)
+
+        mock_trading_engine.subscribe_symbol.assert_called_once_with("SHFE.rb2510")
+        mock_trading_engine.subscribe_bars.assert_called_once_with("SHFE.rb2510", "M1")
+        assert strategy.bar_subscriptions == ["SHFE.rb2510-M1"]
+
+    def test_skip_when_already_subscribed(self, strategy_manager, mock_trading_engine):
+        """已订阅相同合约时不重复订阅"""
+        strategy = self._make_strategy(subs=["SHFE.rb2510-M1"])
+
+        strategy_manager.ensure_symbol_subscription(strategy)
+
+        mock_trading_engine.subscribe_symbol.assert_not_called()
+        mock_trading_engine.subscribe_bars.assert_not_called()
+        assert strategy.bar_subscriptions == ["SHFE.rb2510-M1"]
+
+    def test_resubscribe_on_symbol_change(self, strategy_manager, mock_trading_engine):
+        """换月场景：合约从 rb2505 切换到 rb2510 时重新订阅"""
+        strategy = self._make_strategy(symbol="SHFE.rb2510", subs=["SHFE.rb2505-M1"])
+
+        strategy_manager.ensure_symbol_subscription(strategy)
+
+        mock_trading_engine.subscribe_symbol.assert_called_once_with("SHFE.rb2510")
+        mock_trading_engine.subscribe_bars.assert_called_once_with("SHFE.rb2510", "M1")
+        assert strategy.bar_subscriptions == ["SHFE.rb2510-M1"]
+
+    def test_empty_symbol_noop(self, strategy_manager, mock_trading_engine):
+        """合约为空时不订阅"""
+        strategy = self._make_strategy(symbol="")
+
+        strategy_manager.ensure_symbol_subscription(strategy)
+
+        mock_trading_engine.subscribe_symbol.assert_not_called()
+        mock_trading_engine.subscribe_bars.assert_not_called()
