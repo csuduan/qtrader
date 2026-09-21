@@ -308,6 +308,9 @@ class TestBaseStrategyUpdateParams:
 
         assert strategy.param.volume == 10
         assert strategy.param.slip == 1.5
+        # 参数同步写入内存配置，保证 init/回播不回读旧值
+        assert strategy.config.params["volume"] == 10
+        assert strategy.config.params["slip"] == 1.5
 
     def test_update_invalid_param_skips_with_warning(self, strategy: BaseStrategy):
         """测试无效参数跳过并记录警告"""
@@ -329,6 +332,8 @@ class TestBaseStrategyUpdateParams:
         strategy.update_params({"symbol": "SHFE.rb2510"})
 
         assert strategy.symbol == "SHFE.rb2510"
+        # 配置同步为新合约，手动回播重新 init 时不回读老合约
+        assert strategy.config.params["symbol"] == "SHFE.rb2510"
         strategy.strategy_manager.ensure_symbol_subscription.assert_called_once_with(strategy)
 
     def test_update_params_symbol_unchanged_no_resubscribe(self, strategy: BaseStrategy):

@@ -69,3 +69,28 @@ class TestRsiStrategySymbolChange:
 
         assert strategy.symbol == "IM2609"
         assert len(strategy.short_k_bars) == 1
+
+    def test_symbol_change_clears_signal(self, strategy_config: StrategyConfig):
+        """测试换月时清理基于老合约价格产生的活跃信号"""
+        strategy = RsiStrategy("rsi_test", strategy_config)
+        asyncio.run(strategy.init(datetime.now()))
+        strategy.update_signal({"side": 1, "entry_price": 4000.0})
+        assert strategy.signal is not None
+
+        strategy.update_params({"symbol": "IM2610"})
+
+        assert strategy.symbol == "IM2610"
+        assert strategy.signal is None
+
+    def test_symbol_change_syncs_config_for_replay(self, strategy_config: StrategyConfig):
+        """测试盘中切换合约后配置同步，手动回播重新 init 时不回读老合约"""
+        strategy = RsiStrategy("rsi_test", strategy_config)
+        asyncio.run(strategy.init(datetime.now()))
+        assert strategy.config.params["symbol"] == "IM2609"
+
+        strategy.update_params({"symbol": "IM2610"})
+
+        assert strategy.config.params["symbol"] == "IM2610"
+        # 重新 init（回播第一步）应使用新合约
+        asyncio.run(strategy.init(datetime.now()))
+        assert strategy.symbol == "IM2610"

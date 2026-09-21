@@ -105,22 +105,11 @@ class RsiStrategy(BaseStrategy):
         Args:
             params: 要更新的参数字典
         """
-        for key, value in params.items():
-            if hasattr(self.param, key):
-                # 处理时间类型的参数
-                if key in [
-                    "trade_start_time",
-                    "trade_end_time",
-                    "force_exit_time",
-                    "day_start",
-                ] and isinstance(value, str):
-                    value = _parse_time(value)
-                setattr(self.param, key, value)
-            else:
-                logger.warning(f"策略 [{self.strategy_id}] 参数 {key} 不存在")
-
-        self._sync_symbol_from_param()
-        logger.info(f"策略 [{self.strategy_id}] 参数已更新: {params}")
+        # 时间类型参数先解析为 time 对象，其余交给基类处理（含合约切换同步）
+        for key in ["trade_start_time", "trade_end_time", "force_exit_time", "day_start"]:
+            if key in params and isinstance(params[key], str):
+                params[key] = _parse_time(params[key])
+        super().update_params(params)
 
     def _on_symbol_changed(self, old_symbol: str) -> None:
         """换月后清理老合约K线缓存，避免新旧合约数据混算"""

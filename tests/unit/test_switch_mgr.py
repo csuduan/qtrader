@@ -130,7 +130,7 @@ def _make_scan_env(mgr: SwitchPosManager, tmp_path, name: str):
 
 
 def test_scan_skips_fresh_files(tmp_path):
-    """扫描时只导入时间戳与系统时间偏差绝对值大于10秒的文件"""
+    """扫描时只导入时间戳与系统时间偏差绝对值不小于5秒且大小稳定的文件"""
     mgr = build_manager()
     today_str = datetime.now().strftime("%Y%m%d")
     today_dir = tmp_path / today_str
@@ -140,9 +140,9 @@ def test_scan_skips_fresh_files(tmp_path):
     now = time.time()
     files = {
         "fresh": now,  # 刚写入 → 跳过
-        "future_fresh": now + 5,  # 未来值但偏差不足10秒 → 跳过
-        "stable": now - 60,  # 偏差超过10秒 → 导入
-        "future": now + 3600,  # 未来值且偏差超过10秒（时区偏差）→ 导入
+        "future_fresh": now + 2,  # 未来值但偏差不足5秒 → 跳过
+        "stable": now - 60,  # 偏差不小于5秒 → 导入
+        "future": now + 3600,  # 未来值且偏差超过5秒（时区偏差）→ 导入
     }
     for name, mtime in files.items():
         f = today_dir / f"{today_str}_DQ_{name}.csv"
@@ -162,6 +162,69 @@ def test_scan_skips_fresh_files(tmp_path):
         f"{today_str}_DQ_future.csv",
         f"{today_str}_DQ_stable.csv",
     ]
+
+
+# ==================== _is_file_stable ====================
+
+
+def _stable_file(tmp_path, name: str = "a.csv"):
+    """创建内容固定、时间戳为60秒前的文件"""
+    f = tmp_path / name
+    f.write_text("header\n", encoding="gbk")
+    old_ts = time.time() - 60
+    os.utime(f, (old_ts, old_ts))
+    return f
+
+
+def test_is_file_stable_old_file(tmp_path):
+    """修改时间超过5秒且观察窗口内大小不变 → 稳定"""
+    mgr = build_manager()
+    f = _stable_file(tmp_path)
+
+    with patch("qtrader.trader.switch_mgr.time.sleep"):
+        assert mgr._is_file_stable(f) is True
+
+
+def test_is_file_stable_fresh_file_no_wait(tmp_path):
+    """修改时间不足5秒 → 不稳定，且不进入观察窗口（无sleep）"""
+    mgr = build_manager()
+    f = tmp_path / "a.csv"
+    f.write_text("header\n", encoding="gbk")
+
+    with patch("qtrader.trader.switch_mgr.time.sleep") as mock_sleep:
+        assert mgr._is_file_stable(f) is False
+        mock_sleep.assert_not_called()
+
+
+def test_is_file_stable_growing_file(tmp_path):
+    """观察窗口内大小变化 → 不稳定"""
+    mgr = build_manager()
+    f = _stable_file(tmp_path)
+
+    def fake_sleep(_):
+        with open(f, "a", encoding="gbk") as fh:
+            fh.write("row\n")
+
+    with patch("qtrader.trader.switch_mgr.time.sleep", fake_sleep):
+        assert mgr._is_file_stable(f) is False
+
+
+def test_is_file_stable_touched_during_window(tmp_path):
+    """观察窗口内被触碰（大小未变）→ 不稳定"""
+    mgr = build_manager()
+    f = _stable_file(tmp_path)
+
+    def fake_sleep(_):
+        os.utime(f, None)
+
+    with patch("qtrader.trader.switch_mgr.time.sleep", fake_sleep):
+        assert mgr._is_file_stable(f) is False
+
+
+def test_is_file_stable_missing_file(tmp_path):
+    """文件不存在（获取状态失败）→ 不稳定"""
+    mgr = build_manager()
+    assert mgr._is_file_stable(tmp_path / "nope.csv") is False
 
 
 def test_scan_skips_empty_file(tmp_path):
