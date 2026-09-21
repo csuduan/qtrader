@@ -395,7 +395,7 @@ class TestParamLoading:
     def test_load_csv_file(self, tmp_path):
         csv_path = tmp_path / "params.csv"
         csv_path.write_text(
-            "strategy_id,k1,k2\n" "rsi_001,10,20\n" "rsi_002,30,\n" ",99,99\n",
+            "strategy_id,k1,k2\nrsi_001,10,20\nrsi_002,30,\n,99,99\n",
             encoding="utf-8",
         )
 
@@ -447,3 +447,55 @@ class TestParamLoading:
         ):
             mock_loader.return_value._load_app_config.return_value = app_config
             assert load_strategy_params(config, "rsi_001") == {}
+
+
+# ==================== Test Ensure Symbol Subscription ====================
+
+
+class TestEnsureSymbolSubscription:
+    """测试 ensure_symbol_subscription 换月重订阅"""
+
+    def _make_strategy(self, symbol="SHFE.rb2510", bar="M1", subs=None):
+        strategy = make_strategy(symbol=symbol)
+        strategy.config.bar = bar
+        strategy.bar_subscriptions = subs if subs is not None else []
+        return strategy
+
+    def test_subscribe_new_symbol(self, manager, engine):
+        """首次订阅：订阅 tick 和 K 线并记录 bar 订阅"""
+        strategy = self._make_strategy()
+
+        manager.ensure_symbol_subscription(strategy)
+
+        engine.subscribe_symbol.assert_called_once_with("SHFE.rb2510")
+        engine.subscribe_bars.assert_called_once_with("SHFE.rb2510", "M1")
+        assert strategy.bar_subscriptions == ["SHFE.rb2510-M1"]
+
+    def test_skip_when_already_subscribed(self, manager, engine):
+        """已订阅相同合约时不重复订阅"""
+        strategy = self._make_strategy(subs=["SHFE.rb2510-M1"])
+
+        manager.ensure_symbol_subscription(strategy)
+
+        engine.subscribe_symbol.assert_not_called()
+        engine.subscribe_bars.assert_not_called()
+        assert strategy.bar_subscriptions == ["SHFE.rb2510-M1"]
+
+    def test_resubscribe_on_symbol_change(self, manager, engine):
+        """换月场景：合约从 rb2505 切换到 rb2510 时重新订阅"""
+        strategy = self._make_strategy(symbol="SHFE.rb2510", subs=["SHFE.rb2505-M1"])
+
+        manager.ensure_symbol_subscription(strategy)
+
+        engine.subscribe_symbol.assert_called_once_with("SHFE.rb2510")
+        engine.subscribe_bars.assert_called_once_with("SHFE.rb2510", "M1")
+        assert strategy.bar_subscriptions == ["SHFE.rb2510-M1"]
+
+    def test_empty_symbol_noop(self, manager, engine):
+        """合约为空时不订阅"""
+        strategy = self._make_strategy(symbol="")
+
+        manager.ensure_symbol_subscription(strategy)
+
+        engine.subscribe_symbol.assert_not_called()
+        engine.subscribe_bars.assert_not_called()

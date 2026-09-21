@@ -5,6 +5,7 @@ RSI 策略单元测试
 信号生成阈值判断、止盈止损与外部信号过滤。不依赖交易引擎。
 """
 
+import asyncio
 import math
 from collections import deque
 from datetime import datetime, time
@@ -20,6 +21,7 @@ from qtrader.trader.strategy.strategy_rsi import (
     calc_rsi_sma,
     roll_mean_right,
 )
+from qtrader.utils.config_loader import StrategyConfig
 
 
 def make_bar(
@@ -247,3 +249,83 @@ class TestUpdateParams:
     def test_invalid_time_falls_back(self, strategy):
         strategy.update_params({"trade_start_time": "bad"})
         assert strategy.param.trade_start_time == time(0, 0, 0)
+
+
+# ==================== Test Symbol Change (换月) ====================
+
+
+@pytest.fixture
+def strategy_config() -> StrategyConfig:
+    """创建RSI策略配置（换月场景需完整init）"""
+    return StrategyConfig(
+        enabled=True,
+        type="rsi_strategy",
+        symbol="IM2609",
+        exchange="CFFEX",
+        volume=1,
+        bar="M1",
+        params={"symbol": "IM2609", "volume": 1},
+    )
+
+
+def _bar_at(minute: int, symbol: str = "IM2610") -> BarData:
+    """创建9:30锚点后的M1测试bar"""
+    return make_bar(datetime(2026, 9, 17, 9, minute), symbol=symbol)
+
+
+class TestRsiStrategySymbolChange:
+    """换月清理K线缓存测试"""
+
+    def test_symbol_change_clears_bar_caches(self, strategy_config: StrategyConfig):
+        """测试换月后清空老合约的指标缓存"""
+        strategy = RsiStrategy("rsi_test", strategy_config)
+        asyncio.run(strategy.init(datetime.now()))
+        bar = _bar_at(31, "IM2609")
+        strategy.short_k_bars.append(bar)
+        strategy.long_k_bars.append(bar)
+        strategy._short_bar_buf.append(bar)
+        strategy._long_bar_buf.append(bar)
+
+        strategy.update_params({"symbol": "IM2610"})
+
+        assert strategy.symbol == "IM2610"
+        assert len(strategy.short_k_bars) == 0
+        assert len(strategy.long_k_bars) == 0
+        assert len(strategy._short_bar_buf) == 0
+        assert len(strategy._long_bar_buf) == 0
+
+    def test_symbol_unchanged_keeps_bar_caches(self, strategy_config: StrategyConfig):
+        """测试合约未变化时不清空指标缓存"""
+        strategy = RsiStrategy("rsi_test", strategy_config)
+        asyncio.run(strategy.init(datetime.now()))
+        strategy.short_k_bars.append(_bar_at(31, "IM2609"))
+
+        strategy.update_params({"volume": 2})
+
+        assert strategy.symbol == "IM2609"
+        assert len(strategy.short_k_bars) == 1
+
+    def test_symbol_change_clears_signal(self, strategy_config: StrategyConfig):
+        """测试换月时清理基于老合约价格产生的活跃信号"""
+        strategy = RsiStrategy("rsi_test", strategy_config)
+        asyncio.run(strategy.init(datetime.now()))
+        strategy.update_signal({"side": 1, "entry_price": 4000.0})
+        assert strategy.signal is not None
+
+        strategy.update_params({"symbol": "IM2610"})
+
+        assert strategy.symbol == "IM2610"
+        assert strategy.signal is None
+
+    def test_symbol_change_syncs_config_for_replay(self, strategy_config: StrategyConfig):
+        """测试盘中切换合约后配置同步，手动回播重新 init 时不回读老合约"""
+        strategy = RsiStrategy("rsi_test", strategy_config)
+        asyncio.run(strategy.init(datetime.now()))
+        assert strategy.config.params["symbol"] == "IM2609"
+
+        strategy.update_params({"symbol": "IM2610"})
+
+        assert strategy.config.params["symbol"] == "IM2610"
+        # 重新 init（回播第一步）应使用新合约
+        asyncio.run(strategy.init(datetime.now()))
+        assert strategy.symbol == "IM2610"

@@ -13,9 +13,8 @@ BaseStrategy 单元测试
 """
 
 import asyncio
-from datetime import datetime, time
-from typing import Any, Dict
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
 
@@ -308,12 +307,14 @@ class TestBaseStrategyUpdateParams:
     def test_update_valid_params(self, strategy: BaseStrategy):
         """测试有效参数正确更新"""
         asyncio.run(strategy.init(datetime.now()))
-        original_volume = strategy.param.volume
 
         strategy.update_params({"volume": 10, "slip": 1.5})
 
         assert strategy.param.volume == 10
         assert strategy.param.slip == 1.5
+        # 参数同步写入内存配置，保证 init/回播不回读旧值
+        assert strategy.config.params["volume"] == 10
+        assert strategy.config.params["slip"] == 1.5
 
     def test_update_invalid_param_skips_with_warning(self, strategy: BaseStrategy):
         """测试无效参数跳过并记录警告"""
@@ -326,6 +327,27 @@ class TestBaseStrategyUpdateParams:
         """测试参数未初始化时的处理"""
         # 验证不会报错，参数未初始化时应该优雅处理
         strategy.update_params({"volume": 10})
+
+    def test_update_params_symbol_change_syncs_and_resubscribes(self, strategy: BaseStrategy):
+        """测试换月时 symbol 参数更新会同步 self.symbol 并触发重新订阅"""
+        asyncio.run(strategy.init(datetime.now()))
+        assert strategy.symbol == "SHFE.rb2505"
+
+        strategy.update_params({"symbol": "SHFE.rb2510"})
+
+        assert strategy.symbol == "SHFE.rb2510"
+        # 配置同步为新合约，手动回播重新 init 时不回读老合约
+        assert strategy.config.params["symbol"] == "SHFE.rb2510"
+        strategy.strategy_manager.ensure_symbol_subscription.assert_called_once_with(strategy)
+
+    def test_update_params_symbol_unchanged_no_resubscribe(self, strategy: BaseStrategy):
+        """测试 symbol 未变化时不触发重新订阅"""
+        asyncio.run(strategy.init(datetime.now()))
+
+        strategy.update_params({"volume": 10})
+
+        assert strategy.symbol == "SHFE.rb2505"
+        strategy.strategy_manager.ensure_symbol_subscription.assert_not_called()
 
 
 # ==================== TestBaseStrategyUpdateSignal ====================

@@ -213,6 +213,8 @@ class BaseStrategy:
     def update_params(self, params: dict[str, Any]) -> None:
         """
         更新策略参数（只更新内存，不写入文件）
+        合约切换（换月）时同步合约代码、清理老合约状态并重新订阅行情；
+        盘中切换后如需重建指标状态，需手动触发行情回播
 
         Args:
             params: 要更新的参数字典
@@ -220,10 +222,35 @@ class BaseStrategy:
         for key, value in params.items():
             if hasattr(self.param, key):
                 setattr(self.param, key, value)
+                # 同步到内存配置，避免后续 init/回播从旧配置回读老合约
+                self.config.params[key] = value
             else:
                 logger.warning(f"策略 [{self.strategy_id}] 参数 {key} 不存在")
 
+        self._sync_symbol_from_param()
         logger.info(f"策略 [{self.strategy_id}] 参数已更新: {params}")
+
+    def _sync_symbol_from_param(self) -> None:
+        """参数更新后同步合约代码，合约切换时清理状态并重新订阅行情（换月场景）"""
+        if not self.param or not self.param.symbol or self.param.symbol == self.symbol:
+            return
+        old_symbol = self.symbol
+        self.symbol = self.param.symbol
+        logger.info(f"策略 [{self.strategy_id}] 合约切换: {old_symbol} -> {self.symbol}")
+        # 旧信号基于老合约价格产生，清理避免新合约价格误触发止盈止损
+        self.clear_signal()
+        # 清理老合约相关状态（指标缓存等）
+        self._on_symbol_changed(old_symbol)
+        if self.strategy_manager:
+            self.strategy_manager.ensure_symbol_subscription(self)
+
+    def _on_symbol_changed(self, old_symbol: str) -> None:
+        """
+        合约切换钩子，子类重写以清理老合约的指标状态
+
+        Args:
+            old_symbol: 切换前的合约代码
+        """
 
     def update_signal(self, data: dict[str, Any]) -> None:
         """

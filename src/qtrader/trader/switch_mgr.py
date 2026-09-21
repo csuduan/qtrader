@@ -308,6 +308,46 @@ class SwitchPosManager:
         }
         return data
 
+    async def _is_file_stable(
+        self, csv_file: Path, size_window: float = 3.0, min_age: float = 5.0
+    ) -> bool:
+        """
+        检查文件是否已写入完成（不再变化）
+
+        判定条件（同时满足）：
+        1. size_window 秒观察窗口内文件大小无变化
+        2. 文件修改时间与当前时间差的绝对值不小于 min_age 秒
+           （进入观察窗口前快检一次，观察结束后复检一次，观察期内被触碰视为未稳定）
+
+        Args:
+            csv_file: 待检查的文件
+            size_window: 大小稳定性观察窗口（秒）
+            min_age: 修改时间与当前时间的最小偏差（秒）
+
+        Returns:
+            bool: True-文件已稳定；False-仍在变化、时间戳过新或获取状态失败
+        """
+        try:
+            stat_before = csv_file.stat()
+            # 时间戳过新（含轻微未来偏差，共享目录时钟不一致场景）直接跳过，不进入观察窗口
+            if abs(time.time() - stat_before.st_mtime) < min_age:
+                logger.debug(
+                    f"文件 {csv_file.name} 修改时间与当前偏差不足{min_age}秒，跳过本次扫描"
+                )
+                return False
+            await asyncio.sleep(size_window)
+            stat_after = csv_file.stat()
+            if stat_before.st_size != stat_after.st_size:
+                logger.warning(f"文件 {csv_file.name} 正在写入，跳过本次扫描")
+                return False
+            if abs(time.time() - stat_after.st_mtime) < min_age:
+                logger.warning(f"文件 {csv_file.name} 观察期内被修改，跳过本次扫描")
+                return False
+            return True
+        except OSError as e:
+            logger.warning(f"获取文件 {csv_file.name} 状态失败: {e}")
+            return False
+
     @logger.catch(message="扫描订单文件时出错")
     async def scan_and_process_orders(self) -> None:
         """扫描并处理交易指令文件"""
@@ -320,48 +360,56 @@ class SwitchPosManager:
         ]
         if not csv_files:
             return
-        # 文件时间戳与系统时间偏差的绝对值不超过10秒时跳过，
-        # 避免导入未写完的文件（未来值一般是时区/时钟偏差，偏差大于10秒直接放行）
-        now_ts = time.time()
-        stable_files = []
-        for f in csv_files:
-            if abs(now_ts - f.stat().st_mtime) <= 10:
-                logger.debug(f"文件 {f.name} 时间戳与系统时间偏差不足10秒，跳过本次扫描")
-                continue
-            stable_files.append(f)
-        csv_files = stable_files
-        if not csv_files:
-            return
         csv_files = sorted(
             csv_files,
             key=lambda f: f.stat().st_mtime if f.is_file() else 0,
             reverse=True,
         )
-        # logger.info(f"扫描到 {len(csv_files)} 个换仓文件")
+
+        # 筛出尚未导入的文件（会话即开即关，不跨越下方的文件等待）
         async with get_async_session() as session:
-            for csv_file in csv_files:
-                # 检查该文件是否已导入
+            pending_files = []
+            for f in csv_files:
                 existing = await fetch_one(
                     session,
                     select(OrderFile).filter_by(
-                        account_id=self.config.account_id, file_name=csv_file.name
+                        account_id=self.config.account_id, file_name=f.name
                     ),
                 )
-                if existing:
-                    continue
-                # 读取一次内容，用于导入与计算文件指纹
-                try:
-                    content = csv_file.read_text(encoding="gbk")
-                except Exception:
-                    logger.exception("读取文件 {} 失败", csv_file.name)
-                    continue
-                # 导入文件
+                if not existing:
+                    pending_files.append(f)
+        if not pending_files:
+            return
+
+        # 预检文件稳定性与内容（含大小观察窗口等待），不占用数据库会话
+        ready_files: list[tuple[Path, str]] = []
+        for csv_file in pending_files:
+            if not await self._is_file_stable(csv_file):
+                continue
+            try:
+                content = csv_file.read_text(encoding="gbk")
+            except Exception:
+                logger.exception("读取文件 {} 失败", csv_file.name)
+                continue
+
+            # 内容为空说明写入方尚未写入，跳过本轮，下轮扫描重试
+            if not content.strip():
+                logger.warning(f"文件 {csv_file.name} 内容为空，可能正在写入，跳过本次扫描")
+                continue
+
+            ready_files.append((csv_file, content))
+        if not ready_files:
+            return
+
+        # 导入文件；失败时不写导入记录，等待下轮扫描重试
+        async with get_async_session() as session:
+            for csv_file, content in ready_files:
                 try:
                     await self.import_csv(content, csv_file.name, mode="replace")
                 except Exception:
-                    # 导入失败不写导入记录，下轮扫描重试
                     logger.exception("导入文件 {} 时出错", csv_file.name)
                     continue
+
                 # 导入成功后写入导入记录
                 record = OrderFile(
                     account_id=self.config.account_id,
