@@ -89,7 +89,7 @@ class RsiStrategy(BaseStrategy):
         # 加载上一个交易日的数据
         hist_bars = await self.load_hist_bars(
             self.symbol,
-            self.trading_day - timedelta(days=3),
+            self.trading_day - timedelta(days=5),
             self.trading_day,
         )
         for bar in hist_bars:

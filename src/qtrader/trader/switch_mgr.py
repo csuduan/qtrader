@@ -297,46 +297,6 @@ class SwitchPosManager:
         data = {"imported": imported_count, "failed": failed_count, "errors": errors[:10]}
         return data
 
-    def _is_file_stable(
-        self, csv_file: Path, size_window: float = 3.0, min_age: float = 5.0
-    ) -> bool:
-        """
-        检查文件是否已写入完成（不再变化）
-
-        判定条件（同时满足）：
-        1. size_window 秒观察窗口内文件大小无变化
-        2. 文件修改时间与当前时间差的绝对值不小于 min_age 秒
-           （进入观察窗口前快检一次，观察结束后复检一次，观察期内被触碰视为未稳定）
-
-        Args:
-            csv_file: 待检查的文件
-            size_window: 大小稳定性观察窗口（秒）
-            min_age: 修改时间与当前时间的最小偏差（秒）
-
-        Returns:
-            bool: True-文件已稳定；False-仍在变化、时间戳过新或获取状态失败
-        """
-        try:
-            stat_before = csv_file.stat()
-            # 时间戳过新（含轻微未来偏差，共享目录时钟不一致场景）直接跳过，不进入观察窗口
-            if abs(time.time() - stat_before.st_mtime) < min_age:
-                logger.debug(
-                    f"文件 {csv_file.name} 修改时间与当前偏差不足{min_age}秒，跳过本次扫描"
-                )
-                return False
-            time.sleep(size_window)
-            stat_after = csv_file.stat()
-            if stat_before.st_size != stat_after.st_size:
-                logger.warning(f"文件 {csv_file.name} 正在写入，跳过本次扫描")
-                return False
-            if abs(time.time() - stat_after.st_mtime) < min_age:
-                logger.warning(f"文件 {csv_file.name} 观察期内被修改，跳过本次扫描")
-                return False
-            return True
-        except OSError as e:
-            logger.warning(f"获取文件 {csv_file.name} 状态失败: {e}")
-            return False
-
     def scan_and_process_orders(self) -> None:
         """扫描并处理交易指令文件"""
         try:
@@ -366,10 +326,12 @@ class SwitchPosManager:
             if not pending_files:
                 return
 
-            # 预检文件稳定性与内容（含大小观察窗口等待），不占用数据库会话
+            # 预检文件完整性与内容，不占用数据库会话
             ready_files: list[tuple[Path, str]] = []
             for csv_file in pending_files:
-                if not self._is_file_stable(csv_file):
+                # 写入方约定：csv写完后才写同名.list哨兵文件，无哨兵说明仍在写入
+                if not csv_file.with_suffix(".list").exists():
+                    logger.debug(f"文件 {csv_file.name} 缺少.list哨兵文件，跳过本次扫描")
                     continue
                 try:
                     content = csv_file.read_text(encoding="gbk")
@@ -377,9 +339,9 @@ class SwitchPosManager:
                     logger.error(f"读取文件 {csv_file.name} 失败: {e}")
                     continue
 
-                # 内容为空说明写入方尚未写入，跳过本轮，下轮扫描重试
+                # 内容为空属于写入方异常，跳过本轮不写导入记录，等待下轮扫描重试
                 if not content.strip():
-                    logger.warning(f"文件 {csv_file.name} 内容为空，可能正在写入，跳过本次扫描")
+                    logger.warning(f"文件 {csv_file.name} 内容为空，跳过本次扫描")
                     continue
 
                 ready_files.append((csv_file, content))
