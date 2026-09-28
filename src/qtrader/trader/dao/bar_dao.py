@@ -4,10 +4,10 @@ K线数据DAO
 （ManagerDataFeed，data-only TqApi）统一写入；Trader 只读，用于策略加载历史bar。
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import Any, cast
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 
@@ -126,6 +126,41 @@ class BarDao:
             )
             session.expunge_all()
             return pos
+
+    async def query_hist_trading_day_start(
+        self, symbol: str, interval: str, before_day: date, n: int = 5
+    ) -> datetime | None:
+        """
+        查询历史表中第n个交易日（不含before_day当日）的0点时间
+
+        按trading_day列回数，节假日不占天数；不足n个交易日时取最早可用交易日。
+
+        Args:
+            symbol: 合约代码
+            interval: K线周期
+            before_day: 截止交易日（不含）
+            n: 往回数的交易日个数
+
+        Returns:
+            起始时间（交易日0点），历史表无数据时返回None
+        """
+        top_days = (
+            select(BarHistoryPo.trading_day)
+            .where(
+                BarHistoryPo.symbol == symbol,
+                BarHistoryPo.interval == interval,
+                BarHistoryPo.trading_day < before_day,
+            )
+            .distinct()
+            .order_by(BarHistoryPo.trading_day.desc())
+            .limit(n)
+            .subquery()
+        )
+        async with get_async_session(self._db_name) as session:
+            min_day = await session.scalar(select(func.min(top_days.c.trading_day)))
+        if min_day is None:
+            return None
+        return datetime.combine(min_day, time.min)
 
     async def upsert_today_bars(
         self, account_id: str, bars: list[BarData], trading_day: date

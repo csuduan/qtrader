@@ -10,6 +10,7 @@ asyncpg 连接池绑定事件循环，不能与主循环共享实例。
 import asyncio
 import threading
 import time
+from bisect import bisect_right
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from typing import Any
@@ -40,6 +41,56 @@ FEED_DB_NAME = "feed"
 
 # 自动全量同步间隔（秒），同时用于发现新增订阅（如换月后的新合约）
 AUTO_SYNC_INTERVAL = 300.0
+
+
+def calc_bar_trading_day(bar_time: datetime, trading_dates: list[date]) -> date:
+    """
+    按bar时间计算真实交易日
+
+    白盘bar（3~20点）归当天；夜盘bar（>=20点或<3点，跨午夜）归下一交易日。
+
+    Args:
+        bar_time: bar开始时间
+        trading_dates: 升序交易日列表（来自交易日历，可为空）
+
+    Returns:
+        该bar归属的交易日
+    """
+    if bar_time.hour >= 20 or bar_time.hour < 3:
+        # >=20点属当晚开始的夜盘；<3点属前一日晚夜盘的延续
+        anchor = bar_time.date() if bar_time.hour >= 20 else bar_time.date() - timedelta(days=1)
+        idx = bisect_right(trading_dates, anchor)
+        if idx < len(trading_dates):
+            return trading_dates[idx]
+        logger.warning(f"交易日历不可用，夜盘bar {bar_time} 按锚点日近似: {anchor}")
+        return anchor
+    return bar_time.date()
+
+
+def load_trading_dates(api: TqApi | None, days_back: int = 60) -> list[date]:
+    """
+    从TQ交易日历构建升序交易日列表
+
+    Args:
+        api: TqApi实例（为None或查询失败时返回空列表）
+        days_back: 往前取多少天的日历
+
+    Returns:
+        升序交易日列表，失败时为空列表
+    """
+    if api is None:
+        return []
+    try:
+        now = datetime.now()
+        cal = api.get_trading_calendar(now - timedelta(days=days_back), now + timedelta(days=30))
+        return sorted(
+            date.fromisoformat(str(d))
+            for d, t in zip(cal["date"], cal["trading"], strict=False)
+            if t
+        )
+    except Exception as e:
+        logger.warning(f"查询交易日历失败，夜盘bar交易日按自然日近似: {e}")
+        return []
 
 
 def collect_bar_subscriptions(
@@ -308,6 +359,7 @@ class ManagerDataFeed:
         if trading_day is None:
             logger.warning("ManagerDataFeed 未获取到交易日，跳过全量同步")
             return
+        trading_dates = load_trading_dates(self.api)
         # 2. 全量落库
         history_rows: list[dict[str, Any]] = []
         today_bars = []
@@ -321,7 +373,7 @@ class ManagerDataFeed:
                         "symbol": symbol,
                         "interval": interval,
                         "bar_time": bar_time,
-                        "trading_day": trading_day,  # 标记字段，历史段按bar_time查询
+                        "trading_day": calc_bar_trading_day(bar_time, trading_dates),
                         "open": float(row["open"]),
                         "high": float(row["high"]),
                         "low": float(row["low"]),

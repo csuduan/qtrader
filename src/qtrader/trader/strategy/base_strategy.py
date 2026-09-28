@@ -5,7 +5,7 @@
 
 import asyncio
 import contextlib
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
@@ -204,7 +204,21 @@ class BaseStrategy:
         if self.strategy_manager is None:
             logger.error(f"策略 [{self.strategy_id}] 的 strategy_manager 未初始化")
             return []
+        logger.info(
+            f"策略 [{self.strategy_id}] 加载历史K线数据: {symbol} {self.bar_type} {start} - {end}"
+        )
         return await self.strategy_manager.load_hist_bars(symbol, self.bar_type, start, end)
+
+    async def load_hist_start(
+        self, symbol: str, trading_day: datetime, n_days: int = 5
+    ) -> datetime:
+        """查询历史K线最近n个交易日的加载起点（按交易日回数，节假日不占天数）"""
+        if self.strategy_manager is None:
+            logger.error(f"策略 [{self.strategy_id}] 的 strategy_manager 未初始化")
+            return trading_day - timedelta(days=n_days)
+        return await self.strategy_manager.get_hist_start(
+            symbol, self.bar_type, trading_day, n_days
+        )
 
     def get_signal(self) -> (dict[str, Any]) | None:
         """获取当前信号"""
