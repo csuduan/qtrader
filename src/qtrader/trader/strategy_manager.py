@@ -669,6 +669,40 @@ class StrategyManager:
             logger.exception(f"回播所有策略失败: {e}")
             return {"success": False, "message": f"回播失败: {str(e)}", "replayed_count": 0}
 
+    async def get_hist_start(
+        self, symbol: str, interval: str, trading_day: datetime, n_days: int = 5
+    ) -> datetime:
+        """
+        查询历史K线最近n个交易日的加载起点（按trading_day列回数，节假日不占天数）
+
+        历史表无数据或查询失败时回退为自然日估算。
+
+        Args:
+            symbol: 合约代码
+            interval: K线周期
+            trading_day: 当前交易日
+            n_days: 往回数的交易日个数
+
+        Returns:
+            历史加载起始时间
+        """
+        from qtrader.trader.dao.bar_dao import BarDao
+
+        try:
+            start = await asyncio.to_thread(
+                BarDao().query_hist_trading_day_start,
+                symbol,
+                interval,
+                trading_day.date(),
+                n_days,
+            )
+            if start is not None:
+                return start
+            logger.warning(f"历史表无 {symbol} {interval} 的K线，按自然日估算加载起点")
+        except Exception as e:
+            logger.exception(f"查询历史K线交易日起点失败: {symbol} {interval}: {e}")
+        return trading_day - timedelta(days=n_days)
+
     async def load_hist_bars(
         self, symbol, interval, start: datetime, end: datetime
     ) -> list[BarData]:

@@ -4,7 +4,7 @@ load_hist_bars 三层数据源合并逻辑测试
 数据来源优先级：bars_history 历史表 → 网关内存K线（覆盖）→ bars_today 当日表（补缺）
 """
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from unittest.mock import MagicMock
 
 import pandas as pd
@@ -166,3 +166,46 @@ class TestLoadHistBars:
             )
 
         assert bars == []
+
+
+class TestGetHistStart:
+    """get_hist_start 交易日回数与回退逻辑测试"""
+
+    @pytest.mark.asyncio
+    async def test_returns_trading_day_start(self, strategy_manager):
+        """历史表有数据时返回trading_day列回数的起点"""
+        dao = MagicMock()
+        dao.query_hist_trading_day_start.return_value = datetime(2026, 9, 30, 9, 30)
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("qtrader.trader.dao.bar_dao.BarDao", lambda: dao)
+            start = await strategy_manager.get_hist_start("IM2609", "M1", datetime(2026, 10, 9))
+
+        assert start == datetime(2026, 9, 30, 9, 30)
+        dao.query_hist_trading_day_start.assert_called_once_with(
+            "IM2609", "M1", date(2026, 10, 9), 5
+        )
+
+    @pytest.mark.asyncio
+    async def test_falls_back_when_no_data(self, strategy_manager):
+        """历史表无数据时回退为自然日估算"""
+        dao = MagicMock()
+        dao.query_hist_trading_day_start.return_value = None
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("qtrader.trader.dao.bar_dao.BarDao", lambda: dao)
+            start = await strategy_manager.get_hist_start("IM2609", "M1", datetime(2026, 10, 9))
+
+        assert start == datetime(2026, 10, 4)
+
+    @pytest.mark.asyncio
+    async def test_falls_back_on_db_error(self, strategy_manager):
+        """查询异常时回退为自然日估算"""
+        dao = MagicMock()
+        dao.query_hist_trading_day_start.side_effect = Exception("db down")
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("qtrader.trader.dao.bar_dao.BarDao", lambda: dao)
+            start = await strategy_manager.get_hist_start("IM2609", "M1", datetime(2026, 10, 9))
+
+        assert start == datetime(2026, 10, 4)

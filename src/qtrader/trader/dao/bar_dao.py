@@ -6,6 +6,7 @@ K线数据DAO
 
 from datetime import date, datetime
 
+from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from qtrader.models.object import BarData
@@ -98,6 +99,52 @@ class BarDao:
             )
             session.expunge_all()
             return pos
+
+    def query_hist_trading_day_start(
+        self, symbol: str, interval: str, before_day: date, n: int = 5
+    ) -> datetime | None:
+        """
+        查询历史表中最近n个交易日（不含before_day当日）最早一根bar的时间
+
+        按trading_day列回数，节假日不占天数；起点含该交易日的夜盘bar。
+
+        Args:
+            symbol: 合约代码
+            interval: K线周期
+            before_day: 截止交易日（不含）
+            n: 往回数的交易日个数
+
+        Returns:
+            起始bar_time，历史表无数据时返回None
+        """
+        with session_scope() as session:
+            days = [
+                row[0]
+                for row in (
+                    session.query(BarHistoryPo.trading_day)
+                    .filter(
+                        BarHistoryPo.symbol == symbol,
+                        BarHistoryPo.interval == interval,
+                        BarHistoryPo.trading_day < before_day,
+                    )
+                    .distinct()
+                    .order_by(BarHistoryPo.trading_day.desc())
+                    .limit(n)
+                    .all()
+                )
+            ]
+            if not days:
+                return None
+            min_time: datetime | None = (
+                session.query(func.min(BarHistoryPo.bar_time))
+                .filter(
+                    BarHistoryPo.symbol == symbol,
+                    BarHistoryPo.interval == interval,
+                    BarHistoryPo.trading_day == days[-1],
+                )
+                .scalar()
+            )
+            return min_time
 
     def upsert_today_bars(self, account_id: str, bars: list[BarData], trading_day: date) -> int:
         """

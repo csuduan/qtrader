@@ -152,6 +152,79 @@ class TestBarDaoQuery:
         assert dao.upsert_today_bars("MANAGER", [], date.today()) == 0
 
 
+class TestQueryHistTradingDayStart:
+    """按交易日回数查询加载起点测试"""
+
+    def _add_hist_bars(
+        self, symbol: str, trading_day: date, bar_times: list[datetime], interval: str = "M1"
+    ):
+        from qtrader.models.po import BarHistoryPo
+        from qtrader.utils.database import session_scope
+
+        with session_scope() as session:
+            for bt in bar_times:
+                session.add(
+                    BarHistoryPo(
+                        symbol=symbol,
+                        interval=interval,
+                        bar_time=bt,
+                        trading_day=trading_day,
+                        open_price=100,
+                        high_price=101,
+                        low_price=99,
+                        close_price=100,
+                    )
+                )
+
+    def test_skips_holiday_gap(self, dao):
+        """长假后按交易日回数，起点不在假期内（9/30为节前最后交易日）"""
+        # 数据只有两个交易日，中间隔国庆假期
+        self._add_hist_bars("IM2609", date(2026, 9, 30), [datetime(2026, 9, 30, 9, 30)])
+        self._add_hist_bars("IM2609", date(2026, 10, 9), [datetime(2026, 10, 9, 9, 31)])
+
+        start = dao.query_hist_trading_day_start("IM2609", "M1", date(2026, 10, 9), n=1)
+        assert start == datetime(2026, 9, 30, 9, 30)
+
+    def test_start_includes_night_session(self, dao):
+        """起点含交易日夜盘bar（trading_day=10/9 的bar_time在10/8晚上）"""
+        self._add_hist_bars(
+            "IM2609",
+            date(2026, 10, 9),
+            [datetime(2026, 10, 8, 21, 0), datetime(2026, 10, 9, 9, 31)],
+        )
+
+        start = dao.query_hist_trading_day_start("IM2609", "M1", date(2026, 10, 12), n=1)
+        assert start == datetime(2026, 10, 8, 21, 0)
+
+    def test_excludes_before_day(self, dao):
+        """before_day当日不计入回数范围"""
+        self._add_hist_bars("IM2609", date(2026, 10, 9), [datetime(2026, 10, 9, 9, 31)])
+        self._add_hist_bars("IM2609", date(2026, 10, 8), [datetime(2026, 10, 8, 9, 30)])
+
+        assert dao.query_hist_trading_day_start("IM2609", "M1", date(2026, 10, 9), n=5) == (
+            datetime(2026, 10, 8, 9, 30)
+        )
+
+    def test_counts_n_trading_days(self, dao):
+        """n个交易日取第n个交易日的最早bar，多于n天的数据不加载"""
+        self._add_hist_bars("IM2609", date(2026, 9, 27), [datetime(2026, 9, 25, 9, 30)])
+        self._add_hist_bars("IM2609", date(2026, 9, 28), [datetime(2026, 9, 28, 9, 30)])
+        self._add_hist_bars("IM2609", date(2026, 9, 29), [datetime(2026, 9, 29, 9, 30)])
+
+        start = dao.query_hist_trading_day_start("IM2609", "M1", date(2026, 9, 30), n=2)
+        assert start == datetime(2026, 9, 28, 9, 30)
+
+    def test_filters_symbol_and_interval(self, dao):
+        """其他合约或周期的数据不参与回数"""
+        self._add_hist_bars("IC2609", date(2026, 9, 30), [datetime(2026, 9, 30, 9, 30)])
+        self._add_hist_bars("IM2609", date(2026, 9, 30), [datetime(2026, 9, 30, 9, 30)])
+
+        assert dao.query_hist_trading_day_start("IM2609", "M5", date(2026, 10, 9), n=5) is None
+
+    def test_no_data_returns_none(self, dao):
+        assert dao.query_hist_trading_day_start("IM2609", "M1", date(2026, 10, 9), n=5) is None
+
+
 class TestCollectBarSubscriptions:
     """订阅汇总逻辑测试"""
 

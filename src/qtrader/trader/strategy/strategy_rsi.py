@@ -11,7 +11,7 @@ RSI 可执行策略
 """
 
 from collections import deque
-from datetime import datetime, time, timedelta
+from datetime import datetime, time
 from typing import Any
 
 import numpy as np
@@ -86,12 +86,9 @@ class RsiStrategy(BaseStrategy):
             logger.error(f"策略 [{self.strategy_id}] 未配置参数")
             return False
 
-        # 加载上一个交易日的数据
-        hist_bars = await self.load_hist_bars(
-            self.symbol,
-            self.trading_day - timedelta(days=5),
-            self.trading_day,
-        )
+        # 加载最近n个交易日的数据（按交易日回数，节假日不占天数）
+        hist_start = await self.load_hist_start(self.symbol, self.trading_day, n_days=3)
+        hist_bars = await self.load_hist_bars(self.symbol, hist_start, self.trading_day)
         for bar in hist_bars:
             self._resample_kline(bar)
 
