@@ -200,6 +200,7 @@ class BaseStrategy:
         if self.strategy_manager is None:
             logger.error(f"策略 [{self.strategy_id}] 的 strategy_manager 未初始化")
             return []
+        logger.info(f"策略 [{self.strategy_id}] 加载历史K线数据: {symbol} {self.bar_type} {start} - {end}")
         return await self.strategy_manager.load_hist_bars(symbol, self.bar_type, start, end)
 
     async def load_hist_start(

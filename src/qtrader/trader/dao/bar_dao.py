@@ -4,7 +4,7 @@ K线数据DAO
 （ManagerDataFeed，data-only TqApi）统一写入；Trader 只读，用于策略加载历史bar。
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, time
 
 from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -104,9 +104,9 @@ class BarDao:
         self, symbol: str, interval: str, before_day: date, n: int = 5
     ) -> datetime | None:
         """
-        查询历史表中最近n个交易日（不含before_day当日）最早一根bar的时间
+        查询历史表中第n个交易日（不含before_day当日）的0点时间
 
-        按trading_day列回数，节假日不占天数；起点含该交易日的夜盘bar。
+        按trading_day列回数，节假日不占天数；不足n个交易日时取最早可用交易日。
 
         Args:
             symbol: 合约代码
@@ -115,36 +115,25 @@ class BarDao:
             n: 往回数的交易日个数
 
         Returns:
-            起始bar_time，历史表无数据时返回None
+            起始时间（交易日0点），历史表无数据时返回None
         """
         with session_scope() as session:
-            days = [
-                row[0]
-                for row in (
-                    session.query(BarHistoryPo.trading_day)
-                    .filter(
-                        BarHistoryPo.symbol == symbol,
-                        BarHistoryPo.interval == interval,
-                        BarHistoryPo.trading_day < before_day,
-                    )
-                    .distinct()
-                    .order_by(BarHistoryPo.trading_day.desc())
-                    .limit(n)
-                    .all()
-                )
-            ]
-            if not days:
-                return None
-            min_time: datetime | None = (
-                session.query(func.min(BarHistoryPo.bar_time))
+            top_days = (
+                session.query(BarHistoryPo.trading_day)
                 .filter(
                     BarHistoryPo.symbol == symbol,
                     BarHistoryPo.interval == interval,
-                    BarHistoryPo.trading_day == days[-1],
+                    BarHistoryPo.trading_day < before_day,
                 )
-                .scalar()
+                .distinct()
+                .order_by(BarHistoryPo.trading_day.desc())
+                .limit(n)
+                .subquery()
             )
-            return min_time
+            min_day: date | None = session.query(func.min(top_days.c.trading_day)).scalar()
+            if min_day is None:
+                return None
+            return datetime.combine(min_day, time.min)
 
     def upsert_today_bars(self, account_id: str, bars: list[BarData], trading_day: date) -> int:
         """

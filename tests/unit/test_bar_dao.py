@@ -183,10 +183,10 @@ class TestQueryHistTradingDayStart:
         self._add_hist_bars("IM2609", date(2026, 10, 9), [datetime(2026, 10, 9, 9, 31)])
 
         start = dao.query_hist_trading_day_start("IM2609", "M1", date(2026, 10, 9), n=1)
-        assert start == datetime(2026, 9, 30, 9, 30)
+        assert start == datetime(2026, 9, 30)
 
-    def test_start_includes_night_session(self, dao):
-        """起点含交易日夜盘bar（trading_day=10/9 的bar_time在10/8晚上）"""
+    def test_start_is_trading_day_midnight(self, dao):
+        """起点为交易日0点（该日夜盘bar_time在前一晚，不在起点范围内）"""
         self._add_hist_bars(
             "IM2609",
             date(2026, 10, 9),
@@ -194,7 +194,7 @@ class TestQueryHistTradingDayStart:
         )
 
         start = dao.query_hist_trading_day_start("IM2609", "M1", date(2026, 10, 12), n=1)
-        assert start == datetime(2026, 10, 8, 21, 0)
+        assert start == datetime(2026, 10, 9)
 
     def test_excludes_before_day(self, dao):
         """before_day当日不计入回数范围"""
@@ -202,7 +202,7 @@ class TestQueryHistTradingDayStart:
         self._add_hist_bars("IM2609", date(2026, 10, 8), [datetime(2026, 10, 8, 9, 30)])
 
         assert dao.query_hist_trading_day_start("IM2609", "M1", date(2026, 10, 9), n=5) == (
-            datetime(2026, 10, 8, 9, 30)
+            datetime(2026, 10, 8)
         )
 
     def test_counts_n_trading_days(self, dao):
@@ -212,7 +212,15 @@ class TestQueryHistTradingDayStart:
         self._add_hist_bars("IM2609", date(2026, 9, 29), [datetime(2026, 9, 29, 9, 30)])
 
         start = dao.query_hist_trading_day_start("IM2609", "M1", date(2026, 9, 30), n=2)
-        assert start == datetime(2026, 9, 28, 9, 30)
+        assert start == datetime(2026, 9, 28)
+
+    def test_falls_back_to_oldest_when_fewer_than_n_days(self, dao):
+        """不足n个交易日时取最早可用交易日（新合约场景）"""
+        self._add_hist_bars("IM2609", date(2026, 9, 22), [datetime(2026, 9, 22, 9, 30)])
+
+        assert dao.query_hist_trading_day_start("IM2609", "M1", date(2026, 9, 28), n=3) == (
+            datetime(2026, 9, 22)
+        )
 
     def test_filters_symbol_and_interval(self, dao):
         """其他合约或周期的数据不参与回数"""
@@ -331,3 +339,48 @@ class TestManagerDataFeed:
             assert feed._resolve_tq_symbol("XX9999") is None
         finally:
             close_database()
+
+
+class TestCalcBarTradingDay:
+    """calc_bar_trading_day 白盘/夜盘归属测试
+
+    日历为2026年9月真实交易日：9/25中秋休市，9/19-20、9/26-27为周末
+    """
+
+    # 9/14(一)~9/18(五), 9/21(一)~9/24(四), 9/28(一)
+    TRADING_DATES = [date(2026, 9, d) for d in [14, 15, 16, 17, 18, 21, 22, 23, 24, 28]]
+
+    def _calc(self, dt: datetime, dates: list[date] | None = None) -> date:
+        from qtrader.manager.data_feed import calc_bar_trading_day
+
+        return calc_bar_trading_day(dt, self.TRADING_DATES if dates is None else dates)
+
+    def test_day_session_bars_belong_to_same_day(self):
+        """白盘bar归当天，不依赖日历"""
+        assert self._calc(datetime(2026, 9, 22, 9, 30)) == date(2026, 9, 22)
+        assert self._calc(datetime(2026, 9, 22, 14, 59)) == date(2026, 9, 22)
+
+    def test_night_session_evening_belongs_to_next_trading_day(self):
+        """夜盘bar（>=20点）归下一交易日，跳过周末"""
+        # 周五晚夜盘 -> 下周一
+        assert self._calc(datetime(2026, 9, 18, 21, 0)) == date(2026, 9, 21)
+        # 周四晚夜盘 -> 下周一（跳过9/25中秋+周末）
+        assert self._calc(datetime(2026, 9, 24, 21, 0)) == date(2026, 9, 28)
+
+    def test_night_session_early_morning_belongs_to_following_day(self):
+        """凌晨夜盘bar（<3点）按前一日晚的夜盘归下一交易日"""
+        # 周一夜盘延续到周二凌晨 -> 周二
+        assert self._calc(datetime(2026, 9, 22, 1, 0)) == date(2026, 9, 22)
+        # 周五夜盘延续到周六凌晨 -> 下周一
+        assert self._calc(datetime(2026, 9, 19, 1, 0)) == date(2026, 9, 21)
+
+    def test_empty_calendar_fallback(self):
+        """日历不可用时：白盘仍归当天，夜盘按锚点日近似"""
+        assert self._calc(datetime(2026, 9, 22, 9, 30), dates=[]) == date(2026, 9, 22)
+        assert self._calc(datetime(2026, 9, 18, 21, 0), dates=[]) == date(2026, 9, 18)
+
+    def test_load_trading_dates_handles_api_none(self):
+        """api为None时返回空列表"""
+        from qtrader.manager.data_feed import load_trading_dates
+
+        assert load_trading_dates(None) == []
