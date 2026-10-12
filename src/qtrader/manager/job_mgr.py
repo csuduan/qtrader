@@ -587,7 +587,7 @@ class ManagerJobManager:
                 logger.warning(f"本周({monday} ~ {today})无结算权益数据，跳过周报发送")
                 return
 
-            html_body = _build_settlement_report_html(records, today)
+            html_body = _build_settlement_report_html(records, today, app_config)
             subject = f"Q-Trader 结算权益周报 ({today:%m-%d})"
 
             send_email(
@@ -610,13 +610,14 @@ def _fmt_money(value) -> str:
     return f"{float(value):,.2f}" if value is not None else "-"
 
 
-def _build_settlement_report_html(records, end_date) -> str:
+def _build_settlement_report_html(records, end_date, app_config) -> str:
     """
     拼接结算权益周报 HTML 正文（全部账户合并一张表，每账户取最新一日数据）
 
     Args:
         records: AccountHistoryPo 列表（已按账户、日期排序）
         end_date: 周报结束日期
+        app_config: 全局配置，用于查询账户名称
 
     Returns:
         HTML 字符串
@@ -637,6 +638,7 @@ def _build_settlement_report_html(records, end_date) -> str:
         '<table style="border-collapse:collapse;font-size:13px;">',
         "<tr>"
         f'<th style="{header_style}">账户</th>'
+        f'<th style="{header_style}">账户名称</th>'
         f'<th style="{header_style}">日期</th>'
         f'<th style="{header_style}">结算权益</th>'
         f'<th style="{header_style}">入金</th>'
@@ -649,9 +651,12 @@ def _build_settlement_report_html(records, end_date) -> str:
     for account_id in sorted(latest_by_account):
         record = latest_by_account[account_id]
         risk_ratio = f"{float(record.risk_ratio):.2%}" if record.risk_ratio is not None else "-"
+        acc_config = app_config.get_account_config(account_id) if app_config else None
+        account_name = acc_config.name if acc_config and acc_config.name else "-"
         parts.append(
             "<tr>"
             f'<td style="{name_style}">{account_id}</td>'
+            f'<td style="{name_style}">{account_name}</td>'
             f'<td style="{cell_style}">{record.settle_date}</td>'
             f'<td style="{cell_style}">{_fmt_money(record.balance)}</td>'
             f'<td style="{cell_style}">{_fmt_money(record.deposit)}</td>'
