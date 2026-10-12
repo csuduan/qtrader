@@ -301,12 +301,9 @@ class SwitchPosManager:
         """扫描并处理交易指令文件"""
         try:
             today_dir = Path(self.switchPos_files_dir) / datetime.now().strftime("%Y%m%d")
-            today_str = datetime.now().strftime("%Y%m%d")
-            csv_files = [
-                f
-                for f in today_dir.glob("*.csv")
-                if today_str in f.name and self.config.account_id in f.name
-            ]
+            # 文件名约定：SwitchPos-{account_id}-{date}-*，前缀精确匹配账户，避免 WY 误扫 WY2 的文件
+            file_prefix = f"SwitchPos-{self.config.account_id}-{datetime.now().strftime('%Y%m%d')}-"
+            csv_files = [f for f in today_dir.glob("*.csv") if f.name.startswith(file_prefix)]
             if not csv_files:
                 return
 

@@ -112,7 +112,7 @@ def _make_scan_env(mgr: SwitchPosManager, tmp_path, name: str, with_sentinel: bo
     today_dir.mkdir(exist_ok=True)
     mgr.switchPos_files_dir = str(tmp_path)
 
-    csv_file = today_dir / f"{today_str}_DQ_{name}.csv"
+    csv_file = today_dir / f"SwitchPos-{mgr.config.account_id}-{today_str}-{name}.csv"
     if with_sentinel:
         csv_file.with_suffix(".list").touch()
     return csv_file, _mock_session_scope_pair()
@@ -174,3 +174,29 @@ def test_scan_no_record_when_import_fails(tmp_path):
 
     mgr.import_csv.assert_called_once()
     session.add.assert_not_called()
+
+
+def test_scan_ignores_prefixed_other_account_file(tmp_path):
+    """扫描按前缀匹配账户，WY 不会误扫 WY2 的文件（避免replace模式清空自身指令）"""
+    mgr = build_manager("WY")
+    csv_file, (session_factory, _) = _make_scan_env(mgr, tmp_path, "142530")
+    csv_file.write_text(
+        "account,strategy,symbol,offset,direction,volume\nWY,S1,a2611,Open,Buy,1\n",
+        encoding="gbk",
+    )
+
+    today_str = datetime.now().strftime("%Y%m%d")
+    wy2_file = csv_file.parent / f"SwitchPos-WY2-{today_str}-D-1.csv"
+    wy2_file.write_text(
+        "account,strategy,symbol,offset,direction,volume\nWY2,S1,a2611,Open,Buy,2\n",
+        encoding="gbk",
+    )
+    wy2_file.with_suffix(".list").touch()
+
+    imported = []
+    mgr.import_csv = lambda content, filename, mode="replace": imported.append(filename)
+
+    with patch("qtrader.trader.switch_mgr.session_scope", session_factory):
+        mgr.scan_and_process_orders()
+
+    assert imported == [csv_file.name]
