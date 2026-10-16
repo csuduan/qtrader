@@ -977,6 +977,41 @@ class TestCloseStalePositions:
         assert by_direction[Direction.BUY].volume == 2
 
     @pytest.mark.asyncio
+    async def test_close_stale_positions_closes_all_stale_symbols(self, strategy: BaseStrategy):
+        """多个遗留合约在同一次任务中全部平仓，配置合约本身不触发"""
+        await strategy.init(datetime.now())
+        strategy._positions = {
+            "SHFE.rb2505": PositionData(
+                symbol="SHFE.rb2505",
+                exchange=Exchange.SHFE,
+                multiple=10,
+                pos_long_yd=4,
+                strategy_id=strategy.strategy_id,
+            ),
+            "SHFE.rb2501": PositionData(
+                symbol="SHFE.rb2501",
+                exchange=Exchange.SHFE,
+                multiple=10,
+                pos_long_yd=2,
+                strategy_id=strategy.strategy_id,
+            ),
+            "SHFE.rb2412": PositionData(
+                symbol="SHFE.rb2412",
+                exchange=Exchange.SHFE,
+                multiple=10,
+                pos_short_yd=1,
+                strategy_id=strategy.strategy_id,
+            ),
+        }
+
+        await strategy.close_stale_positions()
+
+        # 两个遗留合约各发一笔平仓指令，配置合约rb2505不触发
+        assert strategy.strategy_manager.send_order_cmd.await_count == 2
+        cmds = [c.args[1] for c in strategy.strategy_manager.send_order_cmd.await_args_list]
+        assert {c.symbol for c in cmds} == {"SHFE.rb2501", "SHFE.rb2412"}
+
+    @pytest.mark.asyncio
     async def test_close_stale_positions_sends_even_with_pending_cmd(self, strategy: BaseStrategy):
         """测试有在途指令时仍会发送遗留平仓指令（任务每日仅触发一次，不做防重）"""
         await self._setup_stale(strategy)

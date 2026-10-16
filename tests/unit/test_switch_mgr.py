@@ -133,7 +133,7 @@ async def test_scan_skips_fresh_files(tmp_path):
         "future": now + 3600,  # 未来值且偏差超过5秒（时区偏差）→ 导入
     }
     for name, mtime in files.items():
-        f = today_dir / f"{today_str}_DQ_{name}.csv"
+        f = today_dir / f"SwitchPos-DQ-{today_str}-{name}.csv"
         f.write_text("header\n", encoding="gbk")
         os.utime(f, (mtime, mtime))
 
@@ -152,8 +152,8 @@ async def test_scan_skips_fresh_files(tmp_path):
         await mgr.scan_and_process_orders()
 
     assert sorted(imported) == [
-        f"{today_str}_DQ_future.csv",
-        f"{today_str}_DQ_stable.csv",
+        f"SwitchPos-DQ-{today_str}-future.csv",
+        f"SwitchPos-DQ-{today_str}-stable.csv",
     ]
 
 
@@ -163,7 +163,8 @@ def _make_scan_env(mgr: SwitchPosManager, tmp_path, name: str, content: str = ""
     today_dir = tmp_path / today_str
     today_dir.mkdir(exist_ok=True)
     mgr.switchPos_files_dir = str(tmp_path)
-    csv_file = today_dir / f"{today_str}_DQ_{name}.csv"
+
+    csv_file = today_dir / f"SwitchPos-{mgr.config.account_id}-{today_str}-{name}.csv"
     csv_file.write_text(content, encoding="gbk")
     old_ts = time.time() - 60
     os.utime(csv_file, (old_ts, old_ts))
@@ -312,3 +313,39 @@ def test_is_file_stable_missing_file(tmp_path):
     """文件不存在（获取状态失败）→ 不稳定"""
     mgr = build_manager()
     assert asyncio.run(mgr._is_file_stable(tmp_path / "nope.csv")) is False
+
+
+async def test_scan_ignores_prefixed_other_account_file(tmp_path):
+    """扫描按前缀匹配账户，WY 不会误扫 WY2 的文件（避免replace模式清空自身指令）"""
+    mgr = build_manager("WY")
+    csv_file, session, session_factory = _make_scan_env(
+        mgr,
+        tmp_path,
+        "142530",
+        "account,strategy,symbol,offset,direction,volume\nWY,S1,a2611,Open,Buy,1\n",
+    )
+
+    today_str = datetime.now().strftime("%Y%m%d")
+    wy2_file = csv_file.parent / f"SwitchPos-WY2-{today_str}-D-1.csv"
+    wy2_file.write_text(
+        "account,strategy,symbol,offset,direction,volume\nWY2,S1,a2611,Open,Buy,2\n",
+        encoding="gbk",
+    )
+    old_ts = time.time() - 60
+    os.utime(wy2_file, (old_ts, old_ts))
+
+    imported = []
+
+    async def fake_import(content, filename, mode="replace"):
+        imported.append(filename)
+
+    mgr.import_csv = fake_import
+
+    with (
+        patch("qtrader.trader.switch_mgr.get_async_session", session_factory),
+        patch("qtrader.trader.switch_mgr.fetch_one", AsyncMock(return_value=None)),
+        patch("qtrader.trader.switch_mgr.asyncio.sleep", AsyncMock()),
+    ):
+        await mgr.scan_and_process_orders()
+
+    assert imported == [csv_file.name]

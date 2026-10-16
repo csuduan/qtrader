@@ -105,6 +105,12 @@
                   ¥{{ formatNumber(acc.today_profit || 0) }}
                 </div>
               </div>
+              <div class="account-stat">
+                <div class="account-stat-label">换仓进度</div>
+                <div class="account-stat-value" :class="isRotationCompleted(acc) ? 'profit' : ''">
+                  {{ getRotationProgressText(acc) }}
+                </div>
+              </div>
             </div>
           </el-card>
         </el-col>
@@ -260,14 +266,18 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useStore } from '@/stores'
-import { alarmApi, systemApi, accountApi } from '@/api'
+import { alarmApi, systemApi, accountApi, rotationApi } from '@/api'
 import type { RiskControlStatus, Account } from '@/types'
 
 const store = useStore()
 const alarmStats = ref({ today_total: 0, last_hour: 0, last_five_minutes: 0 })
+
+// 各账户换仓进度: account_id -> { completed: 已完成条数, total: 总条数 }
+const rotationProgress = ref<Record<string, { completed: number; total: number }>>({})
+let rotationTimer: number | null = null
 
 const currentRiskStatus = computed<RiskControlStatus>(() => {
   return store.currentAccount?.risk_status || {
@@ -372,6 +382,34 @@ async function loadAlarmStats() {
   }
 }
 
+/** 加载所有账户今日换仓进度（已完成/总条目），失败账户静默跳过 */
+async function loadRotationProgress() {
+  const accounts = store.accounts
+  if (!accounts.length) return
+  const results = await Promise.all(
+    accounts.map(async acc => {
+      try {
+        const result = await rotationApi.getRotationInstructions(acc.account_id, { limit: 500 })
+        const instructions = result.instructions || []
+        return [
+          acc.account_id,
+          {
+            completed: instructions.filter(i => i.status === 'COMPLETED').length,
+            total: instructions.length
+          }
+        ] as const
+      } catch {
+        return [acc.account_id, null] as const
+      }
+    })
+  )
+  const progress: Record<string, { completed: number; total: number }> = {}
+  for (const [accountId, value] of results) {
+    if (value) progress[accountId] = value
+  }
+  rotationProgress.value = progress
+}
+
 async function handleAccountAction(cmd: any, accountId: string) {
   const targetAccountId = accountId
 
@@ -465,11 +503,34 @@ onMounted(async () => {
   // 总览页需要加载所有账户的完整信息
   await store.loadAllAccounts()
   loadAlarmStats()
+  loadRotationProgress()
+  // 换仓进度无WebSocket推送，定时轮询刷新
+  rotationTimer = window.setInterval(loadRotationProgress, 10000)
+})
+
+onUnmounted(() => {
+  if (rotationTimer !== null) {
+    window.clearInterval(rotationTimer)
+    rotationTimer = null
+  }
 })
 
 // 格式化数字
 function formatNumber(num: number): string {
   return num.toFixed(2)
+}
+
+/** 获取账户换仓进度显示文本，无换仓记录时显示 -- */
+function getRotationProgressText(acc: Account): string {
+  const progress = rotationProgress.value[acc.account_id]
+  if (!progress || !progress.total) return '--'
+  return `${progress.completed}/${progress.total}`
+}
+
+/** 换仓是否全部完成（用于绿色高亮） */
+function isRotationCompleted(acc: Account): boolean {
+  const progress = rotationProgress.value[acc.account_id]
+  return !!progress && progress.total > 0 && progress.completed >= progress.total
 }
 
 // 计算报单百分比

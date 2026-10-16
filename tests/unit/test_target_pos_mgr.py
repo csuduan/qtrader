@@ -242,6 +242,12 @@ def test_comparison_ignores_other_account_files(tmp_path):
         "TargetPos-RF-20260811.csv",
         "account,strategy,symbol,direction,volume\nRF,S1,rb2609,Buy,1\n",
     )
+    # 账户ID为DQ2的文件名包含子串DQ，前缀匹配下不应被误读（行内账户留空以验证扫描层的过滤）
+    write_target_file(
+        tmp_path,
+        "TargetPos-DQ2-20260811.csv",
+        "account,strategy,symbol,direction,volume\n,S1,rb2609,Buy,1\n",
+    )
     mgr = build_manager(target_dir=str(tmp_path))
     result = mgr.get_position_comparison()
     assert result["comparisons"] == []

@@ -234,8 +234,9 @@ class TestBuildReportHtml:
     """周报 HTML 拼接测试"""
 
     async def test_build_report_html(self, dao, sample_account):
-        """测试按账户分组生成 HTML 表格"""
+        """测试合并单表生成 HTML，每账户取最新一日数据并显示账户名称"""
         from qtrader.manager.job_mgr import _build_settlement_report_html
+        from qtrader.utils.config_loader import AccountConfig, AppConfig
 
         monday = date(2026, 7, 20)
         friday = date(2026, 7, 24)
@@ -243,29 +244,35 @@ class TestBuildReportHtml:
         await dao.save_settlement_snapshot("AAA", friday, sample_account, {})
         await dao.save_settlement_snapshot("BBB", friday, sample_account, {})
 
-        records = await dao.query_settlements(None, monday, friday)
-        html = _build_settlement_report_html(records, friday)
+        app_config = AppConfig(
+            accounts=[
+                AccountConfig(account_id="AAA", name="账户A"),
+                AccountConfig(account_id="BBB", name="账户B"),
+            ]
+        )
 
-        # 新版语义：全部账户合并一张表，每账户取最新一日数据
-        assert ">AAA<" in html
-        assert ">BBB<" in html
+        records = await dao.query_settlements(None, monday, friday)
+        html = _build_settlement_report_html(records, friday, app_config)
+
+        # 全部账户合并一张表，每账户取最新一日数据
         assert html.count("<table") == 1
-        assert "1,005,000.00" in html  # balance 格式化
+        assert ">AAA</td>" in html and ">账户A</td>" in html
+        assert ">BBB</td>" in html and ">账户B</td>" in html
+        assert html.count("1,005,000.00") == 2  # 每账户仅保留最新一日
         assert "5,000.00" in html  # deposit 格式化
-        assert "结算权益" in html
-        # AAA 有两条记录（周一/周五），仅取周五一条
-        assert html.count(">AAA<") == 1
+        assert "结算权益" in html and "账户名称" in html
 
     async def test_build_report_html_none_fields(self, dao):
-        """测试无出入金的账户在 HTML 中显示为 -"""
+        """测试无配置名称及无出入金的字段显示为 -"""
         from qtrader.manager.job_mgr import _build_settlement_report_html
+        from qtrader.utils.config_loader import AppConfig
 
         monday = date(2026, 7, 20)
         account = AccountData(account_id="TQ", balance=500000.0, available=400000.0)
         await dao.save_settlement_snapshot("TQ", monday, account, {})
 
         records = await dao.query_settlements(None, monday, monday)
-        html = _build_settlement_report_html(records, monday)
+        html = _build_settlement_report_html(records, monday, AppConfig())
 
-        assert ">TQ<" in html
-        assert ">-</td>" in html  # None 字段显示为 -
+        assert ">TQ</td>" in html
+        assert ">-</td>" in html  # 无名称及 None 字段显示为 -

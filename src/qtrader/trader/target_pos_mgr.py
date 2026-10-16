@@ -74,7 +74,7 @@ class TargetPosManager:
         """
         if not re.search(r"\d{8}", filename or ""):
             raise ValueError(f"文件名无法提取交易日（需包含8位日期）: {filename}")
-        if self.account_id not in (filename or ""):
+        if not (filename or "").startswith(f"TargetPos-{self.account_id}-"):
             raise ValueError(f"文件名需包含账户ID（如 TargetPos-{self.account_id}-YYYYMMDD.csv）")
 
         target_dir = Path(self.target_pos_dir)
@@ -353,11 +353,9 @@ class TargetPosManager:
         if not target_dir.exists():
             return targets
 
-        csv_files = [
-            f
-            for f in target_dir.glob("*.csv")
-            if trading_date in f.name and self.account_id in f.name
-        ]
+        # 文件名约定：TargetPos-{account_id}-{date}[-N|-D|-edit|...]，前缀精确匹配账户，避免 WY 误读 WY2 的文件
+        file_prefix = f"TargetPos-{self.account_id}-{trading_date}"
+        csv_files = [f for f in target_dir.glob("*.csv") if f.name.startswith(file_prefix)]
         for csv_file in sorted(csv_files, key=lambda f: f.stat().st_mtime):
             try:
                 rows = self._parse_csv(self._read_file(csv_file))
