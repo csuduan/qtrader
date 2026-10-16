@@ -120,109 +120,6 @@
     <!-- 分割线 -->
     <el-divider />
 
-    <!-- 统计卡片 -->
-    <el-row :gutter="20" class="mt-4">
-      <!-- 统一使用当前选中账户的数据 -->
-      <el-col :xs="12" :sm="6">
-        <el-card shadow="hover">
-          <el-statistic title="总资产" :value="store.currentAccount?.balance || 0" :precision="2" prefix="¥" />
-        </el-card>
-      </el-col>
-      <el-col :xs="12" :sm="6">
-        <el-card shadow="hover">
-          <el-statistic title="可用资金" :value="store.currentAccount?.available || 0" :precision="2" prefix="¥" />
-        </el-card>
-      </el-col>
-      <el-col :xs="12" :sm="6">
-        <el-card shadow="hover">
-          <el-statistic
-            title="持仓数量"
-            :value="store.currentPositions.length"
-            suffix="个"
-          />
-        </el-card>
-      </el-col>
-      <el-col :xs="12" :sm="6">
-        <el-card shadow="hover">
-          <el-statistic
-            title="活跃委托"
-            :value="store.currentOrders.filter(o => o.status === 'ALIVE').length"
-            suffix="单"
-          />
-        </el-card>
-      </el-col>
-    </el-row>
-
-    <el-row :gutter="20" class="mt-4">
-      <!-- 盈亏统计 -->
-      <el-col :xs="24" :sm="12">
-        <el-card shadow="hover">
-          <template #header>
-            <div class="card-header">
-              <span>盈亏统计</span>
-            </div>
-          </template>
-          <!-- 统一使用当前选中账户的数据 -->
-          <div v-if="store.currentAccount">
-            <el-row :gutter="20">
-              <el-col :span="12">
-                <div class="stat-item">
-                  <div class="stat-label">持仓盈亏</div>
-                  <div class="stat-value" :class="(store.currentAccount.position_profit || 0) >= 0 ? 'profit' : 'loss'">
-                    ¥{{ formatNumber(store.currentAccount.position_profit || 0) }}
-                  </div>
-                </div>
-              </el-col>
-              <el-col :span="12">
-                <div class="stat-item">
-                  <div class="stat-label">平仓盈亏</div>
-                  <div class="stat-value" :class="(store.currentAccount.close_profit || 0) >= 0 ? 'profit' : 'loss'">
-                    ¥{{ formatNumber(store.currentAccount.close_profit || 0) }}
-                  </div>
-                </div>
-              </el-col>
-            </el-row>
-          </div>
-          <div v-else class="stat-item">
-            <div class="stat-value" style="color: #909399;">请选择账户</div>
-          </div>
-        </el-card>
-      </el-col>
-
-      <!-- 风控统计 -->
-      <el-col :xs="24" :sm="12" class="mt-4-sm">
-        <el-card shadow="hover">
-          <template #header>
-            <div class="card-header">
-              <span>今日风控</span>
-            </div>
-          </template>
-          <el-row :gutter="20">
-            <el-col :span="12">
-              <el-progress
-                :percentage="getOrderPercentage()"
-                :color="getProgressColor(getOrderPercentage())"
-                :stroke-width="20"
-              />
-              <div class="progress-label">
-                今日报单: {{ currentRiskStatus.daily_order_count }} / {{ currentRiskStatus.max_daily_orders }}
-              </div>
-            </el-col>
-            <el-col :span="12">
-              <el-progress
-                :percentage="getCancelPercentage()"
-                :color="getProgressColor(getCancelPercentage())"
-                :stroke-width="20"
-              />
-              <div class="progress-label">
-                今日撤单: {{ currentRiskStatus.daily_cancel_count }} / {{ currentRiskStatus.max_daily_cancels }}
-              </div>
-            </el-col>
-          </el-row>
-        </el-card>
-      </el-col>
-    </el-row>
-
     <el-row :gutter="20" class="mt-4">
       <!-- 告警统计 -->
       <el-col :span="24">
@@ -267,31 +164,19 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useStore } from '@/stores'
 import { alarmApi, systemApi, accountApi, rotationApi } from '@/api'
-import type { RiskControlStatus, Account } from '@/types'
+import type { Account } from '@/types'
 
 const store = useStore()
+const router = useRouter()
 const alarmStats = ref({ today_total: 0, last_hour: 0, last_five_minutes: 0 })
 
 // 各账户换仓进度: account_id -> { completed: 已完成条数, total: 总条数 }
 const rotationProgress = ref<Record<string, { completed: number; total: number }>>({})
 let rotationTimer: number | null = null
-
-const currentRiskStatus = computed<RiskControlStatus>(() => {
-  return store.currentAccount?.risk_status || {
-    daily_order_count: 0,
-    daily_cancel_count: 0,
-    max_daily_orders: 100,
-    max_daily_cancels: 50,
-    max_order_volume: 50,
-    max_split_volume: 5,
-    order_timeout: 5,
-    remaining_orders: 100,
-    remaining_cancels: 50
-  }
-})
 
 // 账户列表：按API返回的原始顺序显示
 const sortedAccounts = computed(() => {
@@ -365,12 +250,13 @@ function getStatusText(acc: Account): string {
   }
 }
 
-// 处理卡片点击
+// 处理卡片点击：选中账户并进入账户详情
 async function handleCardClick(acc: Account) {
   if (!canViewDetails(acc)) {
     return
   }
   await handleSelectAccount(acc.account_id)
+  router.push('/account')
 }
 
 async function loadAlarmStats() {
@@ -532,33 +418,6 @@ function isRotationCompleted(acc: Account): boolean {
   const progress = rotationProgress.value[acc.account_id]
   return !!progress && progress.total > 0 && progress.completed >= progress.total
 }
-
-// 计算报单百分比
-function getOrderPercentage(): number {
-  const max = currentRiskStatus.value.max_daily_orders ?? 0
-  const count = currentRiskStatus.value.daily_order_count ?? 0
-  if (!max || max === 0) return 0
-  const percentage = (count / max) * 100
-  const result = parseFloat(percentage.toFixed(1))
-  return isNaN(result) ? 0 : result
-}
-
-// 计算撤单百分比
-function getCancelPercentage(): number {
-  const max = currentRiskStatus.value.max_daily_cancels ?? 0
-  const count = currentRiskStatus.value.daily_cancel_count ?? 0
-  if (!max || max === 0) return 0
-  const percentage = (count / max) * 100
-  const result = parseFloat(percentage.toFixed(1))
-  return isNaN(result) ? 0 : result
-}
-
-// 进度条颜色
-function getProgressColor(percentage: number): string {
-  if (percentage >= 80) return '#f56c6c'
-  if (percentage >= 60) return '#e6a23c'
-  return '#67c23a'
-}
 </script>
 
 <style scoped>
@@ -599,13 +458,6 @@ function getProgressColor(percentage: number): string {
 
 .loss {
   color: #f56c6c;
-}
-
-.progress-label {
-  text-align: center;
-  margin-top: 10px;
-  font-size: 12px;
-  color: #606266;
 }
 
 /* 多账号账户卡片样式 */
@@ -726,10 +578,6 @@ function getProgressColor(percentage: number): string {
 
 /* 移动端适配 */
 @media (max-width: 767px) {
-  .mt-4-sm {
-    margin-top: 20px;
-  }
-
   .mb-2-mobile {
     margin-bottom: 16px;
   }
