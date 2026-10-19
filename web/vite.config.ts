@@ -13,10 +13,11 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
+        // 只分包echarts（含其依赖zrender）；vue/element-plus不手动分包——
+        // vue的运行时内核在@vue/*子包，按包名拆分会造成vue chunk反向依赖entry chunk，
+        // 模块求值顺序错乱引发"Cannot access 'RefImpl' before initialization"白屏
         manualChunks: {
-          echarts: ['echarts'],
-          'element-plus': ['element-plus'],
-          vue: ['vue', 'vue-router', 'pinia']
+          echarts: ['echarts', 'zrender']
         }
       }
     }
