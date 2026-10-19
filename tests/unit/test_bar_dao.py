@@ -178,6 +178,82 @@ class TestBarDaoQuery:
     async def test_upsert_today_bars_empty(self, dao):
         assert await dao.upsert_today_bars("MANAGER", [], date.today()) == 0
 
+    async def test_upsert_history_bars_chunks_large_batch(self, monkeypatch):
+        """超大批量按UPSERT_BATCH_SIZE分批执行，单条语句参数数不超asyncpg上限32767"""
+        from sqlalchemy.dialects import postgresql
+
+        from qtrader.trader.dao import bar_dao
+
+        executed_stmts: list[int] = []
+
+        class _FakeSession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def execute(self, stmt):
+                # 模拟asyncpg的参数数校验：逐条编译统计绑定参数
+                executed_stmts.append(len(stmt.compile(dialect=postgresql.dialect()).params))
+                return MagicMock(rowcount=0)
+
+        monkeypatch.setattr(bar_dao, "get_async_session", lambda *a, **kw: _FakeSession())
+
+        base = datetime(2026, 9, 10, 9, 30)
+        bars = [
+            {
+                "symbol": f"S{i}",
+                "interval": "M1",
+                "bar_time": base + timedelta(minutes=i),
+                "trading_day": base.date(),
+                "open": 1,
+                "high": 2,
+                "low": 0.5,
+                "close": 1.5,
+                "volume": 10,
+                "turnover": 0,
+                "open_interest": 5,
+            }
+            for i in range(bar_dao.UPSERT_BATCH_SIZE + 5)
+        ]
+        dao = BarDao()
+        assert await dao.upsert_history_bars(bars, "tq") == len(bars)
+        assert len(executed_stmts) == 2
+        assert max(executed_stmts) <= 32767
+
+    async def test_upsert_today_bars_chunks_large_batch(self, monkeypatch):
+        """当日表大批量同样分批执行，参数数不超asyncpg上限"""
+        from sqlalchemy.dialects import postgresql
+
+        from qtrader.trader.dao import bar_dao
+
+        executed_stmts: list[int] = []
+
+        class _FakeSession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def execute(self, stmt):
+                executed_stmts.append(len(stmt.compile(dialect=postgresql.dialect()).params))
+                return MagicMock(rowcount=1)
+
+        monkeypatch.setattr(bar_dao, "get_async_session", lambda *a, **kw: _FakeSession())
+
+        base = datetime(2026, 9, 10, 21, 0)
+        bars = [
+            _make_bar(f"S{i}", base + timedelta(minutes=i))
+            for i in range(bar_dao.UPSERT_BATCH_SIZE + 5)
+        ]
+        dao = BarDao()
+        # 返回值为各批次rowcount之和（fake每批报1，共2批）
+        assert await dao.upsert_today_bars("MANAGER", bars, base.date()) == 2
+        assert len(executed_stmts) == 2
+        assert max(executed_stmts) <= 32767
+
     async def test_dao_routes_to_named_instance(self, tmp_path):
         """BarDao(db_name=...) 读写指定实例，与默认实例隔离（feed线程独立事件循环场景）"""
         from qtrader.manager.data_feed import FEED_DB_NAME

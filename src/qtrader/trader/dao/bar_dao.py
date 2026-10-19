@@ -18,6 +18,9 @@ from qtrader.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# 单条INSERT的最大行数（asyncpg绑定参数上限32767，每行12列，2000行留足余量）
+UPSERT_BATCH_SIZE = 2000
+
 
 def _to_naive(dt: datetime) -> datetime:
     """
@@ -78,22 +81,24 @@ class BarDao:
                 }
                 for b in bars
             ]
-            stmt = pg_insert(BarHistoryPo).values(rows)
-            stmt = stmt.on_conflict_do_update(
-                constraint="uq_bars_history_symbol_interval_time",
-                set_={
-                    "open_price": stmt.excluded.open_price,
-                    "high_price": stmt.excluded.high_price,
-                    "low_price": stmt.excluded.low_price,
-                    "close_price": stmt.excluded.close_price,
-                    "volume": stmt.excluded.volume,
-                    "turnover": stmt.excluded.turnover,
-                    "open_interest": stmt.excluded.open_interest,
-                    "trading_day": stmt.excluded.trading_day,
-                    "source": stmt.excluded.source,
-                },
-            )
-            await session.execute(stmt)
+            for i in range(0, len(rows), UPSERT_BATCH_SIZE):
+                chunk = rows[i : i + UPSERT_BATCH_SIZE]
+                stmt = pg_insert(BarHistoryPo).values(chunk)
+                stmt = stmt.on_conflict_do_update(
+                    constraint="uq_bars_history_symbol_interval_time",
+                    set_={
+                        "open_price": stmt.excluded.open_price,
+                        "high_price": stmt.excluded.high_price,
+                        "low_price": stmt.excluded.low_price,
+                        "close_price": stmt.excluded.close_price,
+                        "volume": stmt.excluded.volume,
+                        "turnover": stmt.excluded.turnover,
+                        "open_interest": stmt.excluded.open_interest,
+                        "trading_day": stmt.excluded.trading_day,
+                        "source": stmt.excluded.source,
+                    },
+                )
+                await session.execute(stmt)
         return len(rows)
 
     async def query_history_bars(
@@ -196,12 +201,16 @@ class BarDao:
                 }
                 for b in bars
             ]
-            stmt = pg_insert(BarTodayPo).values(rows)
-            stmt = stmt.on_conflict_do_nothing(
-                constraint="uq_bars_today_symbol_interval_time_account"
-            )
-            result = await session.execute(stmt)
-            return int(getattr(result, "rowcount", 0) or 0)
+            written = 0
+            for i in range(0, len(rows), UPSERT_BATCH_SIZE):
+                chunk = rows[i : i + UPSERT_BATCH_SIZE]
+                stmt = pg_insert(BarTodayPo).values(chunk)
+                stmt = stmt.on_conflict_do_nothing(
+                    constraint="uq_bars_today_symbol_interval_time_account"
+                )
+                result = await session.execute(stmt)
+                written += int(getattr(result, "rowcount", 0) or 0)
+            return written
 
     async def query_today_bars(
         self, symbol: str, interval: str, start: datetime, end: datetime
