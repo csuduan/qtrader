@@ -83,11 +83,8 @@ def load_trading_dates(api: TqApi | None, days_back: int = 60) -> list[date]:
     try:
         now = datetime.now()
         cal = api.get_trading_calendar(now - timedelta(days=days_back), now + timedelta(days=30))
-        return sorted(
-            date.fromisoformat(str(d))
-            for d, t in zip(cal["date"], cal["trading"], strict=False)
-            if t
-        )
+        # date列为datetime64，str()会带时间部分（如'2026-08-20 00:00:00'）导致isoformat解析失败
+        return sorted(pd.to_datetime(cal.loc[cal["trading"], "date"]).dt.date)
     except Exception as e:
         logger.warning(f"查询交易日历失败，夜盘bar交易日按自然日近似: {e}")
         return []
