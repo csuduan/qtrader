@@ -74,6 +74,7 @@
         <el-table
           :data="store.currentPositions"
           data-testid="positions-table"
+          :row-key="positionRowKey"
           stripe
           v-loading="loading"
           table-layout="fixed"
@@ -160,6 +161,11 @@ const emit = defineEmits<{
 }>()
 
 const selectedPositions = ref<Position[]>([])
+
+/** 持仓行唯一键：账户+合约（WebSocket推送会整行替换对象，按key匹配才能保持选中） */
+function positionRowKey(row: Position): string {
+  return `${row.account_id}|${row.symbol}`
+}
 
 function handleSelectionChange(selection: Position[]) {
   selectedPositions.value = selection

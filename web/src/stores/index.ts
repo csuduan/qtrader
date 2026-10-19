@@ -5,6 +5,22 @@ import { accountApi, positionApi, tradeApi, orderApi, contractApi } from '@/api'
 import wsManager from '@/ws'
 import { getTradeNaturalTime } from '@/utils/dateTime'
 
+// 推送内容比较时忽略的时间戳字段（后端每次推送都会刷新它们，不代表业务数据变化）
+const VOLATILE_KEYS = new Set(['updated_at', 'update_time'])
+
+/**
+ * 浅比较两个对象的业务字段是否完全相同（忽略时间戳字段）
+ * 用于跳过内容未变化的 WS 推送，避免无效重渲染
+ */
+function contentEqual(a: object, b: object): boolean {
+  const recordA = a as Record<string, unknown>
+  const recordB = b as Record<string, unknown>
+  const keysA = Object.keys(recordA).filter(key => !VOLATILE_KEYS.has(key))
+  const keysB = Object.keys(recordB).filter(key => !VOLATILE_KEYS.has(key))
+  if (keysA.length !== keysB.length) return false
+  return keysA.every(key => recordA[key] === recordB[key])
+}
+
 export const useStore = defineStore('main', () => {
   // 账户信息
   const account = ref<Account | null>(null)
@@ -298,7 +314,11 @@ export const useStore = defineStore('main', () => {
     // 更新账户列表中的对应账户，保留未更新的字段
     const index = accounts.value.findIndex(acc => acc.account_id === data.account_id)
     if (index > -1) {
-      accounts.value[index] = { ...accounts.value[index], ...data }
+      const existing = accounts.value[index]
+      const merged = { ...existing, ...data }
+      // 业务字段无变化时跳过赋值，避免无效重渲染
+      if (existing && contentEqual(existing, merged)) return
+      accounts.value[index] = merged
     }
   }
 
@@ -310,6 +330,9 @@ export const useStore = defineStore('main', () => {
       pos.account_id === data.account_id && pos.symbol === data.symbol
     )
     if (index > -1) {
+      const existing = positions.value[index]
+      // 业务字段无变化时跳过赋值，避免无效重渲染（tick驱动推送约2秒一次，多数情况值未变）
+      if (existing && contentEqual(existing, data)) return
       positions.value[index] = data
     } else {
       positions.value.push(data)
