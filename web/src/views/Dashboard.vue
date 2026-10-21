@@ -8,7 +8,7 @@
             shadow="hover"
             :class="getAccountCardClass(acc)"
             class="account-card"
-            @click="handleCardClick(acc)"
+            @click="(e: MouseEvent) => handleCardClick(acc, e)"
           >
             <div class="account-card-header">
               <div class="account-title-row">
@@ -33,7 +33,7 @@
                     </template>
                   </div>
                 </div>
-                <el-dropdown trigger="click" @command="(cmd: string) => handleAccountAction(cmd, acc.account_id)" @click.stop>
+                <el-dropdown trigger="click" @command="(cmd: string) => handleAccountAction(cmd, acc.account_id)">
                   <el-button circle size="small" class="action-btn" :disabled="!canOperate(acc)">
                     <el-icon><MoreFilled /></el-icon>
                   </el-button>
@@ -250,8 +250,11 @@ function getStatusText(acc: Account): string {
   }
 }
 
-// 处理卡片点击：选中账户并进入账户详情
-async function handleCardClick(acc: Account) {
+// 处理卡片点击：选中账户并进入账户详情；点在操作按钮区域时不进入
+async function handleCardClick(acc: Account, e: MouseEvent) {
+  if ((e.target as HTMLElement).closest('.el-dropdown')) {
+    return
+  }
   if (!canViewDetails(acc)) {
     return
   }

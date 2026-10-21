@@ -25,7 +25,24 @@ export default defineConfig({
   server: {
     port: 3000,
     host: "0.0.0.0",
-    allowedHosts: ['dev.tsing.cc'],
+    allowedHosts: ['dev.tsing.cc', 'nuc.tsing.cc'],
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true
+      },
+      '/ws': {
+        target: 'http://localhost:8000',
+        ws: true,
+        changeOrigin: true
+      }
+    }
+  },
+  // 生产构建产物预览（无nginx环境），代理与dev server保持一致
+  preview: {
+    port: 3000,
+    host: "0.0.0.0",
+    allowedHosts: ['dev.tsing.cc', 'nuc.tsing.cc'],
     proxy: {
       '/api': {
         target: 'http://localhost:8000',

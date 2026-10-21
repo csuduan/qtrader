@@ -53,6 +53,7 @@ Thumbs.db
 # 前端
 web/node_modules/
 web/dist/
+web/dist-*
 
 # 测试
 .coverage
