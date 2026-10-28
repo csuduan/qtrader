@@ -20,6 +20,7 @@ import pytest_asyncio
 
 from qtrader.manager.trader_proxy import TraderProxy
 from qtrader.models.object import AccountData, PositionData, TickData, TraderState
+from qtrader.utils.async_event_engine import EventTypes
 
 
 def make_account_config() -> MagicMock:
@@ -237,6 +238,70 @@ class TestTraderProxyHoldProfit:
             proxy.update_hold_profit(tick)
 
         mock_emit.assert_called_once()
+
+
+@pytest.mark.unit
+class TestTraderProxyPositionEmit:
+    """持仓推送事件构造"""
+
+    @pytest.mark.asyncio
+    async def test_position_emit_injects_account_id(self, proxy):
+        """PositionData 无 account_id 字段，推送前应注入账户标识（前端按 account_id+symbol 匹配行）"""
+        event_engine = MagicMock()
+        with patch("qtrader.manager.trader_proxy.ctx") as mock_ctx:
+            mock_ctx.get_event_engine.return_value = event_engine
+            proxy._emit_data("position", {"symbol": "SHFE.rb2505", "pos_long_td": 1})
+
+        event_engine.put.assert_called_once()
+        event_type, data = event_engine.put.call_args.args
+        assert event_type == EventTypes.POSITION_UPDATE
+        assert data["account_id"] == "test_account_001"
+
+    @pytest.mark.asyncio
+    async def test_position_emit_injects_total_pos(self, proxy):
+        """pos_long/pos_short 为计算属性（model_dump 不含），推送前应按今昨仓补全"""
+        event_engine = MagicMock()
+        with patch("qtrader.manager.trader_proxy.ctx") as mock_ctx:
+            mock_ctx.get_event_engine.return_value = event_engine
+            proxy._emit_data(
+                "position",
+                {"symbol": "SHFE.rb2505", "pos_long_td": 2, "pos_long_yd": 3, "pos_short_yd": 1},
+            )
+
+        _, data = event_engine.put.call_args.args
+        assert data["pos_long"] == 5  # 今2 + 昨3
+        assert data["pos_short"] == 1  # 今缺省0 + 昨1
+
+    @pytest.mark.asyncio
+    async def test_position_emit_keeps_existing_total_pos(self, proxy):
+        """负载已携带 pos_long 时不覆盖（兼容自定义推送）"""
+        event_engine = MagicMock()
+        with patch("qtrader.manager.trader_proxy.ctx") as mock_ctx:
+            mock_ctx.get_event_engine.return_value = event_engine
+            proxy._emit_data(
+                "position", {"symbol": "SHFE.rb2505", "pos_long": 7, "pos_long_td": 1}
+            )
+
+        _, data = event_engine.put.call_args.args
+        assert data["pos_long"] == 7
+
+    @pytest.mark.asyncio
+    async def test_trader_position_push_forwarded_with_account_id(self, proxy):
+        """Trader 持仓推送经 _on_msg_callback 转发时应携带 account_id 与总持仓"""
+        event_engine = MagicMock()
+        with patch("qtrader.manager.trader_proxy.ctx") as mock_ctx:
+            mock_ctx.get_event_engine.return_value = event_engine
+            proxy._on_msg_callback(
+                "position",
+                {"symbol": "SHFE.rb2505", "exchange": "SHFE", "pos_long_td": 1},
+            )
+
+        event_engine.put.assert_called_once()
+        event_type, data = event_engine.put.call_args.args
+        assert event_type == EventTypes.POSITION_UPDATE
+        assert data["account_id"] == "test_account_001"
+        assert data["pos_long"] == 1
+        assert proxy._position_cache["SHFE.rb2505"].pos_long_td == 1
 
 
 @pytest.mark.unit

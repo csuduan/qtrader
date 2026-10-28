@@ -650,6 +650,15 @@ class TraderProxy:
             event_type = EventTypes.TRADE_UPDATE
         elif data_type == "position":
             event_type = EventTypes.POSITION_UPDATE
+            # PositionData 的 account_id 为缺失字段、pos_long/pos_short 为计算属性，model_dump 均不包含；
+            # 前端整行替换并按这些字段展示，需在此补全
+            data["account_id"] = self.account_id
+            data.setdefault(
+                "pos_long", (data.get("pos_long_td") or 0) + (data.get("pos_long_yd") or 0)
+            )
+            data.setdefault(
+                "pos_short", (data.get("pos_short_td") or 0) + (data.get("pos_short_yd") or 0)
+            )
         elif data_type == "tick":
             event_type = EventTypes.TICK_UPDATE
         elif data_type == "tick_batch":
