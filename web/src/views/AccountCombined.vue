@@ -50,19 +50,6 @@
         />
       </el-tab-pane>
 
-      <!-- 合约信息 Tab -->
-      <el-tab-pane label="合约信息" name="contract" lazy>
-        <AccountContractTab
-          :loading="loading"
-          :contracts="contracts"
-          :exchanges="exchanges"
-          :refreshing="refreshingContracts"
-          v-model:filter="contractFilter"
-          @refresh="loadContracts"
-          @refresh-contracts="handleRefreshContracts"
-        />
-      </el-tab-pane>
-
       <!-- 设置 Tab -->
       <el-tab-pane label="账户设置" name="setting" lazy>
         <AccountSettingTab
@@ -76,6 +63,7 @@
           @update-risk-control="updateRiskControl"
         />
       </el-tab-pane>
+
     </el-tabs>
 
     <!-- 平仓对话框（走报单指令，自动拆分今昨仓） -->
@@ -236,15 +224,14 @@
 import { ref, reactive, watch, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useStore } from '@/stores'
-import { orderApi, quoteApi, orderCmdApi, contractApi, systemApi, jobsApi } from '@/api'
+import { orderApi, quoteApi, orderCmdApi, systemApi, jobsApi } from '@/api'
 import wsManager from '@/ws'
 import AccountDetailTab from './account/AccountDetailTab.vue'
 import AccountTradingTab from './account/AccountTradingTab.vue'
 import AccountTradeTab from './account/AccountTradeTab.vue'
 import AccountOrderCmdTab from './account/AccountOrderCmdTab.vue'
-import AccountContractTab from './account/AccountContractTab.vue'
 import AccountSettingTab from './account/AccountSettingTab.vue'
-import type { Position, ManualOrderRequest, Order, Quote, OrderCmd, ContractInfo, ExchangeInfo, Job } from '@/types'
+import type { Position, ManualOrderRequest, Order, Quote, OrderCmd, Job } from '@/types'
 
 const store = useStore()
 const loading = ref(false)
@@ -293,15 +280,6 @@ const tradeDateFilter = ref(new Date().toISOString().split('T')[0])
 const orderCmds = ref<OrderCmd[]>([])
 const orderCmdStatus = ref<'active' | 'finished'>('active')
 const cancellingCmdId = ref<string | null>(null)
-
-// 合约信息相关
-const contracts = ref<ContractInfo[]>([])
-const exchanges = ref<ExchangeInfo[]>([])
-const refreshingContracts = ref(false)
-const contractFilter = reactive({
-  exchange_id: '',
-  symbol_keyword: ''
-})
 
 // 设置相关
 const updatingRisk = ref(false)
@@ -629,59 +607,6 @@ async function handleCancelOrderCmd(cmdId: string) {
   }
 }
 
-// ========== 合约信息方法 ==========
-async function loadContracts() {
-  loading.value = true
-  try {
-    const params = {
-      ...(contractFilter.exchange_id ? { exchange_id: contractFilter.exchange_id } : {}),
-      ...(contractFilter.symbol_keyword ? { symbol_keyword: contractFilter.symbol_keyword } : {})
-    }
-    contracts.value = await contractApi.getContracts(params)
-    if (exchanges.value.length === 0) {
-      loadExchanges()
-    }
-  } catch (error: any) {
-    ElMessage.error(`加载合约信息失败: ${error.message}`)
-  } finally {
-    loading.value = false
-  }
-}
-
-async function loadExchanges() {
-  try {
-    exchanges.value = await contractApi.getExchanges()
-  } catch (error: any) {
-    console.error(`加载交易所列表失败: ${error.message}`)
-  }
-}
-
-async function handleRefreshContracts() {
-  refreshingContracts.value = true
-  try {
-    const result = await contractApi.refreshContracts(store.selectedAccountId || undefined)
-    if (result.success) {
-      ElMessage.success('合约信息刷新成功')
-      await loadContracts()
-    } else {
-      const results = result.results || {}
-      const successCount = Object.values(results).filter((r: any) => r.success).length
-      const totalCount = Object.keys(results).length
-
-      if (successCount > 0) {
-        ElMessage.warning(`部分账户刷新成功 (${successCount}/${totalCount})`)
-        await loadContracts()
-      } else {
-        ElMessage.error('合约信息刷新失败，请检查账户连接状态')
-      }
-    }
-  } catch (error: any) {
-    ElMessage.error(`刷新合约信息失败: ${error.message}`)
-  } finally {
-    refreshingContracts.value = false
-  }
-}
-
 // ========== 设置方法 ==========
 async function updateRiskControl() {
   updatingRisk.value = true
@@ -761,8 +686,6 @@ watch(activeTab, (newTab, oldTab) => {
     loadTradeData()
   } else if (newTab === 'order-cmd') {
     loadOrderCmdData()
-  } else if (newTab === 'contract') {
-    loadContracts()
   } else if (newTab === 'setting') {
     loadTasks()
   }
@@ -784,8 +707,6 @@ watch(() => store.selectedAccountId, (newId) => {
       loadTradeData()
     } else if (activeTab.value === 'order-cmd') {
       loadOrderCmdData()
-    } else if (activeTab.value === 'contract') {
-      loadContracts()
     } else if (activeTab.value === 'setting') {
       loadTasks()
     }
@@ -805,8 +726,6 @@ onMounted(async () => {
     await loadTradeData()
   } else if (activeTab.value === 'order-cmd') {
     await loadOrderCmdData()
-  } else if (activeTab.value === 'contract') {
-    await loadContracts()
   } else if (activeTab.value === 'setting') {
     await loadTasks()
   }

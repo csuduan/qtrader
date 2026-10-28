@@ -1,7 +1,7 @@
 """E2E 交易场景补全测试
 
 覆盖用户指定场景中既有用例未触及的部分：
-- 合约信息页签渲染（账户页 → 合约信息）
+- 行情页合约列表渲染
 - 直接下单：无效单前端拦截（缺合约代码）+ 真实提交（真实模式）
 - 指令下单：无效单（空合约代码被前端拦截）
 - 导入换仓文件：真实选择文件 → 预览 → 确认导入（mock 后端接收）
@@ -30,22 +30,19 @@ requires_real_mode = pytest.mark.skipif(
 API_PREFIX = re.compile(r"^\w+://[^/]+/api")
 
 
-# ==================== 合约信息 ====================
+# ==================== 行情页合约 ====================
 
 
 @pytest.mark.e2e
-class TestContractTab:
-    """合约信息页签（真实模式下走真实后端；冒烟模式下后端被屏蔽，仅验证页签挂载）"""
+class TestMarketContracts:
+    """行情页合约列表（真实模式下走真实后端；冒烟模式下后端被屏蔽，仅验证页面挂载）"""
 
     @requires_real_mode
-    def test_contract_tab_renders(self, authed_page: Page):
-        """真实模式：账户页 → 合约信息页签渲染出合约行"""
+    def test_market_contracts_renders(self, authed_page: Page):
+        """真实模式：行情页 → 合约页签渲染出合约行"""
         page = authed_page
-        page.goto("/account")
-        page.get_by_role("tab", name="合约信息").click()
-        # lazy 页签：切换后加载合约列表；账户页有多个页签表格，
-        # 须限定在可见的合约卡片内（.el-table__row 会命中其他隐藏页签的行）
-        contract_table = page.locator(".account-contract-tab .el-table__row:visible")
+        page.goto("/market")
+        contract_table = page.locator(".market-page .el-table__row")
         expect(contract_table.first).to_be_visible(timeout=10_000)
         assert contract_table.count() > 0
 
