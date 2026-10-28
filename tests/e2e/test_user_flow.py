@@ -10,12 +10,13 @@
 设置 E2E_USERNAME / E2E_PASSWORD 后，真实登录相关用例生效。
 """
 
+import json
 import os
 import re
 import time
 
 import pytest
-from playwright.sync_api import Page, expect
+from playwright.sync_api import Page, Route, expect
 
 from tests.e2e.conftest import E2E_SYMBOL, require_trading_session
 
@@ -97,6 +98,93 @@ class TestUserFlow:
         """真实环境下账户详情页签应渲染持仓表"""
         authed_page.goto("/account")
         expect(authed_page.get_by_test_id("positions-table")).to_be_visible()
+
+    def test_position_selection_keeps_close_button_enabled_after_position_refresh(
+        self, authed_page: Page
+    ):
+        """回归：选中持仓后接口刷新整行替换对象，平仓按钮仍应保持可用"""
+        page = authed_page
+        account = {
+            "account_id": "DQ",
+            "broker_type": "kq",
+            "broker_name": "快期模拟",
+            "currency": "CNY",
+            "balance": 1000000.0,
+            "available": 900000.0,
+            "margin": 100000.0,
+            "pre_balance": 1000000.0,
+            "static_balance": 1000000.0,
+            "position_profit": 0.0,
+            "close_profit": 0.0,
+            "today_profit": 0.0,
+            "risk_ratio": 0.1,
+            "updated_at": "2026-10-26T09:00:00",
+            "user_id": "e2e",
+            "status": "connected",
+            "md_connected": True,
+            "td_connected": True,
+            "trade_paused": False,
+        }
+        positions = [
+            {
+                "id": 1,
+                "account_id": "DQ",
+                "exchange_id": "SHFE",
+                "symbol": "rb2701",
+                "pos_long": 2,
+                "pos_short": 0,
+                "pos_long_yd": 1,
+                "pos_short_yd": 0,
+                "pos_long_td": 1,
+                "pos_short_td": 0,
+                "hold_price_long": 3100.0,
+                "hold_price_short": None,
+                "hold_profit_long": 20.0,
+                "hold_profit_short": 0.0,
+                "close_profit_long": 0.0,
+                "close_profit_short": 0.0,
+                "margin_long": 6200.0,
+                "margin_short": 0.0,
+                "updated_at": "2026-10-26T09:00:00",
+            }
+        ]
+
+        def fulfill_json(route: Route, data: object):
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"code": 0, "message": "ok", "data": data}),
+            )
+
+        def handle_api(route: Route):
+            path = re.sub(r"^\w+://[^/]+", "", route.request.url).split("?")[0]
+            if path == "/api/account/list":
+                return fulfill_json(route, ["DQ"])
+            if path == "/api/account":
+                return fulfill_json(route, account)
+            if path == "/api/position":
+                return fulfill_json(route, positions)
+            return fulfill_json(route, [])
+
+        page.route(re.compile(r"^\w+://[^/]+/api/"), handle_api)
+        page.goto("/account")
+
+        position_row = page.locator("#pane-detail tr", has_text="rb2701").first
+        expect(position_row).to_be_visible(timeout=10_000)
+        close_button = page.locator("#pane-detail").get_by_role("button", name="平仓")
+        expect(close_button).to_be_disabled()
+
+        position_row.locator(".el-checkbox").click()
+        expect(close_button).to_be_enabled()
+
+        # 模拟持仓刷新（整表替换为新对象数组）：勾选与按钮可用状态都应保留
+        positions[:] = [{**positions[0], "updated_at": "2026-10-26T09:00:02"}]
+        page.locator(".el-card", has_text="持仓列表").get_by_role("button", name="刷新").click()
+
+        position_row = page.locator("#pane-detail tr", has_text="rb2701").first
+        expect(position_row).to_be_visible(timeout=10_000)
+        expect(position_row.locator(".el-checkbox.is-checked")).to_be_visible()
+        expect(close_button).to_be_enabled()
 
     @requires_credentials
     def test_order_cmd_full_flow_trading(self, authed_page: Page):

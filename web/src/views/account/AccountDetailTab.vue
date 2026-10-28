@@ -57,8 +57,8 @@
           <div>
             <el-button
               type="danger"
-              @click="emit('closePositions', selectedPositions)"
-              :disabled="selectedPositions.length === 0"
+              @click="emit('closePositions', closablePositions)"
+              :disabled="closablePositions.length === 0"
             >
               平仓
             </el-button>
@@ -84,7 +84,7 @@
           <template #empty>
             <el-empty description="暂无持仓" />
           </template>
-          <el-table-column type="selection" width="45" />
+          <el-table-column type="selection" width="45" reserve-selection />
           <el-table-column prop="symbol" label="合约" width="80">
             <template #default="{ row }">
               {{ row.symbol }}
@@ -143,7 +143,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useStore } from '@/stores'
 import type { Position } from '@/types'
 
@@ -166,6 +166,12 @@ const selectedPositions = ref<Position[]>([])
 function positionRowKey(row: Position): string {
   return `${row.account_id}|${row.symbol}`
 }
+
+/** 当前可用于平仓的选中持仓（与最新表格数据对齐，避免推送后使用旧行对象） */
+const closablePositions = computed(() => {
+  const selectedKeys = new Set(selectedPositions.value.map(positionRowKey))
+  return store.currentPositions.filter(position => selectedKeys.has(positionRowKey(position)))
+})
 
 function handleSelectionChange(selection: Position[]) {
   selectedPositions.value = selection
