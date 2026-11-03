@@ -1705,6 +1705,18 @@ class TestTraderProxyEmitData:
         assert data["updated_at"] == "10:00:00"
 
     @pytest.mark.asyncio
+    async def test_emit_account_update_time_none_falls_back_to_now(self, proxy):
+        """update_time 为 None 时 updated_at 回退为当前时间，避免覆盖前端已有值"""
+        from datetime import datetime
+
+        engine = self._engine()
+        before = datetime.now()
+        proxy._emit_data("account", {"account_id": "test_account_001", "update_time": None})
+        _, data = engine.put.call_args[0]
+        assert isinstance(data["updated_at"], datetime)
+        assert before <= data["updated_at"] <= datetime.now()
+
+    @pytest.mark.asyncio
     async def test_emit_unknown_type_ignored(self, proxy):
         engine = self._engine()
         proxy._emit_data("whatever", {"x": 1})

@@ -642,7 +642,8 @@ class TraderProxy:
         if data_type == "account":
             event_type = EventTypes.ACCOUNT_UPDATE
             if isinstance(data, dict) and "update_time" in data:
-                data = {**data, "updated_at": data["update_time"]}
+                # 网关未提供有效更新时间时回退为当前时间，避免 None 覆盖前端已有值
+                data = {**data, "updated_at": data["update_time"] or datetime.now()}
             data["status"] = self._state
         elif data_type == "order":
             event_type = EventTypes.ORDER_UPDATE
