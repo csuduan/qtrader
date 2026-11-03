@@ -90,8 +90,18 @@ class TestMarketConnect:
 class TestExportPositions:
     """持仓导出 CSV（多空拆行、GBK 编码）"""
 
-    def test_no_positions_skips(self, job, app_paths):
-        job._export_positions_to_csv()  # 不应抛错，也不建文件
+    def test_no_positions_exports_empty_file(self, job, app_paths):
+        """无持仓时也导出仅含表头的空文件"""
+        job._export_positions_to_csv()
+
+        from pathlib import Path
+
+        files = list(Path(app_paths.export).glob("position-DQ-*.csv"))
+        assert len(files) == 1
+        with open(files[0], encoding="gbk") as f:
+            rows = list(csv.DictReader(f))
+        assert rows == []
+        assert files[0].read_text(encoding="gbk").strip() == "账户,交易日期,合约代码,方向,今仓,昨仓"
 
     def test_long_and_short_split_rows(self, engine, job, app_paths):
         from qtrader.models.object import PositionData

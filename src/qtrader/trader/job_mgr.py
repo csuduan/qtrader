@@ -83,8 +83,7 @@ class JobManager:
         # 从内存获取所有持仓
         positions = self.trading_engine.positions
         if not positions:
-            logger.info("当前没有持仓，跳过导出")
-            return
+            logger.info("当前没有持仓，导出空持仓文件")
         # 准备导出目录
         app_config = get_config_loader()._load_app_config()
         export_dir = Path(app_config.paths.export)
