@@ -225,6 +225,14 @@ class TestTradeDaoSave:
         assert await _count_trades() == 1
         assert float((await _query_trade("T1")).price) == pytest.approx(3510.0)
 
+    async def test_save_trade_same_trade_id_different_account(self, db):
+        """不同账户相同 trade_id 均可保存（trade_id 仅账户内唯一）"""
+        dao = TradeDao()
+        await dao.save("ZX", _make_trade())
+        await dao.save("ZX1", _make_trade())
+
+        assert await _count_trades() == 2
+
     async def test_save_trade_without_trade_id_skipped(self, db):
         """测试缺失成交ID时不写入"""
         async with get_async_session() as session:

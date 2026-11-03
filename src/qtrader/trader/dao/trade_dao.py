@@ -33,7 +33,10 @@ class TradeDao:
         if not trade_id:
             return
 
-        existing = await fetch_one(session, select(TradePo).filter_by(trade_id=trade_id))
+        # trade_id 仅在账户内唯一，查重必须带账户维度
+        existing = await fetch_one(
+            session, select(TradePo).filter_by(account_id=account_id, trade_id=trade_id)
+        )
         if existing:
             return
 

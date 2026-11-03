@@ -197,7 +197,8 @@ async def get_trades_by_order(
                 created_at=datetime.now(),
             )
             for trade in all_trades
-            if trade.order_id == order_id
+            # order_id 仅在账户内唯一，指定账户时必须按账户过滤
+            if trade.order_id == order_id and (not account_id or trade.account_id == account_id)
         ]
 
         return success_response(data=order_trades, message="获取成功")

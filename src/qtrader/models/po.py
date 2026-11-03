@@ -149,12 +149,14 @@ class TradePo(Base):
     """成交记录表"""
 
     __tablename__ = "trades"
+    # trade_id 仅在账户内唯一（CTP TradeID 不同账户可重复）
+    __table_args__ = (UniqueConstraint("account_id", "trade_id", name="uq_trades_account_trade"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     account_id: Mapped[str] = mapped_column(
-        String(50), ForeignKey("accounts.account_id"), nullable=False, index=True
+        String(50), ForeignKey("accounts.account_id"), nullable=False
     )
-    trade_id: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
+    trade_id: Mapped[str] = mapped_column(String(100), nullable=False)
     order_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     symbol: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
     direction: Mapped[str] = mapped_column(String(10), nullable=False)
@@ -176,12 +178,14 @@ class OrderPo(Base):
     """委托单记录表"""
 
     __tablename__ = "orders"
+    # order_id 仅在账户内唯一（CTP OrderRef 由会话生成，不同账户可重复）
+    __table_args__ = (UniqueConstraint("account_id", "order_id", name="uq_orders_account_order"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     account_id: Mapped[str] = mapped_column(
-        String(50), ForeignKey("accounts.account_id"), nullable=False, index=True
+        String(50), ForeignKey("accounts.account_id"), nullable=False
     )
-    order_id: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
+    order_id: Mapped[str] = mapped_column(String(100), nullable=False)
     exchange_order_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     symbol: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
     direction: Mapped[str] = mapped_column(String(10), nullable=False)

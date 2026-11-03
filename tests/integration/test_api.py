@@ -332,3 +332,15 @@ class TestTradeAPI:
         assert resp.status_code == 200
         assert resp.json()["code"] == 0
         assert resp.json()["data"] == []
+
+    def test_get_trades_by_order_filters_by_account(self, client, mock_trading_manager):
+        """按订单查成交：order_id 跨账户可重复，指定账户时须按账户过滤"""
+        zx_trade = make_trade().model_copy(update={"account_id": "ZX"})
+        mock_trading_manager.get_trades = AsyncMock(return_value=[make_trade(), zx_trade])
+
+        resp = client.get("/api/trade/order/ord_1", params={"account_id": "DQ"})
+
+        assert resp.status_code == 200
+        data = resp.json()["data"]
+        assert len(data) == 1
+        assert data[0]["account_id"] == "DQ"
