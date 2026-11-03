@@ -15,6 +15,7 @@ export interface Account {
   name?: string | null
   broker_type?: string | null
   broker_name?: string | null
+  risk_terms?: string | null
   currency?: string
   balance: number
   pre_balance?: number

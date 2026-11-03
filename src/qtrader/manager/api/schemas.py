@@ -16,6 +16,7 @@ class AccountRes(BaseModel):
     name: str | None = None
     broker_type: str | None = None
     broker_name: str | None = None
+    risk_terms: str | None = None
     currency: str = "CNY"
     balance: float
     pre_balance: float

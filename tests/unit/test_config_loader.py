@@ -333,7 +333,13 @@ class TestConfigLoaderModels:
         config = AccountConfig()
         assert config.account_type == "kq"
         assert config.enabled is True
+        assert config.risk_terms is None
         assert config.alert.notification.enabled is True
+
+    def test_account_config_risk_terms(self):
+        """测试 risk_terms 自由文本字段"""
+        config = AccountConfig(account_id="test", risk_terms="预警止损 0.92/0.9")
+        assert config.risk_terms == "预警止损 0.92/0.9"
 
     def test_socket_config_validation(self):
         """测试 SocketConfig 验证"""

@@ -2,6 +2,9 @@ account_id: "xxx"
 name: "xxx"
 enabled: true
 
+# 风控条款（可选，自由文本）
+# risk_terms: "预警止损 0.92/0.9"
+
 gateway:
   type: "TQSDK"
   tianqin:

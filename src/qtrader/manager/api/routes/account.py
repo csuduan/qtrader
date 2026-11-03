@@ -29,12 +29,12 @@ async def get_account_info(
     from datetime import datetime
 
     try:
+        from qtrader.utils.config_loader import get_config_loader
+
+        config = get_config_loader().load_config()
         # 从 TradingManager 获取账户数据
         # 如果没有指定 account_id，使用配置中的第一个账户
         if account_id is None:
-            from qtrader.utils.config_loader import get_config_loader
-
-            config = get_config_loader().load_config()
             if config.account_ids:
                 account_id = config.account_ids[0]
             else:
@@ -44,12 +44,14 @@ async def get_account_info(
         if not account_data:
             return error_response(code=404, message=f"账户 [{account_id}] 不存在")
 
+        account_cfg = config.get_account_config(account_id)
         return success_response(
             data=AccountRes(
                 account_id=account_id,
                 name=account_data.name or "--",
                 broker_type=account_data.broker_type or "--",
                 broker_name=account_data.broker_name or "--",
+                risk_terms=account_cfg.risk_terms if account_cfg else None,
                 currency=account_data.currency or "CNY",
                 balance=float(account_data.balance or 0),
                 available=float(account_data.available or 0),
@@ -91,18 +93,21 @@ async def get_all_accounts(
     try:
         # 从 TradingManager 获取所有缓存的账户数据（不走RPC，提升性能）
         accounts = trading_manager.get_all_accounts_cached()
+        config = get_config_loader().load_config()
         accounts_list = []
         for account_info in accounts:
             # 添加 None 检查，避免访问 None 对象的属性
             if account_info is None:
                 continue
 
+            account_cfg = config.get_account_config(account_info.account_id)
             accounts_list.append(
                 AccountRes(
                     account_id=account_info.account_id,
                     name=account_info.name or "--",
                     broker_type=account_info.broker_type or "--",
                     broker_name=account_info.broker_name or "--",
+                    risk_terms=account_cfg.risk_terms if account_cfg else None,
                     currency=account_info.currency or "CNY",
                     balance=float(account_info.balance or 0),
                     available=float(account_info.available or 0),
@@ -129,7 +134,6 @@ async def get_all_accounts(
             )
 
         # 按照配置文件中account_ids的顺序排序
-        config = get_config_loader().load_config()
         account_order = {aid: i for i, aid in enumerate(config.account_ids)}
         sorted_list = sorted(
             accounts_list, key=lambda x: account_order.get(x.account_id, float("inf"))

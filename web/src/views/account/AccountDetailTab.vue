@@ -47,6 +47,7 @@
           </el-tag>
         </el-descriptions-item>
         <el-descriptions-item label="更新时间">{{ formatDateTime(store.currentAccount.updated_at) }}</el-descriptions-item>
+        <el-descriptions-item label="风控条款">{{ store.currentAccount.risk_terms || '-' }}</el-descriptions-item>
       </el-descriptions>
     </el-card>
 

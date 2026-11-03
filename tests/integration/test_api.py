@@ -120,7 +120,50 @@ class TestAccountAPI:
         assert body["code"] == 0
         assert body["data"]["account_id"] == "DQ"
         assert body["data"]["balance"] == 100000.0
+        assert "risk_terms" in body["data"]
         mock_trading_manager.get_account.assert_awaited_once_with("DQ")
+
+    @staticmethod
+    def _use_temp_config(tmp_path, account_yaml: str):
+        """切换配置单例到临时目录，返回恢复函数"""
+        import qtrader.utils.config_loader as config_loader_mod
+        from qtrader.utils.config_loader import ConfigLoader
+
+        (tmp_path / "config.yaml").write_text("account_ids:\n  - DQ\n", encoding="utf-8")
+        (tmp_path / "account-DQ.yaml").write_text(account_yaml, encoding="utf-8")
+        saved_loader = config_loader_mod._config_loader
+        config_loader_mod._config_loader = ConfigLoader(config_dir=str(tmp_path))
+        return saved_loader
+
+    def test_get_account_risk_terms(self, client, mock_trading_manager, tmp_path):
+        """账户配置中的 risk_terms 透传到账户信息响应"""
+        import qtrader.utils.config_loader as config_loader_mod
+
+        mock_trading_manager.get_account = AsyncMock(return_value=make_account())
+        saved_loader = self._use_temp_config(
+            tmp_path, 'account_id: DQ\nrisk_terms: "预警止损 0.92/0.9"\n'
+        )
+        try:
+            resp = client.get("/api/account", params={"account_id": "DQ"})
+        finally:
+            config_loader_mod._config_loader = saved_loader
+
+        assert resp.status_code == 200
+        assert resp.json()["data"]["risk_terms"] == "预警止损 0.92/0.9"
+
+    def test_get_account_risk_terms_empty(self, client, mock_trading_manager, tmp_path):
+        """未配置 risk_terms 时返回 null（前端展示为 -）"""
+        import qtrader.utils.config_loader as config_loader_mod
+
+        mock_trading_manager.get_account = AsyncMock(return_value=make_account())
+        saved_loader = self._use_temp_config(tmp_path, "account_id: DQ\n")
+        try:
+            resp = client.get("/api/account", params={"account_id": "DQ"})
+        finally:
+            config_loader_mod._config_loader = saved_loader
+
+        assert resp.status_code == 200
+        assert resp.json()["data"]["risk_terms"] is None
 
     def test_get_account_not_found(self, client, mock_trading_manager):
         mock_trading_manager.get_account = AsyncMock(return_value=None)

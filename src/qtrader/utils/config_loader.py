@@ -213,6 +213,8 @@ class AccountConfig(BaseModel):
     name: str | None = None
     account_type: str | None = "kq"
     enabled: bool | None = True
+    # 风控条款（自由文本，如 "预警止损 0.92/0.9"）
+    risk_terms: str | None = None
     # 告警配置
     alert: AlertConfig = Field(default_factory=AlertConfig)
 
