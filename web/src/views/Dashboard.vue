@@ -472,6 +472,8 @@ function isRotationCompleted(acc: Account): boolean {
   cursor: pointer;
   transition: all 0.3s;
   border: 2px solid transparent;
+  /* el-row gutter 只管水平间距，行间垂直间距在此补齐 */
+  margin-bottom: 20px;
 }
 
 .account-card:hover:not(.disabled-card) {
