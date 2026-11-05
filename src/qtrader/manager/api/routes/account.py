@@ -19,6 +19,7 @@ router = APIRouter(prefix="/api/account", tags=["账户"])
 @router.get("")
 async def get_account_info(
     account_id: str | None = Query(None, description="账户ID，不传则返回第一个账户"),
+    refresh: bool = Query(False, description="true 时触发一次柜台资金查询（获取最新保证金）"),
     trading_manager: TradingManager = Depends(get_trading_manager),
 ) -> Response:
     """
@@ -40,7 +41,7 @@ async def get_account_info(
             else:
                 return error_response(code=400, message="没有配置任何账户")
 
-        account_data = await trading_manager.get_account(account_id)
+        account_data = await trading_manager.get_account(account_id, refresh=refresh)
         if not account_data:
             return error_response(code=404, message=f"账户 [{account_id}] 不存在")
 

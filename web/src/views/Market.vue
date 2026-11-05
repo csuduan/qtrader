@@ -57,7 +57,20 @@
             <el-table-column prop="exchange_id" label="交易所" width="90" />
             <el-table-column prop="volume_multiple" label="乘数" width="70" align="right" />
             <el-table-column prop="price_tick" label="最小变动" width="90" align="right" />
+            <el-table-column prop="exchange_margin" label="交易所保证金" width="110" align="right">
+              <template #default="{ row }">{{ row.exchange_margin != null ? row.exchange_margin : '-' }}</template>
+            </el-table-column>
+            <el-table-column prop="margin_rate" label="保证金率" width="90" align="right">
+              <template #default="{ row }">{{ row.margin_rate != null ? (row.margin_rate * 100).toFixed(2) + '%' : '-' }}</template>
+            </el-table-column>
+            <el-table-column prop="trading_time_day" label="日盘" width="170" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.trading_time_day || '-' }}</template>
+            </el-table-column>
+            <el-table-column prop="trading_time_night" label="夜盘" width="130" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.trading_time_night || '-' }}</template>
+            </el-table-column>
             <el-table-column prop="min_volume" label="最小手数" width="90" align="right" />
+            <el-table-column prop="min_open_volume" label="最小开仓手数" width="110" align="right" />
             <el-table-column prop="option_type" label="期权类型" width="90">
               <template #default="{ row }">{{ row.option_type || '-' }}</template>
             </el-table-column>

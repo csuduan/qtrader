@@ -511,7 +511,12 @@ export interface ContractInfo {
   product_type: string
   volume_multiple: number
   price_tick: number
+  exchange_margin: number | null
+  margin_rate: number | null
+  trading_time_day: string | null
+  trading_time_night: string | null
   min_volume: number
+  min_open_volume: number
   option_strike: number | null
   option_underlying: string | null
   option_type: string | null

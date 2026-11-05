@@ -197,13 +197,14 @@ export const useStore = defineStore('main', () => {
 
   /**
    * 加载当前选中账户的详情
+   * @param refresh true 时触发一次柜台资金查询（获取最新保证金）
    */
-  async function loadCurrentAccount() {
+  async function loadCurrentAccount(refresh = false) {
     try {
       if (!selectedAccountId.value) {
         return
       }
-      const accountData = await accountApi.getAccount(selectedAccountId.value)
+      const accountData = await accountApi.getAccount(selectedAccountId.value, refresh)
       // 更新账户列表中的对应账户
       const index = accounts.value.findIndex(acc => acc.account_id === accountData.account_id)
       if (index > -1) {

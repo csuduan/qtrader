@@ -367,6 +367,17 @@ class BaseGateway(ABC):
         """
         pass
 
+    async def query_account_refresh(self, timeout: float = 5.0) -> None:
+        """
+        触发一次账户资金查询并等待回报（CTP 类柜台需要主动查询）
+
+        推送型网关（TQ）账户数据实时推送，默认无操作。
+
+        Args:
+            timeout: 等待回报的超时秒数
+        """
+        del timeout  # 推送型网关无需等待
+
     @abstractmethod
     def get_positions(self) -> dict[str, PositionData]:
         """

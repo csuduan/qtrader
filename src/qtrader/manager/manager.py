@@ -472,11 +472,16 @@ class TradingManager:
             return await trader.sync_all()
         return None
 
-    async def get_account(self, account_id: str) -> AccountData | None:
-        """获取账户数据"""
+    async def get_account(self, account_id: str, refresh: bool = False) -> AccountData | None:
+        """获取账户数据
+
+        Args:
+            account_id: 账户ID
+            refresh: True 时触发一次柜台资金查询（获取最新保证金）
+        """
         trader = self.traders.get(account_id)
         if trader:
-            return await trader.get_account()
+            return await trader.get_account(refresh=refresh)
         return None
 
     def get_all_accounts_cached(self) -> list[AccountData]:
@@ -1049,13 +1054,10 @@ class TradingManager:
         """初始化公共数据服务"""
         # 创建公共数据服务并加载历史数据（使用全局异步数据库实例）
         self.public_data_service = PublicDataService()
-        count = await self.public_data_service.load_from_database()
-        # 检查合约新鲜度，过期则从 TqSdk + 米筐刷新
-        if not self.public_data_service.has_fresh_contracts():
-            logger.info("数据库合约信息已过期，从 TqSdk + 米筐 API 刷新...")
-            await self._refresh_contracts_from_tq()
-        else:
-            logger.info(f"合约信息新鲜，已加载 {count} 个合约")
+        # 先加载库中数据作为兜底缓存（刷新失败时仍有数据可用）
+        await self.public_data_service.load_from_database()
+        # 每次启动都从 TqSdk + 米筐 API 全量刷新合约信息
+        await self._refresh_contracts_from_tq()
 
     @logger.catch(message="刷新合约信息失败")
     async def _refresh_contracts_from_tq(self) -> None:
@@ -1076,24 +1078,26 @@ class TradingManager:
         if len(contracts) == 0:
             logger.warning("从 TqSdk 未获取到合约信息（返回空列表）")
             return
-        # 2. 米筐补充最小开仓手数（失败不阻塞）
-        min_order_map: dict[str, int] = {}
+        # 2. 米筐补充交易参数：最小开仓手数、交易所保证金率（失败不阻塞）
+        rq_params_map: dict[str, dict[str, float | int | None]] = {}
         rq_config = self._get_data_service_config("rice_data")
         if rq_config:
             try:
                 from qtrader.manager.rq_contract_fetcher import RqContractFetcher
 
                 rq_fetcher = RqContractFetcher(rq_config["username"], rq_config["password"])
-                min_order_map = await submit_long_task(rq_fetcher.fetch_min_order_quantities)
-                logger.info(f"从米筐获取了 {len(min_order_map)} 个合约的最小开仓手数")
+                rq_params_map = await submit_long_task(rq_fetcher.fetch_trading_parameters)
+                logger.info(f"从米筐获取了 {len(rq_params_map)} 个合约的交易参数")
             except Exception as e:
-                logger.warning("从米筐获取最小开仓手数失败（不影响主流程）: {!r}", e)
-        # 3. 合并数据：将 min_volume 写入 contracts
+                logger.warning("从米筐获取交易参数失败（不影响主流程）: {!r}", e)
+        # 3. 合并数据：将 min_volume / margin_rate 写入 contracts
         # 米筐合约代码为大写，匹配时统一转大写
-        min_order_map_upper = {k.upper(): v for k, v in min_order_map.items()}
+        rq_params_upper = {k.upper(): v for k, v in rq_params_map.items()}
         for contract in contracts:
             raw_symbol = contract["symbol"]  # Tq格式: "rb2505" (无交易所前缀)
-            contract["min_open_volume"] = min_order_map_upper.get(raw_symbol.upper(), 1)
+            params = rq_params_upper.get(raw_symbol.upper())
+            contract["min_open_volume"] = int(params["min_order_quantity"] or 1) if params else 1
+            contract["margin_rate"] = params.get("margin_rate") if params else None
         # 4. 写入共享库（异步批量 upsert）
         if self.public_data_service is None:
             return

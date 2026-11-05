@@ -324,10 +324,10 @@ const riskForm = reactive({
 })
 
 // ========== 账户详情方法 ==========
-async function loadAccountData() {
+async function loadAccountData(refresh = false) {
   loading.value = true
   try {
-    await store.loadCurrentAccount()
+    await store.loadCurrentAccount(refresh)
   } finally {
     loading.value = false
   }

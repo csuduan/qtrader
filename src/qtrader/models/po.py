@@ -379,6 +379,14 @@ class ContractPo(Base):
     product_type: Mapped[str] = mapped_column(String(20), nullable=False, default="FUTURES")
     volume_multiple: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     price_tick: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False, default=0.01)
+    # 每手交易所保证金（元，天勤按交易所率×昨结算价计算，不含期货公司加收）
+    exchange_margin: Mapped[Decimal | None] = mapped_column(Numeric(20, 2), nullable=True)
+    # 交易所保证金率（米筐 long_margin_ratio，多头优先空头回退，不含期货公司加收）
+    margin_rate: Mapped[Decimal | None] = mapped_column(Numeric(10, 6), nullable=True)
+    # 白盘交易时间段（展示格式 "09:00-10:15,10:30-11:30,13:30-15:00"）
+    trading_time_day: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # 夜盘交易时间段（无夜盘为 NULL）
+    trading_time_night: Mapped[str | None] = mapped_column(String(100), nullable=True)
     min_volume: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     min_open_volume: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     option_strike: Mapped[Decimal | None] = mapped_column(Numeric(20, 4), nullable=True)

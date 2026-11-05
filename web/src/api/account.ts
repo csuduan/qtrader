@@ -8,8 +8,8 @@ export const accountApi = {
   /**
    * 获取账户信息
    */
-  getAccount: async (accountId?: string): Promise<Account> => {
-    return api.get<Account>('/account', { params: { account_id: accountId } })
+  getAccount: async (accountId?: string, refresh = false): Promise<Account> => {
+    return api.get<Account>('/account', { params: { account_id: accountId, refresh } })
   },
 
   /**

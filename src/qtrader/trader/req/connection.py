@@ -117,9 +117,15 @@ class ConnectionReqHandler(BaseReqHandler):
 
     @request("get_account")
     async def _req_get_account(self, data: dict[str, Any]) -> dict[str, Any] | None:
-        """处理获取账户数据请求"""
+        """处理获取账户数据请求
+
+        data 中 refresh 为 True 时先触发一次柜台资金查询（CTP 缓存不随成交更新，
+        手动刷新场景需要拿最新保证金）
+        """
         if self.trader.trading_engine is None:
             return None
+        if data.get("refresh") and self.trader.trading_engine.gateway is not None:
+            await self.trader.trading_engine.gateway.query_account_refresh()
         account = self.trader.trading_engine.account
         return account.model_dump() if account else None
 

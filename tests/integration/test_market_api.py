@@ -43,7 +43,15 @@ def make_tick(symbol: str = "rb2505", last: float = 3450.0) -> TickData:
     )
 
 
-def make_contract(symbol: str = "rb2505", exchange_id: str = "SHFE") -> ContractPo:
+def make_contract(
+    symbol: str = "rb2505",
+    exchange_id: str = "SHFE",
+    exchange_margin=None,
+    margin_rate=None,
+    trading_time_day: str | None = None,
+    trading_time_night: str | None = None,
+    min_open_volume: int = 1,
+) -> ContractPo:
     """构造持久化合约对象"""
     return ContractPo(
         symbol=symbol,
@@ -52,7 +60,12 @@ def make_contract(symbol: str = "rb2505", exchange_id: str = "SHFE") -> Contract
         product_type="FUTURES",
         volume_multiple=10,
         price_tick=Decimal("1"),
+        exchange_margin=exchange_margin,
+        margin_rate=margin_rate,
+        trading_time_day=trading_time_day,
+        trading_time_night=trading_time_night,
         min_volume=1,
+        min_open_volume=min_open_volume,
         option_strike=None,
         option_underlying=None,
         option_type=None,
@@ -352,7 +365,19 @@ class TestContractQueryAPI:
 
     def test_list_contracts(self, client, tmp_path):
         db = make_contract_db(
-            tmp_path, [make_contract("rb2505", "SHFE"), make_contract("IM2609", "CFFEX")]
+            tmp_path,
+            [
+                make_contract(
+                    "rb2505",
+                    "SHFE",
+                    exchange_margin=Decimal("4356.00"),
+                    margin_rate=Decimal("0.120000"),
+                    trading_time_day="09:00-10:15,10:30-11:30,13:30-15:00",
+                    trading_time_night="21:00-23:00",
+                    min_open_volume=10,
+                ),
+                make_contract("IM2609", "CFFEX"),
+            ],
         )
         with patch("qtrader.manager.api.routes.contract.get_async_database", return_value=db):
             resp = client.get("/api/contract/list")
@@ -365,13 +390,22 @@ class TestContractQueryAPI:
         first = body["data"][0]
         assert first["symbol"] == "IM2609"
         assert first["exchange_id"] == "CFFEX"
+        assert first["exchange_margin"] is None
+        assert first["margin_rate"] is None
+        assert first["trading_time_day"] is None
+        assert first["trading_time_night"] is None
         rb = body["data"][1]
         assert rb["symbol"] == "rb2505"
         assert rb["exchange_id"] == "SHFE"
         assert rb["name"] == "螺纹钢2505"
         assert rb["volume_multiple"] == 10
         assert rb["price_tick"] == 1.0
-        assert rb["min_open_volume"] == rb["min_volume"]
+        assert rb["exchange_margin"] == 4356.0
+        assert rb["margin_rate"] == 0.12
+        assert rb["trading_time_day"] == "09:00-10:15,10:30-11:30,13:30-15:00"
+        assert rb["trading_time_night"] == "21:00-23:00"
+        assert rb["min_volume"] == 1
+        assert rb["min_open_volume"] == 10
         assert rb["update_date"] == "2026-09-01"
         assert rb["updated_at"] == "2026-09-01T08:00:00"
 

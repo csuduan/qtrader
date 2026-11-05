@@ -259,6 +259,41 @@ class TestGetAccount:
 
 
 @pytest.mark.unit
+class TestQueryAccountRefresh:
+    """手动刷新资金查询"""
+
+    async def test_refresh_queries_and_waits_callback(self, gateway):
+        """发起柜台查询并等到回报事件后返回"""
+        _, td = attach_apis(gateway, connected=True)
+
+        def on_query_account() -> None:
+            # 模拟 CTP 回调线程置位：查询一发出即回报
+            gateway.on_account(AccountData(account_id="CTP01", balance=999.0))
+
+        td.query_account.side_effect = on_query_account
+        await gateway.query_account_refresh(timeout=2.0)
+
+        td.query_account.assert_called_once()
+        assert gateway._account.balance == 999.0
+        assert gateway._account_refresh_event is None  # 等待结束已清理
+
+    async def test_refresh_skipped_when_disconnected(self, gateway):
+        """未连接时不发查询，直接返回"""
+        _, td = attach_apis(gateway, connected=False)
+        await gateway.query_account_refresh(timeout=1.0)
+        td.query_account.assert_not_called()
+
+    def test_on_account_sets_pending_event(self, gateway):
+        """等待中的刷新事件被账户回调置位"""
+        import threading
+
+        event = threading.Event()
+        gateway._account_refresh_event = event
+        gateway.on_account(AccountData(account_id="CTP01", balance=1.0))
+        assert event.is_set()
+
+
+@pytest.mark.unit
 class TestCallbacks:
     """ctp_api 回调处理"""
 

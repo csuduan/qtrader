@@ -834,18 +834,25 @@ class TraderProxy:
 
     # ==================== 数据查询接口 ====================
 
-    async def get_account(self) -> AccountData | None:
+    async def get_account(self, refresh: bool = False) -> AccountData | None:
         """获取账户数据 - 优先从Trader实时查询，未连接时使用缓存
 
         内存缓存由以下途径维护：
         1. 初始化时从DB加载
         2. 连接Trader成功后IPC同步
         3. Trader推送的account消息更新
+
+        Args:
+            refresh: True 时Trader先触发一次柜台资金查询（CTP 账户数据不随成交推送）
         """
         # 优先从Trader实时查询
         if self.socket_client and self.socket_client.is_connected():
             try:
-                data = await self.socket_client.request("get_account", {}, timeout=5.0)
+                # refresh 场景Trader需等柜台回报，超时相应放宽
+                timeout = 8.0 if refresh else 5.0
+                data = await self.socket_client.request(
+                    "get_account", {"refresh": refresh}, timeout=timeout
+                )
                 if data and isinstance(data, dict):
                     if self._account_cache:
                         merged = self._account_cache.model_dump()

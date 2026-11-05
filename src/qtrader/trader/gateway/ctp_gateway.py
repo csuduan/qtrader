@@ -7,6 +7,9 @@ CTP Gateway 适配器（异步版本）
 - CTP API 文档：https://www.simnow.com.cn
 """
 
+import asyncio
+import threading
+
 import pandas as pd
 
 from qtrader.app_context import get_app_context
@@ -61,6 +64,9 @@ class CtpGateway(BaseGateway):
 
         # 账户数据缓存
         self._account: AccountData | None = None
+
+        # 手动刷新资金的等待事件（CTP 回调线程置位，异步侧等待）
+        self._account_refresh_event: threading.Event | None = None
 
         # 持仓数据缓存
         self._positions: dict[str, PositionData] = {}
@@ -428,6 +434,9 @@ class CtpGateway(BaseGateway):
         """处理账户回调"""
         # 缓存账户数据
         self._account = account
+        # 唤醒手动刷新等待方
+        if self._account_refresh_event is not None:
+            self._account_refresh_event.set()
         self._account.hold_profit = sum(
             (position.hold_profit_long or 0) + (position.hold_profit_short or 0)
             for position in self._positions.values()
@@ -437,6 +446,22 @@ class CtpGateway(BaseGateway):
             for position in self._positions.values()
         )
         self.emit_event(EventTypes.ACCOUNT_UPDATE, self._account)
+
+    async def query_account_refresh(self, timeout: float = 5.0) -> None:
+        """触发一次资金查询并等待回报，用于前端手动刷新获取最新保证金"""
+        if not self.td_api or not self.td_api.connected:
+            return
+        event = threading.Event()
+        self._account_refresh_event = event
+        try:
+            # 与登录查询序列同一信号量，避免并发查询触发 CTP 流控
+            if self.td_api.semaphore.acquire(timeout=2):
+                self.td_api.query_account()
+            # 回调在 CTP 线程置位事件；放到线程池等待，不阻塞事件循环
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, event.wait, timeout)
+        finally:
+            self._account_refresh_event = None
 
     def on_status(self, ready: bool = False) -> None:
         """处理状态回调"""

@@ -201,6 +201,21 @@ class TestDataQueryHandlers:
         assert result["balance"] == 100000.0
 
     @pytest.mark.asyncio
+    async def test_get_account_refresh_triggers_gateway_query(self, engine, handler):
+        """refresh=True 先触发网关资金查询再返回数据"""
+        engine.gateway.query_account_refresh = AsyncMock()
+        result = await handler._req_get_account({"refresh": True})
+        engine.gateway.query_account_refresh.assert_awaited_once()
+        assert result["balance"] == 100000.0
+
+    @pytest.mark.asyncio
+    async def test_get_account_no_refresh_skips_gateway_query(self, engine, handler):
+        """普通查询不触发柜台查询"""
+        engine.gateway.query_account_refresh = AsyncMock()
+        await handler._req_get_account({})
+        engine.gateway.query_account_refresh.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_get_account_no_engine(self, mock_trader, handler):
         mock_trader.trading_engine = None
         assert await handler._req_get_account({}) is None

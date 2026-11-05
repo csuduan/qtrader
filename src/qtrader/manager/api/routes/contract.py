@@ -69,8 +69,12 @@ async def get_contracts(
                     "product_type": c.product_type,
                     "volume_multiple": c.volume_multiple,
                     "price_tick": float(c.price_tick) if c.price_tick else 0.01,
+                    "exchange_margin": float(c.exchange_margin) if c.exchange_margin else None,
+                    "margin_rate": float(c.margin_rate) if c.margin_rate else None,
+                    "trading_time_day": c.trading_time_day,
+                    "trading_time_night": c.trading_time_night,
                     "min_volume": c.min_volume,
-                    "min_open_volume": c.min_volume,  # 暂时用min_volume
+                    "min_open_volume": c.min_open_volume,
                     "option_strike": float(c.option_strike) if c.option_strike else None,
                     "option_underlying": c.option_underlying,
                     "option_type": c.option_type,

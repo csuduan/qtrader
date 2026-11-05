@@ -278,9 +278,7 @@ class TestTraderProxyPositionEmit:
         event_engine = MagicMock()
         with patch("qtrader.manager.trader_proxy.ctx") as mock_ctx:
             mock_ctx.get_event_engine.return_value = event_engine
-            proxy._emit_data(
-                "position", {"symbol": "SHFE.rb2505", "pos_long": 7, "pos_long_td": 1}
-            )
+            proxy._emit_data("position", {"symbol": "SHFE.rb2505", "pos_long": 7, "pos_long_td": 1})
 
         _, data = event_engine.put.call_args.args
         assert data["pos_long"] == 7
@@ -914,11 +912,21 @@ class TestTraderProxyQueryRpc:
         client = connect_proxy(proxy)
         client.request = AsyncMock(return_value={"balance": 777.0})
         result = await proxy.get_account()
-        client.request.assert_awaited_once_with("get_account", {}, timeout=5.0)
+        client.request.assert_awaited_once_with("get_account", {"refresh": False}, timeout=5.0)
         assert result.balance == 777.0
         assert result.account_id == "test_account_001"
         assert result.status == TraderState.CONNECTED
         assert proxy._account_cache.balance == 777.0
+
+    @pytest.mark.asyncio
+    async def test_get_account_refresh_passes_flag_and_longer_timeout(self, proxy):
+        """refresh=True 时请求携带标记并放宽超时（Trader 需等柜台回报）"""
+        proxy._account_cache = AccountData(account_id="test_account_001", balance=1.0)
+        client = connect_proxy(proxy)
+        client.request = AsyncMock(return_value={"balance": 888.0})
+        result = await proxy.get_account(refresh=True)
+        client.request.assert_awaited_once_with("get_account", {"refresh": True}, timeout=8.0)
+        assert result.balance == 888.0
 
     @pytest.mark.asyncio
     async def test_get_account_request_error_falls_back_to_cache(self, proxy):

@@ -5,7 +5,7 @@
         <div class="card-header">
           <span>账户信息</span>
           <div>
-            <el-button type="primary" @click="emit('refresh')" :loading="loading">
+            <el-button type="primary" @click="emit('refresh', true)" :loading="loading">
               <el-icon><Refresh /></el-icon>
               刷新
             </el-button>
@@ -156,7 +156,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  refresh: []
+  refresh: [refresh: boolean]
   refreshPositions: []
   closePositions: [positions: Position[]]
 }>()

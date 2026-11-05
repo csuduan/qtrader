@@ -1,8 +1,9 @@
 """
 米筐数据服务合约查询器
-通过 rqdatac 补充合约交易参数（最小开仓手数等）
+通过 rqdatac 补充合约交易参数（最小开仓手数、交易所保证金率等）
 """
 
+import math
 from datetime import datetime
 
 import pandas as pd
@@ -26,12 +27,13 @@ class RqContractFetcher:
         self.username = username
         self.password = password
 
-    def fetch_min_order_quantities(self) -> dict[str, int]:
+    def fetch_trading_parameters(self) -> dict[str, dict[str, float | int | None]]:
         """
-        查询活跃期货合约的最小开仓手数
+        查询活跃期货合约的交易参数（最小开仓手数、交易所保证金率）
 
         Returns:
-            {order_book_id: min_order_qty}，key 格式如 "IF2605"（无交易所前缀）
+            {order_book_id: {"min_order_quantity": int, "margin_rate": float|None}}，
+            key 格式如 "IF2605"（无交易所前缀）；
             对于郑商所(CZCE)合约，同时返回短格式和长格式两种key，以便兼容TqSdk
         """
         import rqdatac
@@ -50,32 +52,49 @@ class RqContractFetcher:
         # 查询交易参数
         params = rqdatac.futures.get_trading_parameters(order_book_ids=order_book_ids, market="cn")
         df_min_order = params["min_order_quantity"]
+        df_long_margin = params["long_margin_ratio"]
+        df_short_margin = params["short_margin_ratio"]
 
         # 构建 order_book_id -> exchange 映射，用于判断郑商所合约
         ob_id_exchange = dict(zip(active["order_book_id"], active["exchange"], strict=True))
 
-        result: dict[str, int] = {}
+        def latest_valid(df: pd.DataFrame, ob_id: str) -> float | None:
+            """取某合约该列最近一个有效值（多行时取最后一行）"""
+            if ob_id not in df.index:
+                return None
+            series = df.loc[ob_id]
+            if isinstance(series, pd.Series):
+                valid = series.dropna()
+                return float(valid.iloc[-1]) if len(valid) > 0 else None
+            return None if pd.isna(series) else float(series)
+
+        result: dict[str, dict[str, float | int | None]] = {}
         for ob_id in order_book_ids:
-            if ob_id in df_min_order.index:
-                series = df_min_order.loc[ob_id]
-                if isinstance(series, pd.Series):
-                    valid = series.dropna()
-                    latest = int(valid.iloc[-1]) if len(valid) > 0 else 1
-                else:
-                    latest = int(series) if not pd.isna(series) else 1
+            min_order = latest_valid(df_min_order, ob_id)
+            # 保证金率：多头优先，缺失回退空头
+            margin_rate = latest_valid(df_long_margin, ob_id)
+            if margin_rate is None or math.isnan(margin_rate):
+                margin_rate = latest_valid(df_short_margin, ob_id)
+            if margin_rate is not None and math.isnan(margin_rate):
+                margin_rate = None
 
-                # 原始格式（米筐长格式）
-                result[ob_id] = latest
+            item: dict[str, float | int | None] = {
+                "min_order_quantity": int(min_order) if min_order is not None else 1,
+                "margin_rate": margin_rate,
+            }
 
-                # 郑商所合约：米筐补齐为4位年份(如CF1701)，TqSdk用3位(如CF701)
-                # 同时添加短格式key以便与TqSdk匹配
-                exchange = ob_id_exchange.get(ob_id, "")
-                if exchange.upper() in ("CZCE", "ZF", "郑商所"):
-                    short_format = self._czce_to_short(ob_id)
-                    if short_format != ob_id:
-                        result[short_format] = latest
+            # 原始格式（米筐长格式）
+            result[ob_id] = item
 
-        logger.info(f"米筐获取了 {len(result)} 个合约的最小开仓手数（含短格式兼容）")
+            # 郑商所合约：米筐补齐为4位年份(如CF1701)，TqSdk用3位(如CF701)
+            # 同时添加短格式key以便与TqSdk匹配
+            exchange = ob_id_exchange.get(ob_id, "")
+            if exchange.upper() in ("CZCE", "ZF", "郑商所"):
+                short_format = self._czce_to_short(ob_id)
+                if short_format != ob_id:
+                    result[short_format] = item
+
+        logger.info(f"米筐获取了 {len(result)} 个合约的交易参数（含短格式兼容）")
         return result
 
     @staticmethod

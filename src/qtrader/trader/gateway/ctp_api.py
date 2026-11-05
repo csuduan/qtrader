@@ -952,7 +952,9 @@ class CtpTdApi(tdapi.CThostFtdcTraderSpi):  # type: ignore[misc]  # CTP SDK 无�
 
             self.gateway.on_account(account)
             self._safe_release_semaphore()
-            logger.info(f"CTP 资金查询成功，余额: {account.balance}")
+            logger.info(f"CTP 资金查询成功，余额: {account.balance},保证金：{account.margin}")
+
+
 
     def OnRspQryInvestorPosition(
         self,

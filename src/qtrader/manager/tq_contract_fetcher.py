@@ -3,6 +3,8 @@ TqSdk 合约查询器
 用于 Manager 进程独立查询合约基础信息（不需要完整交易 Gateway）
 """
 
+import math
+import time
 from typing import Any
 
 from tqsdk import TqApi, TqAuth, TqKq
@@ -11,6 +13,47 @@ from tqsdk.exceptions import TqTimeoutError
 from qtrader.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def parse_exchange_margin(value: Any) -> float | None:
+    """每手交易所保证金转换（NaN/None/非数值返回 None）
+
+    Args:
+        value: query_symbol_info 返回的 margin 列值
+
+    Returns:
+        保留2位小数的保证金金额，无效值返回 None
+    """
+    try:
+        margin = float(value)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(margin):
+        return None
+    return round(margin, 2)
+
+
+def parse_trading_time(value: Any) -> str | None:
+    """交易时间段转展示字符串
+
+    Args:
+        value: query_symbol_info 的 trading_time_day/night 列值
+            （Series，每个元素为 [起, 止] 的列表；无数据为 None）
+
+    Returns:
+        展示格式 "09:00-10:15,10:30-11:30,13:30-15:00"；无数据返回 None
+    """
+    try:
+        periods = list(value)
+    except TypeError:
+        return None
+    if not periods:
+        return None
+    parts = []
+    for period in periods:
+        start, end = str(period[0])[:5], str(period[1])[:5]
+        parts.append(f"{start}-{end}")
+    return ",".join(parts)
 
 
 class TqContractFetcher:
@@ -40,6 +83,9 @@ class TqContractFetcher:
             - product_type: 产品类型
             - volume_multiple: 合约乘数
             - price_tick: 最小变动价位
+            - exchange_margin: 每手交易所保证金（元），无数据为 None
+            - trading_time_day: 白盘时间段展示串，无数据为 None
+            - trading_time_night: 夜盘时间段展示串，无夜盘为 None
             如果获取失败返回 None
         """
         api = None
@@ -52,6 +98,9 @@ class TqContractFetcher:
             quotes = [x for x in quotes if len(x) <= 12]
             symbol_infos = api.query_symbol_info(quotes)
             logger.info(f"TqSdk 查询到 {len(symbol_infos)} 个合约")
+
+            # query_symbol_info 不返回保证金列，改从行情订阅获取每手交易所保证金
+            margin_map = self._fetch_margin_map(api, quotes)
 
             contracts = []
             for _, item in symbol_infos.iterrows():
@@ -71,6 +120,9 @@ class TqContractFetcher:
                         "product_type": "FUTURES",
                         "volume_multiple": item.volume_multiple,
                         "price_tick": item.price_tick,
+                        "exchange_margin": parse_exchange_margin(margin_map.get(instrument_id)),
+                        "trading_time_day": parse_trading_time(item.trading_time_day),
+                        "trading_time_night": parse_trading_time(item.trading_time_night),
                     }
                 )
 
@@ -90,6 +142,39 @@ class TqContractFetcher:
                     logger.info("TqSdk API 已关闭")
                 except Exception as e:
                     logger.warning("关闭 TqSdk API 失败: {!r}", e)
+
+    @staticmethod
+    def _fetch_margin_map(
+        api: TqApi, symbols: list[str], timeout: float = 30.0
+    ) -> dict[str, float]:
+        """批量订阅行情并等待每手交易所保证金就绪
+
+        Args:
+            api: TqApi实例
+            symbols: 合约代码列表（EXCHANGE.code 格式）
+            timeout: 等待全部就绪的超时秒数（到点后有多少取多少）
+
+        Returns:
+            {instrument_id: 每手保证金}，仅含已就绪的合约；整体失败返回空 dict
+        """
+        try:
+            quote_list = api.get_quote_list(symbols)
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                api.wait_update(deadline=max(1.0, deadline - time.time()))
+                ready = sum(1 for q in quote_list if q.get("margin") == q.get("margin"))
+                if ready == len(quote_list):
+                    break
+            margin_map = {
+                q.instrument_id: float(q.margin)
+                for q in quote_list
+                if q.get("margin") == q.get("margin")
+            }
+            logger.info(f"每手保证金就绪: {len(margin_map)}/{len(symbols)}")
+            return margin_map
+        except Exception as e:
+            logger.warning("获取每手交易所保证金失败（不影响合约基础信息同步）: {!r}", e)
+            return {}
 
     @staticmethod
     def _mark_dominant_contracts(api: TqApi, contracts: list[dict[str, Any]]) -> None:
