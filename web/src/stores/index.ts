@@ -143,10 +143,21 @@ export const useStore = defineStore('main', () => {
 
   /**
    * 加载所有账户信息
+   *
+   * 按账户合并更新而非整体替换：/account/all 只返回有 Trader 代理的账户，
+   * 整体替换会丢失尚未启动（无缓存）的账户占位数据
    */
   async function loadAllAccounts() {
     try {
-      accounts.value = await accountApi.getAllAccounts()
+      const list = await accountApi.getAllAccounts()
+      for (const acc of list) {
+        const index = accounts.value.findIndex(a => a.account_id === acc.account_id)
+        if (index > -1) {
+          accounts.value[index] = acc
+        } else {
+          accounts.value.push(acc)
+        }
+      }
       // 如果有账户但还没选中，默认选中第一个已连接的账户
       if (!selectedAccountId.value && accounts.value.length > 0) {
         const firstConnected = accounts.value.find(acc => acc.status === 'connected')
@@ -286,6 +297,9 @@ export const useStore = defineStore('main', () => {
     // 如果有账户数据，加载持仓、成交、订单
     if (accounts.value.length > 0) {
       await Promise.all([
+        // 并行补全全部账户真实状态（读Manager内存缓存，不走RPC），
+        // 否则刷新后其他账户停留在占位status='stopped'，下拉列表依赖WS推送才能恢复
+        loadAllAccounts(),
         loadPositions(),
         loadTrades(),
         loadOrders('ALIVE')

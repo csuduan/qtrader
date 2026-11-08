@@ -183,8 +183,9 @@
               </div>
               <template #dropdown>
                 <el-dropdown-menu>
+                  <!-- 显示全部账户，非connected状态由disabled禁用（灰点标识stopped） -->
                   <el-dropdown-item
-                    v-for="acc in sortedAccounts"
+                    v-for="acc in store.accounts"
                     :key="acc.account_id"
                     :command="acc.account_id"
                     :class="{ 'is-selected': acc.account_id === store.selectedAccountId, 'is-disabled': acc.status !== 'connected' }"
@@ -385,11 +386,6 @@ function getLogo() {
 function formatNumber(num: number): string {
   return num.toFixed(2)
 }
-
-// 账户列表：剔除已停止的账户，顺序与总览页账户卡片一致（API 返回的原始顺序）
-const sortedAccounts = computed(() => {
-  return store.accounts.filter((acc) => !isAccountStopped(acc))
-})
 
 // 当前账户名称
 const currentAccountName = computed(() => {
