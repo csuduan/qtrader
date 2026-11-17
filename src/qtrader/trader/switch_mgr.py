@@ -167,12 +167,12 @@ class SwitchPosManager:
         导入换仓指令文件
 
         Args:
-            csv_text: 换仓指令文件内容
+            csv_text: 换仓指令文件内容（仅含抬头表示当日无换仓，replace 模式下会清空当日已有指令）
             filename: 文件名（用于提取交易日）
             mode: 导入模式（replace/append）
         """
         lines = csv_text.strip().split("\n")
-        if len(lines) < 2:
+        if not lines[0].strip():
             raise ValueError("CSV文件为空或格式错误")
 
         header = lines[0].strip().split(",")

@@ -238,10 +238,21 @@ class TestSwitchMgrImportCsvValidation:
         self.mgr.trading_engine.std_symbol = lambda s: s
         self.mgr.load_rotation_instructions = AsyncMock()
 
+    async def test_import_csv_header_only_means_no_rotation(self):
+        """只有表头视为当日无换仓，导入成功 0 条，replace 模式清空当日已有指令"""
+        session = async_session()
+        with patch("qtrader.trader.switch_mgr.get_async_session", scope_with(session)):
+            result = await self.mgr.import_csv("account,strategy\n", "20260818_DQ.csv")
+        assert result == {"imported": 0, "failed": 0, "errors": []}
+        session.execute.assert_awaited_once()
+        session.add_all.assert_called_once_with([])
+
     async def test_import_csv_empty_text_raises(self):
-        """只有表头时视为空文件，抛出 ValueError"""
+        """完全空白的文件抛出 ValueError"""
         with pytest.raises(ValueError, match="CSV文件为空"):
-            await self.mgr.import_csv("account,strategy\n", "20260818_DQ.csv")
+            await self.mgr.import_csv("", "20260818_DQ.csv")
+        with pytest.raises(ValueError, match="CSV文件为空"):
+            await self.mgr.import_csv(" \n \n", "20260818_DQ.csv")
 
     async def test_import_csv_filename_without_date_raises(self):
         """文件名中无 8 位日期时抛出 ValueError"""

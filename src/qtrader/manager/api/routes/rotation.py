@@ -426,6 +426,7 @@ async def import_rotation_instructions(
 
     CSV格式：账户编号,策略编号,合约,开平,方向,手数,报单时间(可选)
     例如：DQ,StrategyFix_PK,PK603.CZC,Close,Sell,2,09:05:00
+    仅含抬头表示当日无换仓：导入成功 0 条，replace 模式下清空当日已有指令
 
     文件名格式支持：yyyyMMdd_*.csv，用于提取交易日
     例如：20250115_rotation.csv，将提取交易日期为20250115
