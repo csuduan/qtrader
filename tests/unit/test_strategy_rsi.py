@@ -8,7 +8,7 @@ RSI 策略单元测试
 import asyncio
 import math
 from collections import deque
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from unittest.mock import MagicMock
 
 import pytest
@@ -19,6 +19,7 @@ from qtrader.trader.strategy.strategy_rsi import (
     RsiParam,
     RsiStrategy,
     calc_rsi_sma,
+    hv_side,
     roll_mean_right,
 )
 from qtrader.utils.config_loader import StrategyConfig
@@ -329,3 +330,255 @@ class TestRsiStrategySymbolChange:
         # 重新 init（回播第一步）应使用新合约
         asyncio.run(strategy.init(datetime.now()))
         assert strategy.symbol == "IM2610"
+
+
+# ==================== Test High-Vol Mode (高波模式) ====================
+
+HV_TRADING_DAY = datetime(2026, 11, 23)  # 周一
+
+
+@pytest.fixture
+def hv_strategy() -> RsiStrategy:
+    """高波模式（mode=1）AM行策略，IM品种，止损1.5%"""
+    config = MagicMock()
+    config.symbol = "IM2612"
+    config.volume = 1
+    config.bar = "M1"
+    config.params = {
+        "symbol": "IM2612",
+        "mode": 1,
+        "rsi_n": 3,
+        "short_k": 5,
+        "long_k": 15,
+        "trade_start_time": time(10, 0),
+        "trade_end_time": time(13, 25),
+        "force_exit_time": time(14, 55),
+        "take_profit_pct": 0.015,
+        "stop_loss_pct": 0.015,
+    }
+    s = RsiStrategy("StrRsiInDay-AM-IM01", config)
+    s.signal = None
+    s.param = RsiParam(**config.params)
+    s.symbol = s.param.symbol
+    s.volume = s.param.volume
+    s.short_k_bars = deque()
+    s.long_k_bars = deque()
+    s._short_bar_buf = []
+    s._long_bar_buf = []
+    s.trading_day = HV_TRADING_DAY
+    s._prev_close = None
+    s._day_open = None
+    s._day_bar_count = 0
+    s._hv_decided = False
+    return s
+
+
+def feed_hv_bar(strategy: RsiStrategy, dt: datetime, open_: float, close: float) -> None:
+    """喂一根M1给策略（高波测试专用）"""
+    bar = make_bar(dt, open_=open_, close=close, symbol="IM2612")
+    asyncio.run(strategy.on_bar(bar))
+
+
+def feed_prev_day_close(strategy: RsiStrategy, close: float) -> None:
+    """喂前一交易日最后一根M1，建立昨收"""
+    feed_hv_bar(strategy, datetime(2026, 11, 20, 14, 59), close, close)
+
+
+def feed_first_15_min(
+    strategy: RsiStrategy, day_open: float, closes: list[float], skip_minutes: tuple[int, ...] = ()
+) -> None:
+    """
+    喂当日09:30-09:44的M1（closes长度15，索引即分钟偏移）
+    skip_minutes 指定跳过的分钟偏移，用于模拟行情缺数
+    """
+    for m in range(15):
+        if m in skip_minutes:
+            continue
+        close = closes[m]
+        feed_hv_bar(
+            strategy,
+            HV_TRADING_DAY.replace(hour=9, minute=30) + timedelta(minutes=m),
+            day_open,
+            close,
+        )
+
+
+@pytest.mark.unit
+class TestHvSide:
+    """高波09:45方向判定纯函数（对接说明定稿口径）"""
+
+    def test_gap_and_move_same_direction_long(self) -> None:
+        assert hv_side(4710.0, 4700.0, 4720.0) == 1
+
+    def test_gap_and_move_same_direction_short(self) -> None:
+        assert hv_side(4690.0, 4700.0, 4680.0) == -1
+
+    def test_rebound_passes_floor_and_recovers_prev_close(self) -> None:
+        # 高开+1回落：回到昨收下方且回撤0.53%>=0.35%，沿回补方向开空
+        assert hv_side(4720.0, 4700.0, 4695.0) == -1
+
+    def test_rebound_not_reaching_prev_close_blocks(self) -> None:
+        # 回落但未回到昨收
+        assert hv_side(4720.0, 4700.0, 4710.0) == 0
+
+    def test_rebound_below_floor_blocks(self) -> None:
+        # 恰好回到昨收但幅度仅0.13%<0.35%
+        assert hv_side(4706.0, 4700.0, 4700.0) == 0
+
+    def test_rebound_exactly_at_floor_opens(self) -> None:
+        # 低开回升：恰好回到昨收且幅度恰好0.35%，边界可开仓
+        assert hv_side(10000.0, 10035.0, 10035.0) == 1
+
+    def test_flat_open_blocks(self) -> None:
+        # 平开（今开==昨收）gap=0
+        assert hv_side(4700.0, 4700.0, 4710.0) == 0
+
+    def test_flat_move_blocks(self) -> None:
+        # 09:45收盘==今开 move=0
+        assert hv_side(4710.0, 4700.0, 4710.0) == 0
+
+
+@pytest.mark.unit
+class TestHvOnBarFlow:
+    """高波模式on_bar流程：09:45开仓、退出规则"""
+
+    def test_am_row_opens_at_0945(self, hv_strategy: RsiStrategy) -> None:
+        """顺跳空：昨收4700/今开4710/09:45收4720 → 09:44 bar收盘即开多"""
+        feed_prev_day_close(hv_strategy, 4700.0)
+        closes = [4705.0 + i for i in range(14)] + [4720.0]
+        feed_first_15_min(hv_strategy, 4710.0, closes)
+
+        assert hv_strategy.signal is not None
+        assert hv_strategy.signal.side == 1
+        assert hv_strategy.signal.entry_price == 4720.0
+        assert hv_strategy.signal.entry_time == time(9, 44)
+
+    def test_pm_row_never_opens(self, hv_strategy: RsiStrategy) -> None:
+        """下午行（trade_start_time=13:30）高波日不开仓"""
+        hv_strategy.param.trade_start_time = time(13, 30)
+        feed_prev_day_close(hv_strategy, 4700.0)
+        closes = [4705.0 + i for i in range(14)] + [4720.0]
+        feed_first_15_min(hv_strategy, 4710.0, closes)
+
+        assert hv_strategy.signal is None
+        assert hv_strategy._hv_decided is True
+
+    def test_incomplete_15min_blocks(self, hv_strategy: RsiStrategy) -> None:
+        """前15分钟缺一根M1（数据不完整）按空仓处理"""
+        feed_prev_day_close(hv_strategy, 4700.0)
+        closes = [4705.0 + i for i in range(15)]
+        feed_first_15_min(hv_strategy, 4710.0, closes, skip_minutes=(5,))
+
+        assert hv_strategy.signal is None
+
+    def test_missing_prev_close_blocks(self, hv_strategy: RsiStrategy) -> None:
+        """无昨收（历史数据缺失）按空仓处理"""
+        closes = [4705.0 + i for i in range(15)]
+        feed_first_15_min(hv_strategy, 4710.0, closes)
+
+        assert hv_strategy.signal is None
+
+    def test_decide_only_once(self, hv_strategy: RsiStrategy) -> None:
+        """09:45判定一次后不再重判：判定空仓后即使行情补齐也不开仓"""
+        feed_prev_day_close(hv_strategy, 4700.0)
+        # 高开回落但未回补昨收：09:45判定为空仓
+        closes = [4710.0 - 0.5 * i for i in range(11)] + [4705.0] * 4
+        feed_first_15_min(hv_strategy, 4710.0, closes)
+        assert hv_strategy.signal is None
+        assert hv_strategy._hv_decided is True
+
+        # 09:45 后价格大幅上冲（若重判将满足顺势条件）
+        feed_hv_bar(hv_strategy, HV_TRADING_DAY.replace(hour=9, minute=45), 4720.0, 4740.0)
+        assert hv_strategy.signal is None
+
+    def test_stop_loss_confirmed_on_5min_close(self, hv_strategy: RsiStrategy) -> None:
+        """止损以完整5分钟K线收盘确认：M1跌破不触发，5分钟bar收盘触发"""
+        feed_prev_day_close(hv_strategy, 4700.0)
+        closes = [4705.0 + i for i in range(14)] + [4720.0]
+        feed_first_15_min(hv_strategy, 4710.0, closes)
+        assert hv_strategy.signal is not None and hv_strategy.signal.side == 1
+
+        # 09:45-09:48 M1收盘已深跌破止损线（4720*0.985=4649.2），未形成5分钟bar不触发
+        for m in range(15, 19):
+            feed_hv_bar(
+                hv_strategy,
+                HV_TRADING_DAY.replace(hour=9, minute=30) + timedelta(minutes=m),
+                4650.0,
+                4640.0,
+            )
+        assert hv_strategy.signal.exit_time is None
+
+        # 09:49 形成09:45-09:49完整5分钟K线，收盘确认止损
+        feed_hv_bar(
+            hv_strategy,
+            HV_TRADING_DAY.replace(hour=9, minute=30) + timedelta(minutes=19),
+            4645.0,
+            4640.0,
+        )
+        assert hv_strategy.signal.exit_reason == "SL"
+        assert hv_strategy.signal.exit_price == 4640.0
+
+    def test_no_take_profit_in_hv_mode(self, hv_strategy: RsiStrategy) -> None:
+        """高波模式无固定止盈：涨幅超take_profit_pct也不平仓"""
+        feed_prev_day_close(hv_strategy, 4700.0)
+        closes = [4705.0 + i for i in range(14)] + [4720.0]
+        feed_first_15_min(hv_strategy, 4710.0, closes)
+
+        # 09:49 5分钟收盘4800，涨幅1.7%>1.5%止盈线，高波模式只查止损
+        for m in range(15, 20):
+            feed_hv_bar(
+                hv_strategy,
+                HV_TRADING_DAY.replace(hour=9, minute=30) + timedelta(minutes=m),
+                4790.0,
+                4800.0,
+            )
+        assert hv_strategy.signal.exit_time is None
+
+    def test_force_exit_kept_in_hv_mode(self, hv_strategy: RsiStrategy) -> None:
+        """高波模式保留14:55强平"""
+        feed_prev_day_close(hv_strategy, 4700.0)
+        closes = [4705.0 + i for i in range(14)] + [4720.0]
+        feed_first_15_min(hv_strategy, 4710.0, closes)
+        assert hv_strategy.signal is not None
+
+        feed_hv_bar(hv_strategy, HV_TRADING_DAY.replace(hour=14, minute=55), 4720.0, 4720.0)
+        assert hv_strategy.signal.exit_reason == "FORCE"
+
+    def test_rsi_open_disabled_in_hv_mode(self, hv_strategy: RsiStrategy) -> None:
+        """高波日停用RSI开仓：即使RSI条件满足也不产生RSI信号"""
+        feed_prev_day_close(hv_strategy, 4700.0)
+        # 构造单边上涨满足RSI多头条件
+        closes = [4700.0 + i * 2 for i in range(15)]
+        feed_first_15_min(hv_strategy, 4701.0, closes)
+
+        # 信号若产生只可能来自09:45判定（顺跳空做多）
+        assert hv_strategy.signal is not None
+        assert hv_strategy.signal.side == 1
+        assert hv_strategy.signal.entry_time == time(9, 44)  # 09:44判定，非RSI路径
+
+    def test_mode0_keeps_rsi_path(self, hv_strategy: RsiStrategy) -> None:
+        """mode=0沿用RSI：09:44不触发高波判定"""
+        hv_strategy.param.mode = 0
+        feed_prev_day_close(hv_strategy, 4700.0)
+        closes = [4705.0 + i for i in range(15)]
+        feed_first_15_min(hv_strategy, 4710.0, closes)
+
+        assert hv_strategy.signal is None
+        assert hv_strategy._hv_decided is False
+
+
+@pytest.mark.unit
+class TestHvParams:
+    """高波模式参数加载"""
+
+    def test_mode_string_coerced_by_pydantic(self) -> None:
+        param = RsiParam(mode="1")
+        assert param.mode == 1
+
+    def test_mode_default_zero(self) -> None:
+        assert RsiParam().mode == 0
+
+    def test_update_params_mode_string_converted(self, hv_strategy: RsiStrategy) -> None:
+        hv_strategy.update_params({"mode": "0"})
+        assert hv_strategy.param.mode == 0
+        assert hv_strategy.config.params["mode"] == 0

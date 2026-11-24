@@ -10,6 +10,7 @@ RSI 可执行策略
 5. 强制平仓时间平仓
 """
 
+import contextlib
 from collections import deque
 from datetime import datetime, time
 from typing import Any
@@ -30,6 +31,12 @@ logger = get_logger(__name__)
 # 数值计算精度控制
 EPS = 1e-12
 
+# 高波模式（mode=1）常量
+HV_ENTRY_BAR_TIME = time(9, 44)  # 09:45收盘对应的M1（其收盘价即09:45时点价格）
+HV_MIN_BARS = 15  # 前15分钟完整M1根数
+HV_REBOUND_MIN_RET = 0.0035  # 反向回补幅度下限0.35%
+HV_PM_CUTOFF = time(12, 0)  # 上午/下午行分界
+
 
 class RsiParam(BaseParam):
     """RSI策略参数"""
@@ -48,6 +55,8 @@ class RsiParam(BaseParam):
     # 外部信号过滤
     dir_thr: float = Field(default=0.0, title="方向阈值")  # 信号方向阈值
     used_signal: int = Field(default=0, title="外部信号")  # 外部信号
+    # 日内模式：0=普通日RSI，1=高波日开盘动量（09:45判定）
+    mode: int = Field(default=0, title="日内模式")
 
 
 class RsiStrategy(BaseStrategy):
@@ -75,6 +84,12 @@ class RsiStrategy(BaseStrategy):
         self._long_bar_buf: list[BarData] = []  # 长周期K线缓存
         self._short_bar_buf: list[BarData] = []  # 短周期K线缓存
 
+        # 高波模式（mode=1）状态
+        self._prev_close: float | None = None  # 昨收（前一交易日最后一根M1收盘）
+        self._day_open: float | None = None  # 今开（当日第一根M1开盘价）
+        self._day_bar_count: int = 0  # 当日已收到的M1根数
+        self._hv_decided: bool = False  # 09:45开仓判断是否已完成（每交易日一次）
+
         # 创建RsiParam实例
         if self.config.params and len(self.config.params) > 0:
             self.param: RsiParam = RsiParam(**self.config.params)
@@ -91,6 +106,9 @@ class RsiStrategy(BaseStrategy):
         hist_bars = await self.load_hist_bars(self.symbol, hist_start, self.trading_day)
         for bar in hist_bars:
             self._resample_kline(bar)
+            self._track_hv_bar(bar)
+        if self.param.mode == 1 and self._prev_close is not None:
+            logger.info(f"策略 [{self.strategy_id}] 昨收(高波口径): {self._prev_close}")
 
         self.inited = True
         logger.info(f"策略 [{self.strategy_id}] 初始化完成")
@@ -106,6 +124,10 @@ class RsiStrategy(BaseStrategy):
         for key in ["trade_start_time", "trade_end_time", "force_exit_time", "day_start"]:
             if key in params and isinstance(params[key], str):
                 params[key] = _parse_time(params[key])
+        # mode 从CSV/API传入可能是字符串
+        if "mode" in params and isinstance(params["mode"], str):
+            with contextlib.suppress(ValueError):
+                params["mode"] = int(params["mode"])
         super().update_params(params)
 
     def _on_symbol_changed(self, old_symbol: str) -> None:
@@ -114,6 +136,10 @@ class RsiStrategy(BaseStrategy):
         self.long_k_bars.clear()
         self._long_bar_buf.clear()
         self._short_bar_buf.clear()
+        # 高波价格基准基于老合约行情，清理后新合约数据不足时按缺数空仓处理
+        self._prev_close = None
+        self._day_open = None
+        self._day_bar_count = 0
         logger.info(
             f"策略 [{self.strategy_id}] 已清理老合约 {old_symbol} 的K线缓存，"
             f"新合约 {self.symbol} 将重新累积指标数据"
@@ -138,59 +164,173 @@ class RsiStrategy(BaseStrategy):
             )
             # 重新生成K线
             short_bar, long_bar = self._resample_kline(bar)
-
             bar_time = bar.datetime.time()
-            # 强制平仓检查（使用原始K线时间）
-            if (
-                self.signal
-                and self.signal.side != 0
-                and not self.signal.exit_time
-                and bar_time >= self.param.force_exit_time
-            ):
-                self.signal.exit_price = bar.close_price
+            # 强制平仓检查（使用原始K线时间，两模式共用）
+            self._apply_force_exit(bar_time, bar.close_price)
+
+            if self.param.mode == 1:
+                await self._on_bar_high_vol(bar, bar_time, short_bar)
+            else:
+                await self._on_bar_rsi(bar, bar_time, short_bar)
+        except Exception:
+            logger.exception("策略 [{}] on_bar 异常", self.strategy_id)
+
+    def _apply_force_exit(self, bar_time: time, close_price: float) -> None:
+        """强平检查：到达强平时间且信号未结束时强制结束信号"""
+        if (
+            self.signal
+            and self.signal.side != 0
+            and not self.signal.exit_time
+            and bar_time >= self.param.force_exit_time
+        ):
+            self.signal.exit_price = close_price
+            self.signal.exit_time = bar_time
+            self.signal.exit_reason = "FORCE"
+            logger.info(f"策略 [{self.strategy_id}] 信号结束: {self.signal}")
+
+    async def _on_bar_high_vol(
+        self, bar: BarData, bar_time: time, short_bar: BarData | None
+    ) -> None:
+        """
+        高波模式（mode=1）bar处理：停用RSI开仓，09:45开盘动量判断，
+        无固定止盈，止损以完整5分钟K线收盘确认
+        """
+        self._track_hv_bar(bar)
+
+        # 止损检查：仅在完整5分钟K线形成时以收盘价确认
+        if (
+            self.signal
+            and self.signal.side != 0
+            and not self.signal.exit_time
+            and short_bar is not None
+        ):
+            exit_reason = self._check_hv_exit_conditions(short_bar.close_price, self.signal)
+            if exit_reason:
+                self.signal.exit_price = short_bar.close_price
                 self.signal.exit_time = bar_time
-                self.signal.exit_reason = "FORCE"
+                self.signal.exit_reason = exit_reason
                 logger.info(f"策略 [{self.strategy_id}] 信号结束: {self.signal}")
 
-            # 止盈止损检查
-            if self.signal and self.signal.side != 0 and not self.signal.exit_time:
-                exit_reason = self._check_exit_conditions(bar.close_price, self.signal)
-                if exit_reason:
-                    self.signal.exit_price = bar.close_price
-                    self.signal.exit_time = bar_time
-                    self.signal.exit_reason = exit_reason
-                    logger.info(f"策略 [{self.strategy_id}] 信号结束: {self.signal}")
+        if self.signal:
+            # 已经有信号了，当天不再产生新信号了
+            return
 
-            if self.signal:
-                # 已经有信号了，当天不再产生新信号了
-                return
-
-            # 每次产生新的short_bar，进行后续信号计算
-            if short_bar is None:
-                return
-
-            # 检查交易窗口（使用重采样后的短K线时间）
-            if not (
-                self.param.trade_start_time <= short_bar.datetime.time() < self.param.trade_end_time
-            ):
-                return
-
-            # 计算RSI并生成信号
-            side = self._generate_signal()
-            # 检查信号有效性
-            if side == 0 or not self._check_external_signal_filter(side):
-                return
-
-            # 记录信号
+        # 09:45开盘动量判断（每品种每日最多一笔）
+        side = self._try_hv_entry(bar)
+        if side != 0:
             self.signal = Signal(
                 side=side,
                 entry_price=bar.close_price,
                 entry_time=bar_time,
                 entry_volume=self.volume,
             )
-            logger.info(f"策略 [{self.strategy_id}] 信号开始: {self.signal}")
-        except Exception:
-            logger.exception("策略 [{}] on_bar 异常", self.strategy_id)
+            logger.info(f"策略 [{self.strategy_id}] 高波信号开始: {self.signal}")
+
+    async def _on_bar_rsi(self, bar: BarData, bar_time: time, short_bar: BarData | None) -> None:
+        """普通日RSI模式（mode=0）bar处理：原有RSI信号路径"""
+        # 止盈止损检查
+        if self.signal and self.signal.side != 0 and not self.signal.exit_time:
+            exit_reason = self._check_exit_conditions(bar.close_price, self.signal)
+            if exit_reason:
+                self.signal.exit_price = bar.close_price
+                self.signal.exit_time = bar_time
+                self.signal.exit_reason = exit_reason
+                logger.info(f"策略 [{self.strategy_id}] 信号结束: {self.signal}")
+
+        if self.signal:
+            # 已经有信号了，当天不再产生新信号了
+            return
+
+        # 每次产生新的short_bar，进行后续信号计算
+        if short_bar is None:
+            return
+
+        # 检查交易窗口（使用重采样后的短K线时间）
+        if not (
+            self.param.trade_start_time <= short_bar.datetime.time() < self.param.trade_end_time
+        ):
+            return
+
+        # 计算RSI并生成信号
+        side = self._generate_signal()
+        # 检查信号有效性
+        if side == 0 or not self._check_external_signal_filter(side):
+            return
+
+        # 记录信号
+        self.signal = Signal(
+            side=side,
+            entry_price=bar.close_price,
+            entry_time=bar_time,
+            entry_volume=self.volume,
+        )
+        logger.info(f"策略 [{self.strategy_id}] 信号开始: {self.signal}")
+
+    def _track_hv_bar(self, bar: BarData) -> None:
+        """追踪高波模式所需行情：昨收候选、今开、当日M1计数"""
+        if self.trading_day and bar.datetime.date() == self.trading_day.date():
+            if self._day_open is None and bar.datetime.time() == self.param.day_start:
+                self._day_open = bar.open_price
+            self._day_bar_count += 1
+        else:
+            # 历史交易日按时间升序持续刷新，最终保留前一交易日最后一根M1收盘
+            self._prev_close = bar.close_price
+
+    def _try_hv_entry(self, bar: BarData) -> int:
+        """
+        高波日09:45开盘动量开仓判断（每交易日仅判断一次）
+
+        Args:
+            bar: 当前M1 K线
+
+        Returns:
+            signal: 交易方向 (1开多, -1开空, 0不开仓)
+        """
+        if self._hv_decided or bar.datetime.time() != HV_ENTRY_BAR_TIME:
+            return 0
+        self._hv_decided = True
+
+        if self.param.trade_start_time >= HV_PM_CUTOFF:
+            logger.info(f"策略 [{self.strategy_id}] 高波日下午行不开仓")
+            return 0
+
+        if self._prev_close is None or self._day_open is None or self._day_bar_count < HV_MIN_BARS:
+            logger.warning(
+                f"策略 [{self.strategy_id}] 高波判断数据不足，按空仓处理: "
+                f"昨收={self._prev_close}, 今开={self._day_open}, 当日M1数={self._day_bar_count}"
+            )
+            return 0
+
+        side = hv_side(self._day_open, self._prev_close, bar.close_price)
+        logger.info(
+            f"策略 [{self.strategy_id}] 高波09:45判定: 昨收={self._prev_close}, "
+            f"今开={self._day_open}, 09:45收盘={bar.close_price}, 方向={side}"
+        )
+        return side
+
+    def _check_hv_exit_conditions(self, current_price: float, signal: Signal) -> str | None:
+        """
+        高波模式退出检查：无固定止盈，仅按品种止损率检查止损（5分钟K线收盘确认）
+
+        Args:
+            current_price: 完整5分钟K线收盘价
+            signal: 当前信号
+
+        Returns:
+            退出原因 ("SL"/None)
+        """
+        open_price = signal.entry_price or current_price
+        if signal.side == 1:
+            profit_pct = (current_price - open_price) / open_price
+        else:
+            profit_pct = (open_price - current_price) / open_price
+        if profit_pct <= -self.param.stop_loss_pct:
+            logger.info(
+                f"策略 [{self.strategy_id}] 高波止损: 当前价格={current_price:.2f}, "
+                f"开仓价格={open_price:.2f}, 亏损率={profit_pct:.4f}"
+            )
+            return "SL"
+        return None
 
     def _resample_kline(self, bar: BarData) -> tuple[BarData | None, BarData | None]:
         """
@@ -374,6 +514,42 @@ class RsiStrategy(BaseStrategy):
                 return "SL"
 
         return None
+
+
+def _sign(x: float) -> int:
+    """符号函数：返回 -1、0 或 1"""
+    if x > 0:
+        return 1
+    if x < 0:
+        return -1
+    return 0
+
+
+def hv_side(open_px: float, prev_close: float, close_0945: float) -> int:
+    """
+    高波日09:45开盘动量方向（对接说明定稿口径）
+
+    跳空方向与前15分钟方向同向时顺势开仓；反向时须同时满足
+    09:45价格已回到或越过昨收、且前15分钟绝对涨跌幅不低于0.35%，
+    才沿回补方向开仓；其他情况空仓。
+
+    Args:
+        open_px: 当日开盘价
+        prev_close: 昨收价
+        close_0945: 09:45收盘价（前15分钟K线收盘）
+
+    Returns:
+        方向 (1做多, -1做空, 0空仓)
+    """
+    gap = _sign(open_px - prev_close)
+    move = _sign(close_0945 - open_px)
+    abs_ret15 = abs(close_0945 / open_px - 1)
+
+    if gap * move > 0:
+        return move
+    if gap * move < 0 and move * (close_0945 - prev_close) >= 0 and abs_ret15 >= HV_REBOUND_MIN_RET:
+        return move
+    return 0
 
 
 def roll_mean_right(values: list[float], n: int) -> float:
