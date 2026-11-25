@@ -105,7 +105,7 @@
                   ¥{{ formatNumber(acc.today_profit || 0) }}
                 </div>
               </div>
-              <div class="account-stat">
+              <div class="account-stat rotation-stat" @click.stop="goToRotation(acc)">
                 <div class="account-stat-label">换仓进度</div>
                 <div class="account-stat-value" :class="isRotationCompleted(acc) ? 'profit' : ''">
                   {{ getRotationProgressText(acc) }}
@@ -260,6 +260,15 @@ async function handleCardClick(acc: Account, e: MouseEvent) {
   }
   await handleSelectAccount(acc.account_id)
   router.push('/account')
+}
+
+// 点击换仓进度：选中账户并进入换仓页
+async function goToRotation(acc: Account) {
+  if (!canViewDetails(acc)) {
+    return
+  }
+  await handleSelectAccount(acc.account_id)
+  router.push('/rotation')
 }
 
 async function loadAlarmStats() {
@@ -579,6 +588,19 @@ function isRotationCompleted(acc: Account): boolean {
   font-size: 15px;
   font-weight: 600;
   color: #303133;
+}
+
+/* 换仓进度行可点击跳转换仓页 */
+.rotation-stat {
+  cursor: pointer;
+  padding: 2px 4px;
+  margin: -2px -4px;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+
+.rotation-stat:hover {
+  background-color: #f5f7fa;
 }
 
 /* 移动端适配 */
