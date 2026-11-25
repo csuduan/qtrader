@@ -92,12 +92,13 @@ class TestExportPositions:
 
     def test_no_positions_exports_empty_file(self, job, app_paths):
         """无持仓时也导出仅含表头的空文件"""
-        job._export_positions_to_csv()
+        file_path = job._export_positions_to_csv()
 
         from pathlib import Path
 
         files = list(Path(app_paths.export).glob("position-DQ-*.csv"))
         assert len(files) == 1
+        assert file_path == str(files[0])
         with open(files[0], encoding="gbk") as f:
             rows = list(csv.DictReader(f))
         assert rows == []

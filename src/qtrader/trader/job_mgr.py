@@ -70,16 +70,17 @@ class JobManager:
             logger.info("交易引擎已断开，跳过盘后断开连接任务")
 
     @logger.catch(message="盘后导出持仓任务执行失败")
-    async def post_market_export(self) -> None:
-        """盘后导出持仓"""
+    async def post_market_export(self) -> str | None:
+        """盘后导出持仓，返回导出文件路径"""
         logger.info("开始执行盘后导出持仓任务")
         # 文件IO轻任务，走默认线程池
-        await submit_task(self._export_positions_to_csv)
+        file_path = await submit_task(self._export_positions_to_csv)
         logger.info("盘后导出持仓任务完成")
+        return file_path
 
     @logger.catch(message="导出持仓到CSV失败")
-    def _export_positions_to_csv(self) -> None:
-        """导出持仓到CSV文件"""
+    def _export_positions_to_csv(self) -> str | None:
+        """导出持仓到CSV文件，返回文件路径"""
         # 从内存获取所有持仓
         positions = self.trading_engine.positions
         if not positions:
@@ -124,6 +125,7 @@ class JobManager:
                     }
                     writer.writerow(row)
         logger.info(f"持仓已导出到: {file_path}")
+        return str(file_path)
 
     def test_log(self) -> None:
         """测试日志任务（每5秒执行）"""

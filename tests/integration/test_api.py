@@ -203,6 +203,47 @@ class TestPositionAPI:
         assert body["data"][0]["symbol"] == "SHFE.rb2505"
         assert body["data"][0]["account_id"] == "DQ"
 
+    def test_export_positions(self, client, mock_trading_manager):
+        trader = MagicMock()
+        trader.export_positions = AsyncMock(
+            return_value={
+                "success": True,
+                "message": "持仓导出成功",
+                "file_path": "/data/export/position-DQ-20260901.csv",
+            }
+        )
+        mock_trading_manager.get_trader = MagicMock(return_value=trader)
+
+        resp = client.post("/api/position/export", params={"account_id": "DQ"})
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["code"] == 0
+        assert body["data"]["file_path"] == "/data/export/position-DQ-20260901.csv"
+        assert "持仓已导出" in body["message"]
+        trader.export_positions.assert_awaited_once()
+
+    def test_export_positions_account_not_found(self, client, mock_trading_manager):
+        mock_trading_manager.get_trader = MagicMock(return_value=None)
+
+        resp = client.post("/api/position/export", params={"account_id": "XX"})
+
+        assert resp.status_code == 400
+        assert resp.json()["code"] == 404
+        assert "不存在" in resp.json()["message"]
+
+    def test_export_positions_failed(self, client, mock_trading_manager):
+        trader = MagicMock()
+        trader.export_positions = AsyncMock(
+            return_value={"success": False, "message": "未连接到Trader"}
+        )
+        mock_trading_manager.get_trader = MagicMock(return_value=trader)
+
+        resp = client.post("/api/position/export", params={"account_id": "DQ"})
+
+        assert resp.status_code == 400
+        assert "未连接到Trader" in resp.json()["message"]
+
 
 @pytest.mark.integration
 class TestOrderAPI:

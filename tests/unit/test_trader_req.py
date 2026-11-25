@@ -437,9 +437,19 @@ class TestTradingControlHandlers:
 
     @pytest.mark.asyncio
     async def test_export_positions(self, mock_trader, handler):
-        mock_trader.job_manager.post_market_export = AsyncMock()
+        mock_trader.job_manager.post_market_export = AsyncMock(
+            return_value="/data/export/position-DQ-20260901.csv"
+        )
         result = await handler._req_export_positions({})
         assert result["success"] is True
+        assert result["file_path"] == "/data/export/position-DQ-20260901.csv"
+
+    @pytest.mark.asyncio
+    async def test_export_positions_failed(self, mock_trader, handler):
+        """导出异常（logger.catch 吞掉后返回 None）视为失败"""
+        mock_trader.job_manager.post_market_export = AsyncMock(return_value=None)
+        result = await handler._req_export_positions({})
+        assert result["success"] is False
 
     @pytest.mark.asyncio
     async def test_export_positions_no_job_manager(self, mock_trader, handler):

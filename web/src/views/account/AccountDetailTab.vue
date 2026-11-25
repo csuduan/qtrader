@@ -63,6 +63,10 @@
             >
               平仓
             </el-button>
+            <el-button @click="handleExportPositions" :loading="exportLoading">
+              <el-icon><Download /></el-icon>
+              导出
+            </el-button>
             <el-button @click="emit('refreshPositions')" :loading="loading">
               <el-icon><Refresh /></el-icon>
               刷新
@@ -145,7 +149,9 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ElMessage } from 'element-plus'
 import { useStore } from '@/stores'
+import { positionApi } from '@/api'
 import type { Position } from '@/types'
 
 const store = useStore()
@@ -176,6 +182,25 @@ const closablePositions = computed(() => {
 
 function handleSelectionChange(selection: Position[]) {
   selectedPositions.value = selection
+}
+
+/** 导出当前账户持仓（与收盘后定时任务同一导出位置） */
+const exportLoading = ref(false)
+async function handleExportPositions() {
+  const accountId = store.currentAccount?.account_id
+  if (!accountId) {
+    ElMessage.warning('未选择账户')
+    return
+  }
+  exportLoading.value = true
+  try {
+    const result = await positionApi.exportPositions(accountId)
+    ElMessage.success(`持仓已导出: ${result.file_path || 'export目录'}`)
+  } catch (error: any) {
+    ElMessage.error(`导出持仓失败: ${error.message}`)
+  } finally {
+    exportLoading.value = false
+  }
 }
 
 const isMobile = ref(false)

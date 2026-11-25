@@ -22,6 +22,13 @@ export const positionApi = {
   },
 
   /**
+   * 导出持仓到CSV（与收盘后定时任务同一导出位置）
+   */
+  exportPositions: async (accountId: string): Promise<{ success: boolean; message: string; file_path?: string }> => {
+    return api.post('/position/export', undefined, { params: { account_id: accountId } })
+  },
+
+  /**
    * 平仓
    */
   closePosition: async (data: {

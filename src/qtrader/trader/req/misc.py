@@ -29,8 +29,10 @@ class MiscReqHandler(BaseReqHandler):
             return {"success": False, "message": "作业管理器未初始化"}
 
         try:
-            await self.trader.job_manager.post_market_export()
-            return {"success": True, "message": "持仓导出成功"}
+            file_path = await self.trader.job_manager.post_market_export()
+            if file_path is None:
+                return {"success": False, "message": "导出失败，详见Trader日志"}
+            return {"success": True, "message": "持仓导出成功", "file_path": file_path}
         except Exception as e:
             logger.exception("Trader [{}] 导出持仓失败", self.account_id)
             return {"success": False, "message": f"导出失败: {e}"}

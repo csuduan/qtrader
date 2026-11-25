@@ -144,6 +144,36 @@ async def get_position_by_symbol(
         return error_response(code=500, message=f"获取指定合约持仓失败: {e}")
 
 
+@router.post("/export")
+async def export_positions(
+    account_id: str = Query(..., description="账户ID"),
+    trading_manager: TradingManager = Depends(get_trading_manager),
+) -> Response:
+    """
+    导出持仓到CSV（与收盘后定时任务同一导出位置和格式）
+
+    通过Trader进程将当前持仓写入 export 目录的 position-{账户}-{日期}.csv
+
+    - **account_id**: 账户ID
+    """
+    trader = trading_manager.get_trader(account_id)
+    if not trader:
+        return error_response(code=404, message=f"账户 [{account_id}] 不存在")
+
+    try:
+        result = await trader.export_positions()
+    except Exception as e:
+        logger.exception("导出账户 [{}] 持仓失败", account_id)
+        return error_response(code=500, message=f"导出持仓失败: {e}")
+
+    if not result.get("success"):
+        return error_response(
+            code=500, message=f"导出持仓失败: {result.get('message', '未知错误')}"
+        )
+
+    return success_response(data=result, message=f"持仓已导出: {result.get('file_path', '')}")
+
+
 @router.post("/close")
 async def close_position(
     request: dict[str, Any],
