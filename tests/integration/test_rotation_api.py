@@ -523,6 +523,56 @@ class TestBatchDeleteInstructions:
 
 
 @pytest.mark.integration
+class TestBatchSetEnabled:
+    """批量启用/禁用换仓指令 POST /api/rotation/batch/enable"""
+
+    def test_enable_success(self, client, mock_trading_manager):
+        mock_trading_manager.batch_set_enabled = AsyncMock(return_value={"updated": 2})
+
+        resp = client.post(
+            f"{BASE}/batch/enable",
+            params={"account_id": ACCOUNT},
+            json={"ids": [1, 2], "enabled": True},
+        )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["code"] == 0
+        assert body["message"] == "启用成功"
+        assert body["data"] == {"updated": 2}
+        mock_trading_manager.batch_set_enabled.assert_awaited_once_with(ACCOUNT, [1, 2], True)
+
+    def test_disable_success(self, client, mock_trading_manager):
+        mock_trading_manager.batch_set_enabled = AsyncMock(return_value={"updated": 1})
+
+        resp = client.post(
+            f"{BASE}/batch/enable",
+            params={"account_id": ACCOUNT},
+            json={"ids": [3], "enabled": False},
+        )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["code"] == 0
+        assert body["message"] == "禁用成功"
+        mock_trading_manager.batch_set_enabled.assert_awaited_once_with(ACCOUNT, [3], False)
+
+    def test_set_enabled_failed(self, client, mock_trading_manager):
+        mock_trading_manager.batch_set_enabled = AsyncMock(return_value=None)
+
+        resp = client.post(
+            f"{BASE}/batch/enable",
+            params={"account_id": ACCOUNT},
+            json={"ids": [1], "enabled": True},
+        )
+
+        assert resp.status_code == 400
+        body = resp.json()
+        assert body["code"] == 9999
+        assert body["message"] == "操作失败"
+
+
+@pytest.mark.integration
 class TestRotationControl:
     """换仓流程控制 POST /api/rotation/start|stop|close-all"""
 

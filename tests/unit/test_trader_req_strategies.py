@@ -698,3 +698,20 @@ class TestRotationHandlers:
     @pytest.mark.asyncio
     async def test_batch_delete_without_manager(self, handler):
         assert await handler._req_batch_delete_instructions({"ids": [1, 2]}) == {"deleted": 0}
+
+    @pytest.mark.asyncio
+    async def test_batch_set_enabled(self, mock_trader, handler):
+        spm = MagicMock()
+        spm.batch_set_enabled = AsyncMock()
+        mock_trader.switchPos_manager = spm
+
+        result = await handler._req_batch_set_enabled({"ids": [1, 2], "enabled": True})
+
+        assert result == {"updated": 2}
+        spm.batch_set_enabled.assert_awaited_once_with([1, 2], True)
+
+    @pytest.mark.asyncio
+    async def test_batch_set_enabled_without_manager(self, handler):
+        result = await handler._req_batch_set_enabled({"ids": [1], "enabled": False})
+
+        assert result == {"updated": 0}

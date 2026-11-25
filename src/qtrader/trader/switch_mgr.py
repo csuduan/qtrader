@@ -137,6 +137,22 @@ class SwitchPosManager:
                 .values(is_deleted=True)
             )
 
+    async def batch_set_enabled(self, ids: list[int], enabled: bool) -> None:
+        """批量启用/禁用换仓指令"""
+        now = datetime.now()
+        id_set = set(ids)
+        for instruction in self.all_instructions:
+            if instruction.id in id_set:
+                instruction.enabled = enabled
+                instruction.updated_at = now
+        # 更新数据库
+        async with get_async_session() as session:
+            await session.execute(
+                update(RotationInstructionPo)
+                .where(RotationInstructionPo.id.in_(ids))
+                .values(enabled=enabled, updated_at=now)
+            )
+
     async def load_rotation_instructions(self) -> None:
         """加载所有换仓指令"""
         try:

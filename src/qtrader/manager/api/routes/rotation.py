@@ -502,6 +502,36 @@ async def batch_delete_instructions(
         return error_response(message=f"批量删除换仓指令失败: {e}")
 
 
+class BatchEnableRequest(BaseModel):
+    """批量启用/禁用请求"""
+
+    ids: list[int]
+    enabled: bool
+
+
+@router.post("/batch/enable")
+async def batch_set_enabled(
+    request: BatchEnableRequest,
+    account_id: str = Query(..., description="账户ID"),
+    trading_manager: TradingManager = Depends(get_trading_manager),
+) -> Response:
+    """
+    批量启用/禁用换仓指令
+
+    - **account_id**: 账户ID
+    - **request**: 包含指令ID列表和目标状态的请求体
+    """
+    try:
+        result = await trading_manager.batch_set_enabled(account_id, request.ids, request.enabled)
+        if result is None:
+            return error_response(message="操作失败")
+        action = "启用" if request.enabled else "禁用"
+        return success_response(data=result, message=f"{action}成功")
+    except Exception as e:
+        logger.exception("批量启用/禁用换仓指令失败")
+        return error_response(message=f"批量启用/禁用换仓指令失败: {e}")
+
+
 @router.post("/start")
 async def start_rotation(
     account_id: str = Query(..., description="账户ID"),

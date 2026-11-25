@@ -168,6 +168,17 @@ class RotationBackend:
                 route, {"code": 0, "message": "ok", "data": {"deleted": len(body.get("ids", []))}}
             )
 
+        if path == "/api/rotation/batch/enable" and method == "POST":
+            body = json.loads(request.post_data or "{}")
+            enabled = bool(body.get("enabled", False))
+            for iid in body.get("ids", []):
+                inst = self.instructions.get(int(iid))
+                if inst:
+                    inst["enabled"] = enabled
+            return self._json(
+                route, {"code": 0, "message": "ok", "data": {"updated": len(body.get("ids", []))}}
+            )
+
         # 其余账户/系统类接口返回空态，保证页面可渲染
         return self._json(route, {"code": 0, "message": "ok", "data": {}})
 
@@ -375,14 +386,15 @@ class TestRotationExecution:
         assert ("POST", "/api/rotation/stop") in backend.requests
 
     def test_batch_delete_selected(self, rotation_page: Page):
-        """勾选多条指令 → 批量删除 → 确认 → 列表移除"""
+        """勾选多条指令 → 选中操作下拉 → 批量删除 → 确认 → 列表移除"""
         table = rotation_page.get_by_test_id("rotation-instructions-table")
         # 勾选第1、2行
         rows = table.locator("tbody tr")
         rows.nth(0).locator(".el-checkbox").click()
         rows.nth(1).locator(".el-checkbox").click()
 
-        rotation_page.get_by_role("button", name=re.compile("删除选中")).click()
+        rotation_page.get_by_test_id("batch-actions-btn").click()
+        rotation_page.get_by_role("menuitem", name=re.compile("删除选中")).click()
         confirm = rotation_page.get_by_role("dialog").filter(has_text="确认删除")
         confirm.get_by_role("button", name="OK").click()
 
@@ -391,6 +403,37 @@ class TestRotationExecution:
         assert 1 not in backend.instructions
         assert 2 not in backend.instructions
         expect(table).not_to_contain_text("SHFE.rb2505")
+
+    def test_batch_enable_selected(self, rotation_page: Page):
+        """勾选禁用态指令 → 选中操作下拉 → 批量启用 → 开关置为启用"""
+        table = rotation_page.get_by_test_id("rotation-instructions-table")
+        # 第5行初始 enabled=False
+        rows = table.locator("tbody tr")
+        rows.nth(4).locator(".el-checkbox").click()
+
+        rotation_page.get_by_test_id("batch-actions-btn").click()
+        rotation_page.get_by_role("menuitem", name=re.compile("启用选中")).click()
+
+        backend = rotation_page._rotation_backend
+        assert ("POST", "/api/rotation/batch/enable") in backend.requests
+        assert backend.instructions[5]["enabled"] is True
+        # 列表刷新后开关为启用态
+        expect(rows.nth(4).locator(".el-switch.is-checked")).to_be_visible()
+
+    def test_batch_disable_selected(self, rotation_page: Page):
+        """勾选启用态指令 → 选中操作下拉 → 批量禁用 → 开关关闭"""
+        table = rotation_page.get_by_test_id("rotation-instructions-table")
+        # 第1行初始 enabled=True
+        rows = table.locator("tbody tr")
+        rows.nth(0).locator(".el-checkbox").click()
+
+        rotation_page.get_by_test_id("batch-actions-btn").click()
+        rotation_page.get_by_role("menuitem", name=re.compile("禁用选中")).click()
+
+        backend = rotation_page._rotation_backend
+        assert ("POST", "/api/rotation/batch/enable") in backend.requests
+        assert backend.instructions[1]["enabled"] is False
+        expect(rows.nth(0).locator(".el-switch:not(.is-checked)")).to_be_visible()
 
     def test_import_dialog_flow(self, rotation_page: Page):
         """导入CSV对话框：打开 → 模式选择 → 取消（不实际上传）"""

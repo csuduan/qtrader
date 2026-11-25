@@ -184,4 +184,14 @@ class RotationReqHandler(BaseReqHandler):
         await self.trader.switchPos_manager.delete_instruction(ids)
         return {"deleted": len(ids)}
 
+    @request("batch_set_enabled")
+    async def _req_batch_set_enabled(self, data: dict[str, Any]) -> dict[str, Any]:
+        """处理批量启用/禁用换仓指令请求"""
+        ids = data.get("ids", [])
+        enabled = bool(data.get("enabled", False))
+        if self.trader.switchPos_manager is None:
+            return {"updated": 0}
+        await self.trader.switchPos_manager.batch_set_enabled(ids, enabled)
+        return {"updated": len(ids)}
+
     # ========== 目标仓位比对请求处理 ==========

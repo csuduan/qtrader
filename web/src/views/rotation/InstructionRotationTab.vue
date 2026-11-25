@@ -35,17 +35,34 @@
               <el-icon><CircleClose /></el-icon>
               停止换仓
             </el-button>
-            <el-button
-              @click="handleBatchDelete"
-              :loading="batchDeleting"
-              :disabled="
-                selectedInstructions.length === 0 || rotationStatus.working
-              "
-              type="danger"
-            >
-              <el-icon><Delete /></el-icon>
-              删除选中
-            </el-button>
+            <el-dropdown trigger="click" @command="handleSelectedCommand">
+              <el-button
+                :loading="batchDeleting || batchOperating"
+                :disabled="
+                  selectedInstructions.length === 0 || rotationStatus.working
+                "
+                data-testid="batch-actions-btn"
+              >
+                批量操作
+                <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="enable">
+                    <el-icon><CircleCheck /></el-icon>
+                    启用选中
+                  </el-dropdown-item>
+                  <el-dropdown-item command="disable">
+                    <el-icon><CircleClose /></el-icon>
+                    禁用选中
+                  </el-dropdown-item>
+                  <el-dropdown-item command="delete" divided>
+                    <el-icon><Delete /></el-icon>
+                    删除选中
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
             <el-button
               data-testid="rotation-import-btn"
               @click="showImportDialog = true"
@@ -603,6 +620,40 @@ async function handleBatchDelete() {
     }
   } finally {
     batchDeleting.value = false;
+  }
+}
+
+/** 选中操作下拉分发 */
+async function handleSelectedCommand(command: string) {
+  if (command === "delete") {
+    await handleBatchDelete();
+  } else {
+    await handleBatchSetEnabled(command === "enable");
+  }
+}
+
+/** 批量启用/禁用选中指令 */
+const batchOperating = ref(false);
+async function handleBatchSetEnabled(enabled: boolean) {
+  if (selectedInstructions.value.length === 0) {
+    ElMessage.warning("请先选择要操作的指令");
+    return;
+  }
+  if (!store.selectedAccountId) {
+    ElMessage.error("请先选择账户");
+    return;
+  }
+
+  try {
+    batchOperating.value = true;
+    const ids = selectedInstructions.value.map((item) => item.id);
+    await rotationApi.batchSetEnabled(ids, enabled, store.selectedAccountId);
+    ElMessage.success(enabled ? "启用成功" : "禁用成功");
+    await loadData();
+  } catch (error: any) {
+    ElMessage.error(`操作失败: ${error.message}`);
+  } finally {
+    batchOperating.value = false;
   }
 }
 

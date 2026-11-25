@@ -75,6 +75,13 @@ export const rotationApi = {
   },
 
   /**
+   * 批量启用/禁用换仓指令
+   */
+  batchSetEnabled: async (ids: number[], enabled: boolean, accountId: string): Promise<{ updated: number }> => {
+    return await api.post<{ updated: number }>('/rotation/batch/enable', { ids, enabled }, { params: { account_id: accountId } })
+  },
+
+  /**
    * 启动换仓流程
    */
   startRotation: async (accountId: string): Promise<void> => {

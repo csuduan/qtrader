@@ -876,6 +876,18 @@ class TradingManager:
             return result if isinstance(result, dict) else None
         return None
 
+    async def batch_set_enabled(
+        self, account_id: str, ids: list[int], enabled: bool
+    ) -> dict[str, Any] | None:
+        """批量启用/禁用换仓指令"""
+        trader = self.traders.get(account_id)
+        if trader:
+            result: Any = await trader.send_request(
+                "batch_set_enabled", {"ids": ids, "enabled": enabled}
+            )
+            return result if isinstance(result, dict) else None
+        return None
+
     # ==================== 目标仓位比对接口 ====================
 
     async def get_target_comparison(self, account_id: str) -> dict[str, Any] | None:
