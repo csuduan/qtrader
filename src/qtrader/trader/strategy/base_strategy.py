@@ -6,7 +6,7 @@
 import asyncio
 import contextlib
 from datetime import datetime, time, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel, Field
 
@@ -54,8 +54,17 @@ class BaseParam(BaseModel):
         for field_name, field_info in self.model_fields.items():
             # 获取Field元数据
             title = field_info.title or field_name
+            # 枚举选项（json_schema_extra 声明 choices: [[label, value], ...]）
+            extra = field_info.json_schema_extra
+            choices = (
+                cast("list[list[Any]] | None", extra.get("choices"))
+                if isinstance(extra, dict)
+                else None
+            )
             # 推断类型
-            if field_info.annotation is int:
+            if choices:
+                param_type = "select"
+            elif field_info.annotation is int:
                 param_type = "int"
             elif field_info.annotation is float:
                 param_type = "float"
@@ -66,14 +75,15 @@ class BaseParam(BaseModel):
             else:
                 param_type = "string"
 
-            definitions.append(
-                {
-                    "key": field_name,
-                    "label": title,
-                    "type": param_type,
-                    "value": getattr(self, field_name),
-                }
-            )
+            definition = {
+                "key": field_name,
+                "label": title,
+                "type": param_type,
+                "value": getattr(self, field_name),
+            }
+            if choices:
+                definition["options"] = [{"label": c[0], "value": c[1]} for c in choices]
+            definitions.append(definition)
         return definitions
 
 

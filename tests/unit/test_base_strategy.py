@@ -17,6 +17,7 @@ from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
+from pydantic import Field
 
 from qtrader.models.object import (
     BarData,
@@ -138,6 +139,26 @@ class TestBaseParam:
 
         for key, expected_type in type_mapping.items():
             assert definition_dict.get(key) == expected_type, f"参数 {key} 的类型推断错误"
+
+    def test_get_param_definitions_select_choices(self):
+        """测试声明 choices 的字段推断为 select 并携带选项"""
+
+        class ParamWithChoices(BaseParam):
+            mode: int = Field(
+                default=0,
+                title="日内模式",
+                json_schema_extra={"choices": [("普通RSI", 0), ("高波模式", 1)]},
+            )
+
+        definitions = ParamWithChoices().get_param_definitions()
+        mode_def = next(d for d in definitions if d["key"] == "mode")
+
+        assert mode_def["type"] == "select"
+        assert mode_def["value"] == 0
+        assert mode_def["options"] == [
+            {"label": "普通RSI", "value": 0},
+            {"label": "高波模式", "value": 1},
+        ]
 
     def test_param_pydantic_validation(self):
         """测试 Pydantic 验证规则工作正常"""

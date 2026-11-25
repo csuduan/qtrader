@@ -59,6 +59,14 @@
                 style="width: 100%"
               />
               <el-switch v-else-if="param.type === 'bool'" v-model="paramsForm[param.key]" />
+              <el-select v-else-if="param.type === 'select'" v-model="paramsForm[param.key]" style="width: 100%">
+                <el-option
+                  v-for="opt in param.options"
+                  :key="String(opt.value)"
+                  :label="opt.label"
+                  :value="opt.value"
+                />
+              </el-select>
               <el-time-picker
                 v-else-if="param.type === 'time'"
                 v-model="paramsForm[param.key]"
@@ -84,6 +92,14 @@
                 style="width: 100%"
               />
               <el-switch v-else-if="param.type === 'bool'" v-model="paramsForm[param.key]" />
+              <el-select v-else-if="param.type === 'select'" v-model="paramsForm[param.key]" style="width: 100%">
+                <el-option
+                  v-for="opt in param.options"
+                  :key="String(opt.value)"
+                  :label="opt.label"
+                  :value="opt.value"
+                />
+              </el-select>
               <el-time-picker
                 v-else-if="param.type === 'time'"
                 v-model="paramsForm[param.key]"

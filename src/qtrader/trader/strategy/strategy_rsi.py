@@ -56,7 +56,11 @@ class RsiParam(BaseParam):
     dir_thr: float = Field(default=0.0, title="方向阈值")  # 信号方向阈值
     used_signal: int = Field(default=0, title="外部信号")  # 外部信号
     # 日内模式：0=普通日RSI，1=高波日开盘动量（09:45判定）
-    mode: int = Field(default=0, title="日内模式")
+    mode: int = Field(
+        default=0,
+        title="日内模式",
+        json_schema_extra={"choices": [["普通RSI", 0], ["高波模式", 1]]},
+    )
 
 
 class RsiStrategy(BaseStrategy):

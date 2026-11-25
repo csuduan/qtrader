@@ -252,6 +252,30 @@ class TestUpdateParams:
         assert strategy.param.trade_start_time == time(0, 0, 0)
 
 
+@pytest.mark.unit
+class TestParamDefinitions:
+    """参数定义（前端扩展参数展示契约）"""
+
+    def test_mode_is_select_with_options(self, strategy):
+        """mode 应为 select 类型并携带普通RSI/高波模式选项"""
+        mode_def = next(d for d in strategy.get_params() if d["key"] == "mode")
+
+        assert mode_def["type"] == "select"
+        assert mode_def["options"] == [
+            {"label": "普通RSI", "value": 0},
+            {"label": "高波模式", "value": 1},
+        ]
+
+    def test_mode_falls_into_ext_params(self, strategy):
+        """mode 不属于公共参数，应归入扩展参数"""
+        from qtrader.trader.strategy.base_strategy import BaseParam
+
+        base_fields = set(BaseParam.model_fields.keys())
+        ext_keys = {d["key"] for d in strategy.get_params() if d["key"] not in base_fields}
+
+        assert "mode" in ext_keys
+
+
 # ==================== Test Symbol Change (换月) ====================
 
 

@@ -417,12 +417,19 @@ export interface StrategyConfig {
   params?: Record<string, any>
 }
 
+/** 参数枚举选项 */
+export interface ParamOption {
+  label: string
+  value: string | number | boolean
+}
+
 /** 参数定义 */
 export interface ParamDefinition {
   key: string
   label: string
-  type: 'string' | 'int' | 'float' | 'bool' | 'time'
+  type: 'string' | 'int' | 'float' | 'bool' | 'time' | 'select'
   value: any
+  options?: ParamOption[]
 }
 
 /** 策略状态 */
