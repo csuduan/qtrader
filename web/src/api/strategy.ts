@@ -2,7 +2,7 @@
  * 策略相关 API
  */
 import api from './request'
-import type { StrategyRes, StrategyParams, StrategySignalData, OrderCmdRes, StrategyOrderCmdFilter } from '@/types'
+import type { StrategyRes, StrategyParams, StrategySignalData, OrderCmdRes, StrategyOrderCmdFilter, StrategyIndicators } from '@/types'
 
 export const strategyApi = {
   /**
@@ -146,6 +146,13 @@ export const strategyApi = {
       params.status = filter.status
     }
     return api.get<OrderCmdRes[]>(`/strategies/${strategyId}/order-cmds`, { params })
+  },
+
+  /**
+   * 获取策略当日盘中指标数据（指标走势图）
+   */
+  getStrategyIndicators: async (strategyId: string, accountId?: string): Promise<StrategyIndicators | null> => {
+    return api.get<StrategyIndicators | null>(`/strategies/${strategyId}/indicators`, accountId ? { params: { account_id: accountId } } : undefined)
   },
 
   /**

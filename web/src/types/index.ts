@@ -626,3 +626,58 @@ export interface UpdateStrategyPositionRequest {
   close_profit_long: number
   close_profit_short: number
 }
+
+/** 指标走势数据点（当日M1 bar，RSI值仅在短周期K线形成时点非空） */
+export interface IndicatorBar {
+  time: string
+  open: number
+  high: number
+  low: number
+  close: number
+  rsi_short: number | null
+  rsi_long: number | null
+}
+
+/** 高波模式09:45判定快照 */
+export interface HvDecision {
+  prev_close: number | null
+  day_open: number | null
+  decided?: boolean
+  close_0945?: number
+  gap?: number
+  move?: number
+  abs_ret15?: number
+  side?: number
+  reason?: string
+}
+
+/** 信号开/结束事件 */
+export interface IndicatorEvent {
+  time: string
+  type: 'ENTRY' | 'EXIT'
+  side: number
+  price: number
+  reason: string
+}
+
+/** 策略当日盘中指标数据（指标走势图） */
+export interface StrategyIndicators {
+  trading_day: string
+  symbol: string
+  mode: number
+  params: {
+    rsi_n?: number
+    short_k?: number
+    long_k?: number
+    long_threshold?: number
+    short_threshold?: number
+    trade_start_time?: string
+    trade_end_time?: string
+    take_profit_pct?: number
+    stop_loss_pct?: number
+    force_exit_time?: string
+  }
+  bars: IndicatorBar[]
+  hv: HvDecision | null
+  events: IndicatorEvent[]
+}

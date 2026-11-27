@@ -89,6 +89,40 @@ async def get_strategy(
         return error_response(message=f"获取策略状态失败: {e}")
 
 
+@router.get("/{strategy_id}/indicators")
+async def get_strategy_indicators(
+    strategy_id: str,
+    account_id: str = Query(..., description="账户ID"),
+    trading_manager: TradingManager = Depends(get_trading_manager),
+) -> Response:
+    """
+    获取策略当日盘中指标数据（用于指标走势图，解释信号产生原因）
+
+    Args:
+        strategy_id: 策略ID
+        account_id: 账户ID
+
+    Returns:
+        指标数据（trading_day/mode/params/bars/hv/events），策略不支持或未初始化时为null
+    """
+    try:
+        trader = trading_manager.get_trader(account_id)
+        if not trader:
+            _handle_trader_not_found(account_id)
+
+        result = await trader.send_request(
+            "get_strategy_indicators",
+            {"strategy_id": strategy_id},
+            timeout=10.0,
+        )
+        return success_response(data=result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("获取策略指标数据失败")
+        return error_response(message=f"获取策略指标数据失败: {e}")
+
+
 @router.post("/{strategy_id}/start")
 async def start_strategy(
     strategy_id: str,

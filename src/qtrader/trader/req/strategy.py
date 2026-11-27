@@ -174,6 +174,19 @@ class StrategyReqHandler(BaseReqHandler):
             return result.model_dump()
         return None
 
+    @request("get_strategy_indicators")
+    async def _req_get_strategy_indicators(self, data: dict[str, Any]) -> dict[str, Any] | None:
+        """处理获取策略当日盘中指标数据请求（指标走势图）"""
+        if self.trader.strategy_manager is None:
+            return None
+        strategy_id = data.get("strategy_id")
+        if not strategy_id:
+            return None
+        strategy = self.trader.strategy_manager.strategies.get(strategy_id)
+        if strategy is None:
+            return None
+        return strategy.get_indicators()
+
     @request("replay_all_strategies")
     async def _req_replay_all_strategies(self, data: dict[str, Any]) -> dict[str, Any]:
         """处理回播所有策略请求"""

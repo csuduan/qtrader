@@ -20,6 +20,7 @@ from pydantic import Field
 
 from qtrader.models.object import BarData, TickData
 from qtrader.trader.strategy.base_strategy import BaseParam, BaseStrategy, Signal
+from qtrader.trader.strategy.indicator_mgr import IndicatorManager
 from qtrader.utils.config_loader import StrategyConfig
 from qtrader.utils.helpers import (
     _parse_time,
@@ -70,6 +71,8 @@ class RsiStrategy(BaseStrategy):
 
     def __init__(self, strategy_id: str, strategy_config: StrategyConfig):
         super().__init__(strategy_id, strategy_config)
+        # 盘中指标采集器（init时重置，供Manager查询画指标走势图）
+        self.indicator_mgr = IndicatorManager()
         logger.info(f"RSI策略 [{strategy_id}] 初始化完成")
 
     async def init(self, trading_day: datetime) -> bool:
@@ -105,6 +108,25 @@ class RsiStrategy(BaseStrategy):
             logger.error(f"策略 [{self.strategy_id}] 未配置参数")
             return False
 
+        # 重置指标采集器，随后的回播/实时on_bar重建当日数据
+        self.indicator_mgr.reset(
+            trading_day=trading_day,
+            symbol=self.symbol,
+            mode=self.param.mode,
+            params={
+                "rsi_n": self.param.rsi_n,
+                "short_k": self.param.short_k,
+                "long_k": self.param.long_k,
+                "long_threshold": self.param.long_threshold,
+                "short_threshold": self.param.short_threshold,
+                "trade_start_time": str(self.param.trade_start_time),
+                "trade_end_time": str(self.param.trade_end_time),
+                "take_profit_pct": self.param.take_profit_pct,
+                "stop_loss_pct": self.param.stop_loss_pct,
+                "force_exit_time": str(self.param.force_exit_time),
+            },
+        )
+
         # 加载最近n个交易日的数据（按交易日回数，节假日不占天数）
         hist_start = await self.load_hist_start(self.symbol, self.trading_day, n_days=3)
         hist_bars = await self.load_hist_bars(self.symbol, hist_start, self.trading_day)
@@ -113,6 +135,7 @@ class RsiStrategy(BaseStrategy):
             self._track_hv_bar(bar)
         if self.param.mode == 1 and self._prev_close is not None:
             logger.info(f"策略 [{self.strategy_id}] 昨收(高波口径): {self._prev_close}")
+            self.indicator_mgr.update_hv(prev_close=self._prev_close)
 
         self.inited = True
         logger.info(f"策略 [{self.strategy_id}] 初始化完成")
@@ -144,6 +167,8 @@ class RsiStrategy(BaseStrategy):
         self._prev_close = None
         self._day_open = None
         self._day_bar_count = 0
+        # 指标数据基于老合约行情，清空待回播重建
+        self.indicator_mgr.clear()
         logger.info(
             f"策略 [{self.strategy_id}] 已清理老合约 {old_symbol} 的K线缓存，"
             f"新合约 {self.symbol} 将重新累积指标数据"
@@ -190,6 +215,7 @@ class RsiStrategy(BaseStrategy):
             self.signal.exit_price = close_price
             self.signal.exit_time = bar_time
             self.signal.exit_reason = "FORCE"
+            self._record_signal_event("EXIT", self.signal.side, close_price, bar_time, "FORCE")
             logger.info(f"策略 [{self.strategy_id}] 信号结束: {self.signal}")
 
     async def _on_bar_high_vol(
@@ -200,6 +226,11 @@ class RsiStrategy(BaseStrategy):
         无固定止盈，止损以完整5分钟K线收盘确认
         """
         self._track_hv_bar(bar)
+
+        # 指标采集：当日bar与最新价格基准
+        if self._is_day_bar(bar):
+            self.indicator_mgr.update_hv(prev_close=self._prev_close, day_open=self._day_open)
+            self.indicator_mgr.record_bar(bar)
 
         # 止损检查：仅在完整5分钟K线形成时以收盘价确认
         if (
@@ -213,6 +244,9 @@ class RsiStrategy(BaseStrategy):
                 self.signal.exit_price = short_bar.close_price
                 self.signal.exit_time = bar_time
                 self.signal.exit_reason = exit_reason
+                self._record_signal_event(
+                    "EXIT", self.signal.side, short_bar.close_price, bar_time, exit_reason
+                )
                 logger.info(f"策略 [{self.strategy_id}] 信号结束: {self.signal}")
 
         if self.signal:
@@ -228,10 +262,16 @@ class RsiStrategy(BaseStrategy):
                 entry_time=bar_time,
                 entry_volume=self.volume,
             )
+            self._record_signal_event("ENTRY", side, bar.close_price, bar_time)
             logger.info(f"策略 [{self.strategy_id}] 高波信号开始: {self.signal}")
 
     async def _on_bar_rsi(self, bar: BarData, bar_time: time, short_bar: BarData | None) -> None:
         """普通日RSI模式（mode=0）bar处理：原有RSI信号路径"""
+        # 指标采集：当日bar及短周期K线形成时点的RSI值
+        if self._is_day_bar(bar):
+            rsi_short, rsi_long = self._calc_rsi_pair() if short_bar is not None else (None, None)
+            self.indicator_mgr.record_bar(bar, rsi_short, rsi_long)
+
         # 止盈止损检查
         if self.signal and self.signal.side != 0 and not self.signal.exit_time:
             exit_reason = self._check_exit_conditions(bar.close_price, self.signal)
@@ -239,6 +279,9 @@ class RsiStrategy(BaseStrategy):
                 self.signal.exit_price = bar.close_price
                 self.signal.exit_time = bar_time
                 self.signal.exit_reason = exit_reason
+                self._record_signal_event(
+                    "EXIT", self.signal.side, bar.close_price, bar_time, exit_reason
+                )
                 logger.info(f"策略 [{self.strategy_id}] 信号结束: {self.signal}")
 
         if self.signal:
@@ -261,14 +304,32 @@ class RsiStrategy(BaseStrategy):
         if side == 0 or not self._check_external_signal_filter(side):
             return
 
-        # 记录信号
+        # 记录信号（附满足的条件公式，供指标图展示信号原因）
         self.signal = Signal(
             side=side,
             entry_price=bar.close_price,
             entry_time=bar_time,
             entry_volume=self.volume,
         )
+        self._record_signal_event(
+            "ENTRY", side, bar.close_price, bar_time, self._rsi_entry_reason(side)
+        )
         logger.info(f"策略 [{self.strategy_id}] 信号开始: {self.signal}")
+
+    def _rsi_entry_reason(self, side: int) -> str:
+        """RSI开仓条件公式文字（指标图展示用），如：长RSI62.30>50 且 短RSI71.50>55"""
+        rsi_short, rsi_long = self._calc_rsi_pair()
+        if rsi_short is None or rsi_long is None:
+            return ""
+        if side == 1:
+            return (
+                f"长RSI{rsi_long:.2f}>{self.param.long_threshold:g} 且 "
+                f"短RSI{rsi_short:.2f}>{self.param.short_threshold:g}"
+            )
+        return (
+            f"长RSI{rsi_long:.2f}<{100 - self.param.long_threshold:g} 且 "
+            f"短RSI{rsi_short:.2f}<{100 - self.param.short_threshold:g}"
+        )
 
     def _track_hv_bar(self, bar: BarData) -> None:
         """追踪高波模式所需行情：昨收候选、今开、当日M1计数"""
@@ -279,6 +340,24 @@ class RsiStrategy(BaseStrategy):
         else:
             # 历史交易日按时间升序持续刷新，最终保留前一交易日最后一根M1收盘
             self._prev_close = bar.close_price
+
+    def _is_day_bar(self, bar: BarData) -> bool:
+        """是否为当交易日日盘bar（夜盘/历史bar不入指标图）"""
+        return (
+            self.trading_day is not None
+            and bar.datetime.date() == self.trading_day.date()
+            and bar.datetime.time() >= self.param.day_start
+        )
+
+    def _record_signal_event(
+        self, event_type: str, side: int, price: float, bar_time: time, reason: str = ""
+    ) -> None:
+        """记录信号开/结束事件到指标采集器"""
+        self.indicator_mgr.record_event(bar_time.strftime("%H:%M"), event_type, side, price, reason)
+
+    def get_indicators(self) -> dict[str, Any] | None:
+        """获取当日盘中指标数据（供Manager查询画指标走势图）"""
+        return self.indicator_mgr.to_dict()
 
     def _try_hv_entry(self, bar: BarData) -> int:
         """
@@ -296,6 +375,7 @@ class RsiStrategy(BaseStrategy):
 
         if self.param.trade_start_time >= HV_PM_CUTOFF:
             logger.info(f"策略 [{self.strategy_id}] 高波日下午行不开仓")
+            self.indicator_mgr.update_hv(decided=True, side=0, reason="下午行不开仓")
             return 0
 
         if self._prev_close is None or self._day_open is None or self._day_bar_count < HV_MIN_BARS:
@@ -303,14 +383,39 @@ class RsiStrategy(BaseStrategy):
                 f"策略 [{self.strategy_id}] 高波判断数据不足，按空仓处理: "
                 f"昨收={self._prev_close}, 今开={self._day_open}, 当日M1数={self._day_bar_count}"
             )
+            self.indicator_mgr.update_hv(decided=True, side=0, reason="行情数据不足，按空仓处理")
             return 0
 
         side = hv_side(self._day_open, self._prev_close, bar.close_price)
+        gap = _sign(self._day_open - self._prev_close)
+        move = _sign(bar.close_price - self._day_open)
+        abs_ret15 = abs(bar.close_price / self._day_open - 1)
+        self.indicator_mgr.update_hv(
+            decided=True,
+            close_0945=bar.close_price,
+            gap=gap,
+            move=move,
+            abs_ret15=round(abs_ret15, 6),
+            side=side,
+            reason=self._hv_reason(gap, move, abs_ret15, side),
+        )
         logger.info(
             f"策略 [{self.strategy_id}] 高波09:45判定: 昨收={self._prev_close}, "
             f"今开={self._day_open}, 09:45收盘={bar.close_price}, 方向={side}"
         )
         return side
+
+    @staticmethod
+    def _hv_reason(gap: int, move: int, abs_ret15: float, side: int) -> str:
+        """高波09:45判定结论文字（指标图展示用）"""
+        direction = "做多" if side == 1 else "做空"
+        if side != 0 and gap * move > 0:
+            return f"跳空与开盘动量同向，顺势{direction}"
+        if side != 0:
+            return f"反向回补成立：幅度{abs_ret15:.2%}≥{HV_REBOUND_MIN_RET:.2%}且已越过昨收，{direction}"
+        if gap * move < 0:
+            return f"反向但回补条件不满足（幅度{abs_ret15:.2%}），空仓"
+        return "跳空与开盘动量不同向，空仓"
 
     def _check_hv_exit_conditions(self, current_price: float, signal: Signal) -> str | None:
         """
@@ -397,32 +502,35 @@ class RsiStrategy(BaseStrategy):
 
         return short_bar, long_bar
 
+    def _calc_rsi_pair(self) -> tuple[float | None, float | None]:
+        """计算当前短/长周期RSI（各自独立，数据不足或结果无效时为None）"""
+        min_bars_needed = self.param.rsi_n + 1
+
+        rsi_short = None
+        if len(self.short_k_bars) >= min_bars_needed:
+            short_prices = [b.close_price for b in list(self.short_k_bars)[-min_bars_needed:]]
+            value = calc_rsi_sma(short_prices, self.param.rsi_n)
+            if np.isfinite(value):
+                rsi_short = value
+
+        rsi_long = None
+        if len(self.long_k_bars) >= min_bars_needed:
+            long_prices = [b.close_price for b in list(self.long_k_bars)[-min_bars_needed:]]
+            value = calc_rsi_sma(long_prices, self.param.rsi_n)
+            if np.isfinite(value):
+                rsi_long = value
+
+        return rsi_short, rsi_long
+
     def _generate_signal(self) -> int:
         """
         生成交易信号
 
-        Args:
-            short_bar: 短周期K线
-            long_bar: 长周期K线
-
         Returns:
             signal: 交易信号 (1-开多 -1-开空 0-无信号)
         """
-        # 使用K线收盘价计算RSI
-        # 需要足够的历史数据
-        min_bars_needed = self.param.rsi_n + 1
-        if len(self.short_k_bars) < min_bars_needed:
-            return 0
-
-        # 短周期RSI计算
-        short_prices = [b.close_price for b in list(self.short_k_bars)[-min_bars_needed:]]
-        rsi_short = calc_rsi_sma(short_prices, self.param.rsi_n)
-
-        # 长周期RSI计算
-        long_prices = [b.close_price for b in list(self.long_k_bars)[-min_bars_needed:]]
-        rsi_long = calc_rsi_sma(long_prices, self.param.rsi_n)
-
-        if not np.isfinite(rsi_short) or not np.isfinite(rsi_long):
+        rsi_short, rsi_long = self._calc_rsi_pair()
+        if rsi_short is None or rsi_long is None:
             return 0
 
         # 多头信号：长周期RSI > long_threshold 且 短周期RSI > short_threshold

@@ -251,6 +251,9 @@
       </el-form>
     </el-card>
 
+    <!-- 指标走势（解释信号产生原因） -->
+    <StrategyIndicatorChart :strategy-id="strategyId" class="section" />
+
     <!-- 添加/编辑持仓对话框 -->
     <el-dialog
       v-model="positionDialogVisible"
@@ -406,6 +409,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useStore } from '@/stores'
 import { strategyApi } from '@/api'
+import StrategyIndicatorChart from '@/components/StrategyIndicatorChart.vue'
 
 const router = useRouter()
 const route = useRoute()

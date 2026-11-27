@@ -234,6 +234,10 @@ class BaseStrategy:
         """获取当前信号"""
         return self.signal.model_dump() if self.signal else None
 
+    def get_indicators(self) -> dict[str, Any] | None:
+        """获取当日盘中指标数据（子类按需重写，默认无指标图）"""
+        return None
+
     def update_params(self, params: dict[str, Any]) -> None:
         """
         更新策略参数（只更新内存，不写入文件）
