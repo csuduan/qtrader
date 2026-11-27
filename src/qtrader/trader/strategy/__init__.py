@@ -7,6 +7,7 @@ qtrader 策略模块
 from typing import TYPE_CHECKING
 
 from qtrader.trader.strategy.base_strategy import BaseParam, BaseStrategy
+from qtrader.trader.strategy.strategy_asym import AsymStrategy
 from qtrader.trader.strategy.strategy_rsi import RsiStrategy
 
 if TYPE_CHECKING:
@@ -18,12 +19,14 @@ __all__ = [
     "StrategyManager",
     "load_strategy_params",
     "RsiStrategy",
+    "AsymStrategy",
     "create_strategy",
 ]
 
 # 策略注册表，用于动态加载
 STRATEGY_REGISTRY: dict[str, type[BaseStrategy]] = {
     "rsi_strategy": RsiStrategy,
+    "asym_strategy": AsymStrategy,
 }
 
 
